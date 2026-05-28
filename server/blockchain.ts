@@ -220,11 +220,11 @@ export class BlockchainRouter {
    */
   public async checkGasBalance(network: 'polygon' | 'bsc' = 'polygon'): Promise<{ balance: string, isLow: boolean }> {
     let lastError = "";
-    
-    // Alchemy cache sorunlarını bypass etmek için genel bir RPC'yi listeye zorla ekle
-    const baseEndpoints = network === 'bsc' ? ['https://bsc-dataseed.binance.org/'] : this.rpcEndpoints;
-    const publicFallback = network === 'polygon' ? 'https://polygon-rpc.com' : 'https://bsc-dataseed.binance.org/';
-    const endpoints = Array.from(new Set([...baseEndpoints, publicFallback]));
+
+    // GÜVENLİK_İZOLE: Render kısıtlamalarını aşmak için sadece tanımlı rpcEndpoints kullanılır.
+    // Dışarıdan zorla bakiye kontrolü (publicFallback) devre dışı bırakıldı.
+    const endpoints = network === 'bsc' ? ['https://bsc-dataseed.binance.org/'] : this.rpcEndpoints;
+    if (endpoints.length === 0) return { balance: "0.000000", isLow: true };
 
     for (const rpc of endpoints) {
       try {

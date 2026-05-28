@@ -508,10 +508,20 @@ async function initializeSystem() {
 async function forcePublishAllAssets() {
   try {
     const pendingItems = await ReadyToSellModel.find({ isSold: false });
-    pushLog('FINANCE', 'ANALYZE', `[FORCE_PUBLISH] ${pendingItems.length} varlık için toplu transfer başlatıldı...`);
+    const total = pendingItems.length;
+    pushLog('FINANCE', 'ANALYZE', `[FORCE_PUBLISH] ${total} varlık için PARTİLİ transfer başlatıldı.`);
     
-    for (const item of pendingItems) {
-      await insightLogisticsEngine(item.id, item.accessPriceUSD || 0);
+    const batchSize = blockchainConfig.publishBatchSize;
+    for (let i = 0; i < total; i += batchSize) {
+      const currentBatch = pendingItems.slice(i, i + batchSize);
+      pushLog('FINANCE', 'INFO', `[BATCH_QUEUING] Parti ${Math.floor(i/batchSize) + 1} işleniyor (${currentBatch.length} adet)...`);
+      
+      for (const item of currentBatch) {
+        await insightLogisticsEngine(item.id, item.accessPriceUSD || 0);
+      }
+
+      // Her parti arasına 2 saniyelik mikro-gecikme ekleyerek bellek yükünü azalt
+      await new Promise(resolve => setTimeout(resolve, 2000));
     }
   } catch (err: any) {
     pushLog('SYSTEM', 'ERROR', `Toplu yayınlama hatası: ${err.message}`);
