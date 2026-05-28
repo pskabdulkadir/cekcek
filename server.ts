@@ -222,9 +222,11 @@ async function processPublishQueue() {
         const balanceCheck = await mainBlockchain.checkGasBalance('polygon');
         const currentBalance = parseFloat(balanceCheck.balance);
         
-        if (currentBalance >= blockchainConfig.minReinvestThreshold) {
+        if (currentBalance > 0 && currentBalance >= blockchainConfig.minReinvestThreshold) {
             pushLog('FINANCE', 'SUCCESS', `[SELF_FINANCE] Bakiye eşiği aşıldı (${currentBalance} POL). Otomatik yayınlama tetiklendi.`);
             isAuthorized = true;
+        } else if (currentBalance === 0) {
+            pushLog('FINANCE', 'WARNING', `[PASSIVE_MODE] Bakiye okunamadı veya 0 POL. Blokzinciri yayını askıya alındı, sadece Voucher üretimi yapılıyor.`);
         }
     }
 

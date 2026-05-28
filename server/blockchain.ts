@@ -211,40 +211,55 @@ export class BlockchainRouter {
   /**
    * Cüzdan bakiyesini kontrol eder ve üretim modu için kritik eşik uyarısı verir.
    * Bu fonksiyon, ödeme emri öncesinde sistemin gas ücretini karşılayıp karşılayamayacağını denetler.
+   * PROTOKOL_POL_SYNC: MATIC -> POL geçişi nedeniyle çoklu RPC doğrulaması yapar.
    */
   public async checkGasBalance(network: 'polygon' | 'bsc' = 'polygon'): Promise<{ balance: string, isLow: boolean }> {
-    try {
-      // Ağ tipine göre uygun RPC terminalini seç (BSC veya Polygon)
-      const rpc = network === 'bsc' ? 'https://bsc-dataseed.binance.org/' : (this.rpcUrl || 'https://polygon-rpc.com');
-      
-      // Render 502 hatalarını önlemek için kesin zaman aşımı (Timeout) ekle
-      const provider = new ethers.providers.JsonRpcProvider({
-        url: rpc,
-        timeout: 10000 // 10 saniye içinde cevap gelmezse iptal et
-      });
+    let lastError = "";
+    const endpoints = network === 'bsc' ? ['https://bsc-dataseed.binance.org/'] : this.rpcEndpoints;
 
-      const wallet = new ethers.Wallet(this.privateKey, provider);
-      const address = wallet.address;
-      
-      const networkInfo = await provider.getNetwork();
-      if (network === 'polygon' && networkInfo.chainId !== 137) {
-        this.emitLog('BLOCKCHAIN', 'WARNING', `Ağ senkronizasyon hatası! Beklenen: 137, Tespit Edilen: ${networkInfo.chainId}`);
+    for (const rpc of endpoints) {
+      try {
+        const provider = new ethers.providers.JsonRpcProvider({
+          url: rpc,
+          timeout: 12000 // 12 saniye timeout
+        });
+
+        const wallet = new ethers.Wallet(this.privateKey);
+        const address = wallet.address;
+
+        // POL Senkronizasyon Koruması: Ağ durumunu kontrol et
+        const networkInfo = await provider.getNetwork();
+        
+        // getBalance çağrısını doğrudan adresten yap (wallet nesnesi yerine)
+        const balance = await provider.getBalance(address);
+        const balanceInEther = ethers.utils.formatEther(balance);
+        
+        const threshold = network === 'bsc' ? this.gasThresholds.bsc : this.gasThresholds.polygon;
+        const isLow = parseFloat(balanceInEther) < parseFloat(threshold);
+
+        // Eğer bakiye hala 0 ise ve rpc başarılıysa, diğer RPC'yi de dene (Senkronizasyon gecikmesi olasılığı)
+        if (parseFloat(balanceInEther) === 0 && endpoints.length > 1 && rpc === endpoints[0]) {
+          this.emitLog('BLOCKCHAIN', 'WARNING', `Bakiye ${rpc} üzerinde 0 görünüyor. Senkronizasyon kontrolü için bir sonraki düğüm deneniyor...`);
+          continue;
+        }
+
+        this.emitLog('BLOCKCHAIN', 'SUCCESS', `Gas Balance Check: ${parseFloat(balanceInEther).toFixed(4)} ${network === 'bsc' ? 'BNB' : 'POL'} detected [RPC: ${rpc}]`);
+
+        if (isLow) {
+          this.emitLog('BLOCKCHAIN', 'WARNING', `DİKKAT: Bakiyeniz düşük (${balanceInEther} POL).`);
+        }
+
+        // Başarılı bakiye alındıysa (0 olsa bile tüm RPC'leri denedik) dön
+        return { balance: balanceInEther, isLow };
+      } catch (err: any) {
+        lastError = err.message;
+        this.emitLog('BLOCKCHAIN', 'WARNING', `Bakiye sorgulama hatası (RPC: ${rpc}): ${err.message}`);
+        continue;
       }
+    }
 
-      const balance = await provider.getBalance(wallet.address);
-      const balanceInEther = ethers.utils.formatEther(balance);
-      
-      const threshold = network === 'bsc' ? this.gasThresholds.bsc : this.gasThresholds.polygon;
-      const isLow = parseFloat(balanceInEther) < parseFloat(threshold);
-
-      this.emitLog('BLOCKCHAIN', 'SUCCESS', `Gas Balance Check: ${parseFloat(balanceInEther).toFixed(4)} POL detected for ${address.slice(0, 6)}...${address.slice(-4)}`);
-
-      if (isLow) {
-        this.emitLog('BLOCKCHAIN', 'WARNING', `DİKKAT: Üretim bakiyesi düşük (${balanceInEther} POL) [Ağ: ${networkInfo.name}]. İşlem sürekliliği için bakiye ekleyin.`);
-      }
-      return { balance: balanceInEther, isLow };
-    } catch (err: any) {
-      this.emitLog('BLOCKCHAIN', 'ERROR', `Bakiye sorgulama hatası (RPC: ${this.rpcUrl}): ${err.message}`);
+    if (lastError) {
+      this.emitLog('BLOCKCHAIN', 'ERROR', `Mevcut tüm RPC düğümleri bakiye sorgusuna yanıt vermedi: ${lastError}`);
       // HATA KORUMASI: RPC hatası 500 döndürmemeli, sadece bakiyeyi 0 göstermeli
       return { balance: "0.000000", isLow: true };
     }
