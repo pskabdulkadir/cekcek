@@ -42,7 +42,7 @@ function validateContractAddress(address: string) {
 }
 
 // Force Publish Flag (Geçici olarak tüm birikmiş varlıkları yayınlamak için)
-const FORCE_PUBLISH = false; // Güvenlik: Sunucu açıldığında otomatik işlem yapmasını engelle
+const FORCE_PUBLISH = process.env.FORCE_PUBLISH === 'true'; // Güvenlik: .env kontrolü
 
 // Load config first
 import { blockchainConfig, dbConfig } from "./server/config.ts";

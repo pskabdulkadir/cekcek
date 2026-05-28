@@ -31,7 +31,7 @@ export const blockchainConfig = {
     commissionWallet: process.env.COMMISSION_WALLET || '', // Aracı firma cüzdanı (Örn: Smart Gate)
     commissionRate: parseFloat(process.env.COMMISSION_RATE || '0.10'), // %10 Komisyon oranı
     rpcUrl: process.env.RPC_URL || 'https://polygon-rpc.com', // Varsayılan olarak Polygon Mainnet RPC
-    privateKey: process.env.PRIVATE_KEY || process.env.INCOME_DISTRIBUTION_WALLET || '',
+    privateKey: process.env.PRIVATE_KEY || '',
     zeroGasActive: false,
     networkMode: process.env.NETWORK_MODE || 'mainnet',
     useAiAnalysis: process.env.USE_AI_ANALYSIS === 'true',
