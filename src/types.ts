@@ -10,7 +10,7 @@
 export interface TransactionRecord {
   url: string; // Veri kaynağı URL'si
   proofHash: string; // Analiz raporunun kriptografik kanıtı
-  co2AnalysisGrams: number; // CO2 analiz değeri
+  co2AnalysisGrams: number; // CO2 analiz değeri (was co2SavingsGrams)
   assetRegistrationTxHash: string; // Varlık kaydının işlem hash'i
   timestamp: string;
 }
@@ -67,7 +67,7 @@ export interface OptimizationResult {
   originalSize: number;
   optimizedSize: number;
   bytesSaved: number;
-  co2AnalysisGrams: number; // co2SavingsGrams yerine co2AnalysisGrams
+  co2AnalysisGrams: number; // CO2 analiz değeri (was co2SavingsGrams)
   efficiencyGainPct: number;
   proofHash: string;
   optimizedCode: string;

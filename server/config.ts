@@ -24,13 +24,13 @@ export const blockchainConfig = {
     payoutWallet: process.env.CHANNEL_ROUTING_WALLET || process.env.PAYOUT_WALLET || '0x02cc8aBBADf0ad5183f5e9Bb2BF469e506a133e4',
     commissionWallet: process.env.COMMISSION_WALLET || '0x71C7656EC7ab88b098defB751B7401B5f6d8976F', // Aracı firma cüzdanı (Örn: Smart Gate)
     commissionRate: parseFloat(process.env.COMMISSION_RATE || '0.10'), // %10 Komisyon oranı
-    rpcUrl: process.env.RPC_URL || 'https://polygon.llamarpc.com', // Varsayılan olarak Polygon Mainnet RPC (Veri Analitiği İşlemleri için)
+    rpcUrl: process.env.RPC_URL || 'https://polygon-rpc.com', // Varsayılan olarak Polygon Mainnet RPC
     privateKey: process.env.PRIVATE_KEY || process.env.INCOME_DISTRIBUTION_WALLET || '',
     zeroGasActive: false,
     networkMode: process.env.NETWORK_MODE || 'mainnet',
     useAiAnalysis: process.env.USE_AI_ANALYSIS === 'true',
     sharedPoolEnabled: process.env.SHARED_DISTRIBUTION_POOL_ENABLED === 'true',
-    batchMining: process.env.BATCH_MINING === 'true',
+    batchMining: process.env.BATCH_MINING !== 'false', // Varsayılan olarak true, .env'den false gelirse false olur
     marketplaceApiUrl: process.env.MARKETPLACE_API_URL || '', // Geçersiz domain temizlendi
     oceanProtocolUrl: process.env.OCEAN_API_URL || 'https://ocean.api/v1/data-assets', // Ocean Protocol veri varlığı API adresi
     middlewareWebhookUrl: process.env.MIDDLEWARE_URL || 'https://hook.make.com/your-webhook-id',

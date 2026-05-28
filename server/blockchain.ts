@@ -12,9 +12,12 @@ import { blockchainConfig } from './config.ts';
 
 export class BlockchainRouter {
   public rpcUrl: string;
-  public rpcEndpoints: string[];
+  public rpcEndpoints: string[] = [];
   public privateKey: string;
-  public contractAddress: string;
+  public contractAddress: string; // The contract address for the current network
+  public currentChainId: number = 137; // Default to Polygon Mainnet ID
+  public currentExplorerUrl: string = "https://etherscan.io"; // Dynamically determined explorer URL
+  public currentNetworkName: string = "Unknown Network"; // Dynamically determined network name
   private isRealMode: boolean = false;
 
   private gasThresholds = {
@@ -39,25 +42,18 @@ export class BlockchainRouter {
       pkey = '0x' + pkey;
     }
 
-    // Sanitize contract address
-    if (!contract || 
-        contract.includes('0x000000000000000000000000') || 
-        contract === 'YOUR_CONTRACT_ADDRESS') {
-      contract = ethers.constants.AddressZero;
-    }
-
-    this.rpcEndpoints = Array.from(new Set([
-      rpc,
-      'https://polygon.llamarpc.com',
-      'https://polygon-mainnet.g.alchemy.com/v2/G-qA0bZx-DU57eXe83q8e',
-      'https://rpc.ankr.com/polygon',
-      'https://1rpc.io/matic',
-      'https://polygon-mainnet.public.blastapi.io'
-    ].filter(Boolean)));
-
-    this.rpcUrl = this.rpcEndpoints[0];
-    this.privateKey = pkey;
+    this.privateKey = pkey; // Set private key first
     this.contractAddress = contract;
+    this.rpcEndpoints = this.getInitialRpcEndpoints(rpc, blockchainConfig.networkMode);
+    this.rpcUrl = this.rpcEndpoints[0];
+
+    // Ağ detaylarını asenkron olarak başlat
+    this.getNetworkDetailsFromRpc(this.rpcUrl).then(details => {
+      this.currentChainId = details.chainId;
+      this.currentExplorerUrl = details.explorerUrl;
+      this.currentNetworkName = details.networkName;
+      this.emitLog('BLOCKCHAIN', 'INFO', `Ağ tespit edildi: ${this.currentNetworkName} (ID: ${this.currentChainId})`);
+    }).catch(() => {});
 
     // ÜRETİM MODU DOĞRULAMASI: Cüzdanın geçerliliğini kontrol et
     try {
@@ -68,6 +64,44 @@ export class BlockchainRouter {
     } catch (err) {
       this.emitLog('BLOCKCHAIN', 'ERROR', "KRITIK: PRIVATE_KEY eksik veya geçersiz! Sistem gerçek işlem yapamaz. Lütfen .env dosyasını kontrol edin.");
       this.isRealMode = false;
+    }
+  }
+
+  private getInitialRpcEndpoints(primaryRpc: string, networkMode: string): string[] {
+    const endpoints = [primaryRpc];
+    if (networkMode === 'mainnet') {
+      endpoints.push(
+        'https://polygon-rpc.com',
+        'https://polygon.llamarpc.com',
+        'https://rpc.ankr.com/polygon',
+        'https://1rpc.io/matic'
+      );
+    } else {
+      endpoints.push(
+        'https://rpc-mumbai.maticvigil.com',
+        'https://rpc-amoy.polygon.technology'
+      );
+    }
+    return Array.from(new Set(endpoints.filter(Boolean)));
+  }
+
+  public async getNetworkDetailsFromRpc(rpcUrl: string): Promise<{ chainId: number, explorerUrl: string, networkName: string }> {
+    try {
+      const provider = new ethers.providers.JsonRpcProvider(rpcUrl);
+      const network = await provider.getNetwork();
+      let explorerUrl = "https://polygonscan.com";
+      let networkName = network.name;
+
+      if (network.chainId === 56 || network.chainId === 97) {
+        explorerUrl = network.chainId === 56 ? "https://bscscan.com" : "https://testnet.bscscan.com";
+        networkName = network.chainId === 56 ? "BSC Mainnet" : "BSC Testnet";
+      } else if (network.chainId === 137 || network.chainId === 80001) {
+        explorerUrl = network.chainId === 137 ? "https://polygonscan.com" : "https://mumbai.polygonscan.com";
+        networkName = network.chainId === 137 ? "Polygon Mainnet" : "Polygon Mumbai";
+      }
+      return { chainId: network.chainId, explorerUrl, networkName };
+    } catch (err) {
+      return { chainId: 137, explorerUrl: "https://polygonscan.com", networkName: "Polygon Mainnet (Fallback)" };
     }
   }
 
@@ -89,6 +123,9 @@ export class BlockchainRouter {
         ]);
 
         this.rpcUrl = currentRpc; // Çalışan RPC'yi ana kanal yap
+        const details = await this.getNetworkDetailsFromRpc(currentRpc);
+        this.currentChainId = details.chainId;
+        this.currentExplorerUrl = details.explorerUrl;
         await provider.getNetwork();
 
         this.emitLog('BLOCKCHAIN', 'SUCCESS', `Ağ bağlantısı kuruldu: ${currentRpc}`);
@@ -198,8 +235,8 @@ export class BlockchainRouter {
       // Domain Separator (Kontrat ile eşleşmeli)
       const domain = {
         name: "InternetReclamationMarket",
-        version: "1",
-        chainId: 137, // Polygon Mainnet (Dinamik sorgu NETWORK_ERROR riskini önlemek için sabitlendi)
+        version: "1", // Kontrat versiyonu
+        chainId: this.currentChainId, // Dinamik olarak belirlenen Chain ID
         verifyingContract: this.contractAddress
       };
 
@@ -293,7 +330,7 @@ export class BlockchainRouter {
           });
 
           this.emitLog('BLOCKCHAIN', 'INFO', `Veri analitiği kanıt işlemi ağa başarıyla iletildi. Blok onayı bekleniyor... İşlem Kodu: ${tx.hash}`);
-          const receipt = await tx.wait();
+          const receipt = await tx.wait(1); // Wait for 1 confirmation
 
           this.emitLog('BLOCKCHAIN', 'SUCCESS', `${receipt.blockNumber} numaralı blok onaylandı. Yeşil Karbon proof kaydı blok zincirine eklendi. Harcanan Gas: ${receipt.gasUsed.toString()}`);
 
@@ -336,7 +373,7 @@ export class BlockchainRouter {
           }
 
           this.emitLog('BLOCKCHAIN', 'INFO', `Ağa başarıyla iletildi. Blok onayı bekleniyor... İşlem Kodu: ${tx.hash}`);
-          const receipt = await tx.wait();
+          const receipt = await tx.wait(1); // Wait for 1 confirmation
 
           this.emitLog('BLOCKCHAIN', 'SUCCESS', `${receipt.blockNumber} numaralı blok onaylandı. Veri analitiği kaydı blok zincirine eklendi. Harcanan Gas: ${receipt.gasUsed.toString()}`);
 

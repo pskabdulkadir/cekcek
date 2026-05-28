@@ -25,14 +25,17 @@ axios.defaults.timeout = 5000;
 // DNS Workaround: IPv6 önceliği nedeniyle oluşan ENOTFOUND hatalarını engelle
 dns.setDefaultResultOrder("ipv4first");
 
+// Force Publish Flag (Geçici olarak tüm birikmiş varlıkları yayınlamak için)
+const FORCE_PUBLISH = true;
+
 // Load config first
 import { blockchainConfig, dbConfig } from "./server/config.ts";
 
 // --- SAF WEB3 FİNANSAL YAPILANDIRMA ---
 const web3Config = {
     payoutWallet: process.env.PAYOUT_WALLET || process.env.CHANNEL_ROUTING_WALLET || "0x02cc8aBBADf0ad5183f5e9Bb2BF469e506a133e4",
-    rpcUrl: process.env.POLYGON_RPC_URL || process.env.RPC_URL || "https://polygon.llamarpc.com",
-    contractAddress: process.env.SMART_GATE_CONTRACT_ADDRESS || process.env.OCEAN_MARKET_CONTRACT || process.env.CONTRACT_ADDRESS || "0x027663260901e6878411c521360814C45d2e7d70"
+    rpcUrl: process.env.POLYGON_RPC_URL || process.env.RPC_URL || "https://polygon-rpc.com",
+    contractAddress: blockchainConfig.contractAddress // Use the contract address from blockchainConfig for consistency
 };
 
 // Modules
@@ -47,6 +50,38 @@ import { MarketplaceManager } from "./server/marketplace.ts";
 const app = express();
 export const mainOptimizer = new DataOptimizer();
 export const mainMarketplace = new MarketplaceManager();
+
+// Ocean Protocol Endpoints (V4)
+// Dynamically set Ocean Protocol endpoints based on chainId
+const getOceanEndpoints = (chainId: number) => {
+  switch (chainId) {
+    case 56: // BSC Mainnet
+      return {
+        aquarius: [process.env.OCEAN_AQUARIUS_URL || "https://v4.aquarius.bsc.oceanprotocol.com", "https://aquarius.bsc.oceanprotocol.com"],
+        provider: [process.env.OCEAN_PROVIDER_URL || "https://v4.provider.bsc.oceanprotocol.com", "https://provider.bsc.oceanprotocol.com"]
+      };
+    case 97: // BSC Testnet
+      return {
+        aquarius: [process.env.OCEAN_AQUARIUS_URL || "https://v4.aquarius.chapel.oceanprotocol.com", "https://aquarius.chapel.oceanprotocol.com"],
+        provider: [process.env.OCEAN_PROVIDER_URL || "https://v4.provider.chapel.oceanprotocol.com", "https://provider.chapel.oceanprotocol.com"]
+      };
+    case 137: // Polygon Mainnet
+      return {
+        aquarius: [process.env.OCEAN_AQUARIUS_URL || "https://v4.aquarius.oceanprotocol.com", "https://aquarius.mainnet.oceanprotocol.com"],
+        provider: [process.env.OCEAN_PROVIDER_URL || "https://v4.provider.polygon.oceanprotocol.com", "https://provider.mainnet.oceanprotocol.com"]
+      };
+    case 80001: // Polygon Mumbai Testnet
+      return {
+        aquarius: [process.env.OCEAN_AQUARIUS_URL || "https://v4.aquarius.mumbai.oceanprotocol.com", "https://aquarius.mumbai.oceanprotocol.com"],
+        provider: [process.env.OCEAN_PROVIDER_URL || "https://v4.provider.mumbai.oceanprotocol.com", "https://provider.mumbai.oceanprotocol.com"]
+      };
+    default: // Fallback to Polygon Mainnet if unknown
+      return {
+        aquarius: [process.env.OCEAN_AQUARIUS_URL || "https://v4.aquarius.oceanprotocol.com", "https://aquarius.mainnet.oceanprotocol.com"],
+        provider: [process.env.OCEAN_PROVIDER_URL || "https://v4.provider.polygon.oceanprotocol.com", "https://provider.mainnet.oceanprotocol.com"]
+      };
+  }
+};
 
 // Settlement Queue: Mutabakat işlemlerini crawler'dan izole eder
 const settlementQueue: { assetId: string, creditValue: number }[] = [];
@@ -182,8 +217,10 @@ setInterval(processPublishQueue, 20000); // 20 saniyede bir yayın kuyruğunu er
 
 async function broadcastToGreenFinanceNetwork(proof: any): Promise<boolean> {
   try {
-    const chainId = 137; // Polygon Mainnet
+    const currentNetworkDetails = await mainBlockchain.getNetworkDetailsFromRpc(mainBlockchain.rpcUrl);
+    const chainId = currentNetworkDetails.chainId;
     const nftAddress = web3Config.contractAddress; // .env'den gelen Data NFT kontrat adresi
+    const oceanEndpoints = getOceanEndpoints(chainId); // Use chainId to get endpoints
 
     if (!nftAddress || nftAddress === ethers.constants.AddressZero) {
       throw new Error("Ocean Market Contract Address (nftAddress) is not configured correctly in .env");
@@ -253,19 +290,21 @@ async function broadcastToGreenFinanceNetwork(proof: any): Promise<boolean> {
     let success = false;
 
     while (attempts < maxRetries && !success) {
+      const currentAquarius = oceanEndpoints.aquarius[attempts % oceanEndpoints.aquarius.length];
+      const currentProvider = oceanEndpoints.provider[attempts % oceanEndpoints.provider.length];
       attempts++;
       try {
         // 1. ADIM: Metadata'ya kaydet (Aquarius Servisi)
-        const metadataUrl = "https://aquarius.oceanprotocol.com/api/aquarius/assets/ddo";
-        pushLog('FINANCE', 'INFO', `[METADATA_PUBLISH] Varlık kimliği dizine ekleniyor...`);
+        const metadataUrl = `${currentAquarius}/api/aquarius/assets/ddo`;
+        pushLog('FINANCE', 'INFO', `[METADATA_PUBLISH] Varlık dizine ekleniyor: ${currentAquarius}`);
         await axios.post(metadataUrl, ddoPayload, {
           headers: commonHeaders,
           timeout: 20000 // Global ağ gecikmeleri için süre artırıldı
         });
-        pushLog('FINANCE', 'SUCCESS', `[METADATA_INDEXED] Varlık Aquarius pazar dizinine mühürlendi.`);
+        pushLog('FINANCE', 'SUCCESS', `[ASSET_PUBLISH_201_CREATED] Varlık Aquarius pazar dizinine mühürlendi.`);
 
         // 2. ADIM: Provider'a bildir (Servisi başlat)
-        const providerUrl = `${currentProvider.replace(/\/$/, '')}/api/v1/services/initialize`;
+        const providerUrl = `${currentProvider}/api/services/initialize`;
         pushLog('FINANCE', 'INFO', `[PROVIDER_INITIALIZING] Erişim katmanı oluşturuluyor: ${currentProvider}`);
         response = await axios.post(providerUrl, {
           document: ddoPayload, // Tam DDO objesi
@@ -293,7 +332,7 @@ async function broadcastToGreenFinanceNetwork(proof: any): Promise<boolean> {
     }
 
     if (response && (response.status === 200 || response.status === 201)) {
-      pushLog('FINANCE', 'SUCCESS', `[DATA_ASSET_LISTED] Veri NFT ve Datatoken basıldı. Ocean Market'te yayına girdi! ID: ${proof.id}`);
+      pushLog('FINANCE', 'SUCCESS', `[MARKET_LISTING_SUCCESS] Veri NFT ve Datatoken mühürlendi. Ocean Market'te yayına girdi! ID: ${proof.id}`);
       
       // Başarı durumunda mülkiyet kanıtını konsola mühürle
       const ddoAddress = response.data?.did || "ZİNCİR_ÜSTÜ_DOĞRULANIYOR";
@@ -362,7 +401,7 @@ async function logDataAssetActivity(data: any) {
 const TransactionSchema = new mongoose.Schema({
   url: String,
   proofHash: String,
-  savedGrams: Number,
+  co2AnalysisGrams: Number, // Renamed from savedGrams
   txHash: String,
   timestamp: { type: Date, default: Date.now }
 });
@@ -371,7 +410,7 @@ const ReadyToSellSchema = new mongoose.Schema({
   id: String,
   url: String,
   proofHash: String,
-  co2AnalysisGrams: Number, // co2SavingsGrams -> co2AnalysisGrams
+  co2AnalysisGrams: Number,
   extractedKeywords: [String],
   reportSummary: String,
   accessPriceUSD: Number, 
@@ -395,18 +434,33 @@ const ReadyToSellModel = mongoose.model("ReadyToSell", ReadyToSellSchema);
  */
 async function initializeSystem() {
   try {
-    // 1. Veritabanı temizliği (Canlı üretim öncesi temizlik)
-    await TransactionModel.deleteMany({});
-    await ReadyToSellModel.deleteMany({});
+    // DİKKAT: Veritabanı temizliği (deleteMany) devre dışı bırakıldı. 
+    // Biriken verileri işlemek için bu satırlar yorum satırı kalmalıdır.
+    // await TransactionModel.deleteMany({});
+    // await ReadyToSellModel.deleteMany({});
     
-    // 2. State sayaçlarını sıfırla
-    serverState.batchVolumeAccumulatedKB = 0;
-    serverState.totalGreenCredits = 0;
-    serverState.totalRealizedCash = 0;
+    const pendingCount = await ReadyToSellModel.countDocuments({ isSold: false });
+    pushLog('SYSTEM', 'SUCCESS', `[DB_CONNECT] MongoDB Atlas bağlantısı kuruldu. İşlenmeyi bekleyen ${pendingCount} varlık bulundu.`);
 
-    pushLog('SYSTEM', 'SUCCESS', `[RESET_COMPLETE] Tüm sahte veriler temizlendi. Sistem CANLI ÜRETİM modunda.`);
+    pushLog('SYSTEM', 'INFO', `[SYSTEM_READY] Sistem CANLI ÜRETİM modunda. Veriler korunuyor.`);
   } catch (err: any) {
     pushLog('SYSTEM', 'ERROR', `Sistem sıfırlama hatası: ${err.message}`);
+  }
+}
+
+/**
+ * FORCE PUBLISH: Veritabanında bekleyen tüm satılmamış varlıkları Ocean Network'e iter.
+ */
+async function forcePublishAllAssets() {
+  try {
+    const pendingItems = await ReadyToSellModel.find({ isSold: false });
+    pushLog('FINANCE', 'ANALYZE', `[FORCE_PUBLISH] ${pendingItems.length} varlık için toplu transfer başlatıldı...`);
+    
+    for (const item of pendingItems) {
+      await insightLogisticsEngine(item.id, item.accessPriceUSD || 0);
+    }
+  } catch (err: any) {
+    pushLog('SYSTEM', 'ERROR', `Toplu yayınlama hatası: ${err.message}`);
   }
 }
 
@@ -899,7 +953,7 @@ app.post("/api/market/confirm-sale", async (req, res) => {
     const record: TransactionRecord = {
       url: item.url,
       proofHash: item.proofHash,
-      savedGrams: item.co2SavingsGrams,
+      co2AnalysisGrams: item.co2AnalysisGrams, // Use co2AnalysisGrams
       txHash: txHash,
       timestamp: new Date().toISOString()
     };
@@ -1014,8 +1068,8 @@ app.post("/api/optimize-url", async (req, res) => {
     const newItem: ReadyToSellItem = {
       id: generatedId,
       url,
-      proofHash,
-      co2SavingsGrams: savings.co2SavingsGrams,
+        proofHash, // Use proofHash directly
+        co2AnalysisGrams: savings.co2SavingsGrams, // Use co2AnalysisGrams
       extractedKeywords: ["asset", "real-data", "mined"],
       reportSummary: `Doğrulanmış Karbon Varlığı: ${url} üzerinden ${savings.co2SavingsGrams.toFixed(4)}g CO2 tasarrufu mühürlendi.`,
       marketPriceUSD: valuation,
@@ -1062,15 +1116,22 @@ async function startServer() {
       const uri = dbConfig.uri;
       if (!uri) throw new Error("MONGO_URI tanımlanmamış!");
       
-      await mongoose.connect(uri, { dbName: dbConfig.dbName });
-      console.log(`[DB] Atlas Cluster Bağlantısı OK: ${dbConfig.dbName}`);
-      pushLog('SYSTEM', 'SUCCESS', `Atlas Cluster Bağlantısı OK: ${dbConfig.dbName}`);
+      console.log(`[DB] MongoDB Atlas'a bağlanılıyor: ${dbConfig.dbName}...`);
+      await mongoose.connect(uri, { 
+        dbName: dbConfig.dbName,
+        connectTimeoutMS: 10000, // 10 saniye içinde bağlanamazsa hata ver
+      });
 
       // PROTOKOL_RESET: Canlıya geçerken temizlik yap
       await initializeSystem();
       
       // Blockchain kontrat ve cüzdan durumunu doğrula
       await mainBlockchain.validateOnChainStatus();
+
+      // CLI Komut Kontrolü: --force-publish-all
+      if (FORCE_PUBLISH) {
+        await forcePublishAllAssets();
+      }
 
       // Motoru başlat
       startAutomatedTrading();
