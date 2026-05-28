@@ -229,26 +229,28 @@ export class BlockchainRouter {
     for (const rpc of endpoints) {
       try {
         let provider;
-        // WebSocket (WSS) İyileştirmesi: Daha uzun bağlantı ömrü
         if (rpc.includes('wss://') || rpc.startsWith('ws')) {
           provider = new ethers.providers.WebSocketProvider(rpc, {
-            polling: true,
-            timeout: blockchainConfig.rpcTimeout
+            timeout: blockchainConfig.rpcTimeout,
+            cacheTimeout: -1, // Önbelleği devre dışı bırak
+            polling: true
           });
         } else {
           provider = new ethers.providers.JsonRpcProvider({
             url: rpc,
             skipFetchSetup: true, // Render/Axios çakışmasını önle
             timeout: blockchainConfig.rpcTimeout // 60 saniye timeout
-          });
+          }, "any"); // Network değişimlerine tolerans göster
         }
 
         const wallet = new ethers.Wallet(this.privateKey);
-        // GÜVENLİK: Adres mülkiyetini ve doğruluğunu kontrol et
-        const address = await wallet.getAddress();
+        const address = wallet.address;
 
         // POL Senkronizasyon Koruması: Ağ durumunu kontrol et
-        await provider.getNetwork();
+        const networkState = await Promise.race([
+          provider.getNetwork(),
+          new Promise((_, reject) => setTimeout(() => reject(new Error("Düğüm Yanıt Vermedi")), 8000))
+        ]);
         
         // PROTOKOL_NATIVE_SYNC: eth_getBalance çağrısını ham RPC olarak zorla (Cache bypass)
         let balance;

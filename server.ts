@@ -226,9 +226,13 @@ async function processPublishQueue() {
             pushLog('FINANCE', 'SUCCESS', `[SELF_FINANCE] Bakiye eşiği aşıldı (${currentBalance} POL). Otomatik yayınlama tetiklendi.`);
             isAuthorized = true;
         } else {
-            // Eğer bakiye tam olarak 0 dönüyorsa (veya hata varsa), ağ hatası olma ihtimaline karşı yayını zorlama.
-            if (publishQueue.length > 0 && Math.random() > 0.9) { // Log kirliliğini önlemek için seyrek yaz
-                pushLog('FINANCE', 'WARNING', `[PASSIVE_MODE] Ağ bağlantısı bekleniyor. ${publishQueue.length} varlık mühürlü bekliyor.`);
+            // VOUCHER envanterini say ve kullanıcıya raporla
+            if (Math.random() > 0.8) { // Log kirliliğini önlemek için periyodik yaz
+              const signedCount = await ReadyToSellModel.countDocuments({ 
+                  isSold: false, 
+                  accessVoucherSignature: { $exists: true } 
+              });
+              pushLog('SYSTEM', 'INFO', `[INVENTORY] Mevcut Stok: ${signedCount} imzalı Voucher satışa hazır bekliyor. (Ağ bağlantısı bekleniyor)`);
             }
         }
     }
