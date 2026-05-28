@@ -10,6 +10,8 @@
 import mongoose from "mongoose";
 import express from "express";
 import path from "path";
+import helmet from "helmet";
+import cors from "cors";
 import axios from "axios";
 import { ethers } from "ethers";
 import { createServer as createViteServer } from "vite";
@@ -25,15 +27,29 @@ axios.defaults.timeout = 5000;
 // DNS Workaround: IPv6 önceliği nedeniyle oluşan ENOTFOUND hatalarını engelle
 dns.setDefaultResultOrder("ipv4first");
 
+// --- GÜVENLİK KATMANI: SÖZLEŞME BEYAZ LİSTESİ ---
+const ALLOWED_CONTRACTS = [
+    "0x4544d5674066f7f6f966144510006327e5b56345", // Ocean Market
+    "0x71C7656EC7ab88b098defB751B7401B5f6d8976F"  // Smart Gate
+].map(addr => addr.toLowerCase());
+
+function validateContractAddress(address: string) {
+    if (!address || address === ethers.constants.AddressZero) return;
+    if (!ALLOWED_CONTRACTS.includes(address.toLowerCase())) {
+        pushLog('FINANCE', 'ERROR', `Kritik Güvenlik İhlali: Yetkisiz sözleşmeye erişim engellendi: ${address}`);
+        throw new Error("SECURITY_BREACH: Unauthorized contract address.");
+    }
+}
+
 // Force Publish Flag (Geçici olarak tüm birikmiş varlıkları yayınlamak için)
-const FORCE_PUBLISH = true;
+const FORCE_PUBLISH = false; // Güvenlik: Sunucu açıldığında otomatik işlem yapmasını engelle
 
 // Load config first
 import { blockchainConfig, dbConfig } from "./server/config.ts";
 
 // --- SAF WEB3 FİNANSAL YAPILANDIRMA ---
 const web3Config = {
-    payoutWallet: process.env.PAYOUT_WALLET || process.env.CHANNEL_ROUTING_WALLET || "0x02cc8aBBADf0ad5183f5e9Bb2BF469e506a133e4",
+    payoutWallet: process.env.PAYOUT_WALLET || process.env.CHANNEL_ROUTING_WALLET || "",
     rpcUrl: process.env.POLYGON_RPC_URL || process.env.RPC_URL || "https://polygon-rpc.com",
     contractAddress: blockchainConfig.contractAddress // Use the contract address from blockchainConfig for consistency
 };
@@ -221,6 +237,8 @@ async function broadcastToGreenFinanceNetwork(proof: any): Promise<boolean> {
     const chainId = currentNetworkDetails.chainId;
     const nftAddress = web3Config.contractAddress; // .env'den gelen Data NFT kontrat adresi
     const oceanEndpoints = getOceanEndpoints(chainId); // Use chainId to get endpoints
+
+    validateContractAddress(nftAddress);
 
     if (!nftAddress || nftAddress === ethers.constants.AddressZero) {
       throw new Error("Ocean Market Contract Address (nftAddress) is not configured correctly in .env");
@@ -426,7 +444,7 @@ ReadyToSellSchema.index({ isSold: 1, accessVoucherSignature: 1, timestamp: 1 });
 ReadyToSellSchema.index({ id: 1 }, { unique: true });
 
 const TransactionModel = mongoose.model("Transaction", TransactionSchema);
-const ReadyToSellModel = mongoose.model("ReadyToSell", ReadyToSellSchema);
+const ReadyToSellModel = mongoose.model("ReadyToSell", ReadyToSellSchema, "ReadyToSell_Clean"); // Temiz koleksiyonu hedefle
 
 /**
  * PROTOKOL: Sistem Başlatma ve Temizlik (RESET)
@@ -434,9 +452,10 @@ const ReadyToSellModel = mongoose.model("ReadyToSell", ReadyToSellSchema);
  */
 async function initializeSystem() {
   try {
-    // DİKKAT: Veritabanı temizliği (deleteMany) devre dışı bırakıldı. 
-    // Biriken verileri işlemek için bu satırlar yorum satırı kalmalıdır.
-    // await TransactionModel.deleteMany({});
+    // --- GÜVENLİK DENETİMİ ---
+    // Eğer veritabanı temizlenecekse, bu işlem mutlaka manuel onay ve log gerektirmelidir.
+    // pushLog('SYSTEM', 'WARNING', 'KRİTİK: Veritabanı temizleme komutu engellendi. Bu işlemi koddan manuel yapın.');
+    // await TransactionModel.deleteMany({}); 
     // await ReadyToSellModel.deleteMany({});
     
     const pendingCount = await ReadyToSellModel.countDocuments({ isSold: false });
@@ -479,6 +498,10 @@ if (!blockchainConfig.appUrl || blockchainConfig.appUrl === "MY_APP_URL") {
 
 const PORT = process.env.PORT || 3000;
 app.use(express.json());
+
+// GÜVENLİK: Sunucu zırhlandırma katmanları
+app.use(helmet()); // HTTP başlıklarını güvenli hale getirir
+app.use(cors());   // Yetkisiz domain erişimlerini kısıtlar
 
 // SSE Active Connections List
 const clients = new Set<any>();
@@ -1024,6 +1047,7 @@ app.post("/api/crawl/stop", (req, res) => {
   }
 
   serverState.isCrawling = false;
+  mainCrawler.stop(); // Ensure the internal crawler loop is signaled to break immediately
   pushLog('SYSTEM', 'WARNING', 'Durdurma sinyali: Otonom emirler donduruluyor.');
   
   res.json({ success: true, message: "Bağımsız tarama döngüsü durduruldu." });

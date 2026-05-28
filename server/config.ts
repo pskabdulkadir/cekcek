@@ -15,14 +15,20 @@ if (envResult.error && !process.env.PRIVATE_KEY) {
 console.log("DEBUG: PRIVATE_KEY kontrolü:", process.env.PRIVATE_KEY ? "YÜKLÜ" : "BOŞ!");
 console.log("DEBUG: MONGO_URI kontrolü:", process.env.MONGO_URI ? "YÜKLÜ" : "BOŞ (varsayılan kullanılacak)");
 
-const mongoUri = process.env.MONGO_URI || 'mongodb+srv://Abdulkadir1983:Abdulkadir1983@cluster0.ukjckex.mongodb.net/geridonüşüm?retryWrites=true&w=majority&appName=Cluster0';
+// GÜVENLİK KRİTİK: Üretim modunda gizli değişkenler zorunludur
+if (process.env.NODE_ENV === 'production') {
+    if (!process.env.MONGO_URI) throw new Error("FATAL: MONGO_URI is missing in production!");
+    if (!process.env.PRIVATE_KEY) throw new Error("FATAL: PRIVATE_KEY is missing in production!");
+}
+
+const mongoUri = process.env.MONGO_URI || 'mongodb://localhost:27017/dev_db';
 
 export const blockchainConfig = {
     geminiApiKey: process.env.GEMINI_API_KEY || '',
     appUrl: process.env.APP_URL || '',
     contractAddress: process.env.CONTRACT_ADDRESS || process.env.SMART_GATE_CONTRACT_ADDRESS || '0x0000000000000000000000000000000000000000', // Data NFT Factory veya Veri Erişim Kontratı
-    payoutWallet: process.env.CHANNEL_ROUTING_WALLET || process.env.PAYOUT_WALLET || '0x02cc8aBBADf0ad5183f5e9Bb2BF469e506a133e4',
-    commissionWallet: process.env.COMMISSION_WALLET || '0x71C7656EC7ab88b098defB751B7401B5f6d8976F', // Aracı firma cüzdanı (Örn: Smart Gate)
+    payoutWallet: process.env.CHANNEL_ROUTING_WALLET || process.env.PAYOUT_WALLET || '',
+    commissionWallet: process.env.COMMISSION_WALLET || '', // Aracı firma cüzdanı (Örn: Smart Gate)
     commissionRate: parseFloat(process.env.COMMISSION_RATE || '0.10'), // %10 Komisyon oranı
     rpcUrl: process.env.RPC_URL || 'https://polygon-rpc.com', // Varsayılan olarak Polygon Mainnet RPC
     privateKey: process.env.PRIVATE_KEY || process.env.INCOME_DISTRIBUTION_WALLET || '',

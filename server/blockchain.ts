@@ -10,6 +10,12 @@ import { ethers } from 'ethers';
 import * as crypto from 'crypto';
 import { blockchainConfig } from './config.ts';
 
+// --- GÜVENLİK KATMANI: SÖZLEŞME BEYAZ LİSTESİ ---
+const ALLOWED_CONTRACTS = [
+  "0x4544d5674066f7f6f966144510006327e5b56345", // Ocean Market
+  "0x71C7656EC7ab88b098defB751B7401B5f6d8976F"  // Smart Gate
+].map(addr => addr.toLowerCase());
+
 export class BlockchainRouter {
   public rpcUrl: string;
   public rpcEndpoints: string[] = [];
@@ -64,6 +70,17 @@ export class BlockchainRouter {
     } catch (err) {
       this.emitLog('BLOCKCHAIN', 'ERROR', "KRITIK: PRIVATE_KEY eksik veya geçersiz! Sistem gerçek işlem yapamaz. Lütfen .env dosyasını kontrol edin.");
       this.isRealMode = false;
+    }
+  }
+
+  /**
+   * Hedef sözleşme adresinin beyaz listede olup olmadığını kontrol eder.
+   */
+  private validateContract(address: string) {
+    if (!address || address === ethers.constants.AddressZero) return; 
+    if (!ALLOWED_CONTRACTS.includes(address.toLowerCase())) {
+      this.emitLog('BLOCKCHAIN', 'ERROR', `GÜVENLİK İHLALİ: Yetkisiz sözleşme adresi tespit edildi: ${address}`);
+      throw new Error("GÜVENLİK İHLALİ: Yetkisiz sözleşme adresi.");
     }
   }
 
@@ -124,6 +141,7 @@ export class BlockchainRouter {
 
         this.rpcUrl = currentRpc; // Çalışan RPC'yi ana kanal yap
         const details = await this.getNetworkDetailsFromRpc(currentRpc);
+        this.validateContract(this.contractAddress);
         this.currentChainId = details.chainId;
         this.currentExplorerUrl = details.explorerUrl;
         await provider.getNetwork();
@@ -228,6 +246,8 @@ export class BlockchainRouter {
   public async createSignedAccessVoucher(dataAssetId: string, co2AnalysisGrams: number, accessPrice: number): Promise<string> {
     this.emitLog('BLOCKCHAIN', 'INFO', `[EIP-712] Veri erişim voucheri imzalanıyor: ${dataAssetId}...`);
     
+    this.validateContract(this.contractAddress);
+
     try {
       // Cüzdanı provider olmadan başlat (Signing işlemi için bağlantı gerekmez, noNetwork hatasını önler)
       const wallet = new ethers.Wallet(this.privateKey);
@@ -304,6 +324,8 @@ export class BlockchainRouter {
           this.emitLog('BLOCKCHAIN', 'ERROR', errMsg);
           return { success: false, txHash: '', simulated: false, error: errMsg };
         }
+
+        this.validateContract(this.contractAddress);
 
         const balance = await provider.getBalance(wallet.address).catch(() => ethers.BigNumber.from(0));
         

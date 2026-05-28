@@ -1226,15 +1226,24 @@ export default function App() {
                           </span>
                         </div>
                       </div>
-                      <button
-                      onClick={stats.isCrawling ? stopCrawlBot : startCrawlBot} // Motoru başlat/durdur
-                      className={`font-mono text-[9px] uppercase font-black tracking-wider px-3 py-1.5 rounded-lg border transition-all pointer shrink-0 ${stats.isCrawling 
-                        ? "bg-red-950/45 hover:bg-red-900/60 border-red-500/30 text-red-400" 
-                        : "bg-emerald-950/45 hover:bg-emerald-900/60 border-emerald-500/30 text-emerald-400"
-                      }`}
-                      >
-                      {stats.isCrawling ? "OTONOM MOTORU DURDUR" : "OTONOM MOTORU BAŞLAT"}
-                      </button>
+                      <div className="flex gap-2 shrink-0">
+                        <button
+                          onClick={startCrawlBot}
+                          disabled={stats.isCrawling}
+                          className={`font-mono text-[9px] uppercase font-black tracking-wider px-3 py-1.5 rounded-lg border transition-all cursor-pointer disabled:opacity-30 bg-emerald-950/45 hover:bg-emerald-900/60 border-emerald-500/30 text-emerald-400`}
+                        >
+                          <Play className="w-3 h-3 inline mr-1 fill-current" />
+                          OTONOM MOTORU BAŞLAT
+                        </button>
+                        <button
+                          onClick={stopCrawlBot}
+                          disabled={!stats.isCrawling}
+                          className={`font-mono text-[9px] uppercase font-black tracking-wider px-3 py-1.5 rounded-lg border transition-all cursor-pointer disabled:opacity-30 bg-red-950/45 hover:bg-red-900/60 border-red-500/30 text-red-400`}
+                        >
+                          <Square className="w-3 h-3 inline mr-1 fill-current" />
+                          OTONOM MOTORU DURDUR
+                        </button>
+                      </div>
                     </div>
 
                     <div className="space-y-3.5 max-h-[420px] overflow-y-auto pr-1">

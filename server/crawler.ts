@@ -10,6 +10,13 @@ import axios from 'axios';
 import * as cheerio from 'cheerio';
 import { URL } from 'url';
 
+// CRAWLER GÜVENLİĞİ: Kimlik Rotasyonu
+const USER_AGENTS = [
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36'
+];
+
 export interface CrawlerOptions {
   delayMs?: number;
   targetLimit?: number;
@@ -92,8 +99,11 @@ export class WebCrawler {
 
   public async fetchAndAnalyze(currentUrl: string): Promise<{ html: string; links: string[] }> {
     try {
+      // Rastgele bir kimlik seç (User-Agent Rotation)
+      const randomAgent = USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
+      
       const headers = {
-        'User-Agent': 'Mozilla/5.0 (compatible; InternetReclamationCoreBot/1.0; +https://github.com/reclamation-core)',
+        'User-Agent': randomAgent,
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9',
       };
 
@@ -164,8 +174,9 @@ export class WebCrawler {
     let crawledCount = 0;
 
     while (this.isRunning) {
-      // PROTOKOL_HIZ_SINIRI: Her döngü başında sunucunun nefes almasını sağla
-      await this.sleep(this.delayMs || 5000);
+      // GÜVENLİK: Jitter (Rastgele gecikme) ekleyerek insansı davranış simüle et
+      const jitter = Math.random() * 3000; // 0-3 saniye arası rastgele ek gecikme
+      await this.sleep((this.delayMs || 5000) + jitter);
 
       try {
         // Robust empty queue protection
