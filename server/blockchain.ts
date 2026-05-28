@@ -212,7 +212,7 @@ export class BlockchainRouter {
       const isLow = parseFloat(balanceInEther) < parseFloat(threshold);
 
       if (isLow) {
-        this.emitLog('BLOCKCHAIN', 'WARNING', `DİKKAT: Üretim bakiyesi düşük (${balanceInEther} ${network === 'bsc' ? 'BNB' : 'POL'}). İşlem sürekliliği için bakiye ekleyin.`);
+        this.emitLog('BLOCKCHAIN', 'WARNING', `DİKKAT: Üretim bakiyesi düşük (${balanceInEther} ${network === 'bsc' ? 'BNB' : 'POL'}) [Tespit Edilen Ağ: ${this.currentNetworkName}]. İşlem sürekliliği için bakiye ekleyin.`);
       }
       return { balance: balanceInEther, isLow };
     } catch (err) {

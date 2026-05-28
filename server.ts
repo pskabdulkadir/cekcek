@@ -57,27 +57,27 @@ const getOceanEndpoints = (chainId: number) => {
   switch (chainId) {
     case 56: // BSC Mainnet
       return {
-        aquarius: [process.env.OCEAN_AQUARIUS_URL || "https://v4.aquarius.bsc.oceanprotocol.com", "https://aquarius.bsc.oceanprotocol.com"],
+        aquarius: [process.env.OCEAN_AQUARIUS_URL || "https://aquarius.oceanprotocol.com", "https://v5.aquarius.oceanprotocol.com"],
         provider: [process.env.OCEAN_PROVIDER_URL || "https://v4.provider.bsc.oceanprotocol.com", "https://provider.bsc.oceanprotocol.com"]
       };
     case 97: // BSC Testnet
       return {
-        aquarius: [process.env.OCEAN_AQUARIUS_URL || "https://v4.aquarius.chapel.oceanprotocol.com", "https://aquarius.chapel.oceanprotocol.com"],
+        aquarius: [process.env.OCEAN_AQUARIUS_URL || "https://aquarius.chapel.oceanprotocol.com", "https://v4.aquarius.chapel.oceanprotocol.com"],
         provider: [process.env.OCEAN_PROVIDER_URL || "https://v4.provider.chapel.oceanprotocol.com", "https://provider.chapel.oceanprotocol.com"]
       };
     case 137: // Polygon Mainnet
       return {
-        aquarius: [process.env.OCEAN_AQUARIUS_URL || "https://v4.aquarius.oceanprotocol.com", "https://aquarius.mainnet.oceanprotocol.com"],
+        aquarius: [process.env.OCEAN_AQUARIUS_URL || "https://aquarius.oceanprotocol.com", "https://v5.aquarius.oceanprotocol.com"],
         provider: [process.env.OCEAN_PROVIDER_URL || "https://v4.provider.polygon.oceanprotocol.com", "https://provider.mainnet.oceanprotocol.com"]
       };
     case 80001: // Polygon Mumbai Testnet
       return {
-        aquarius: [process.env.OCEAN_AQUARIUS_URL || "https://v4.aquarius.mumbai.oceanprotocol.com", "https://aquarius.mumbai.oceanprotocol.com"],
+        aquarius: [process.env.OCEAN_AQUARIUS_URL || "https://aquarius.mumbai.oceanprotocol.com", "https://v4.aquarius.mumbai.oceanprotocol.com"],
         provider: [process.env.OCEAN_PROVIDER_URL || "https://v4.provider.mumbai.oceanprotocol.com", "https://provider.mumbai.oceanprotocol.com"]
       };
     default: // Fallback to Polygon Mainnet if unknown
       return {
-        aquarius: [process.env.OCEAN_AQUARIUS_URL || "https://v4.aquarius.oceanprotocol.com", "https://aquarius.mainnet.oceanprotocol.com"],
+        aquarius: [process.env.OCEAN_AQUARIUS_URL || "https://aquarius.oceanprotocol.com", "https://v5.aquarius.oceanprotocol.com"],
         provider: [process.env.OCEAN_PROVIDER_URL || "https://v4.provider.polygon.oceanprotocol.com", "https://provider.mainnet.oceanprotocol.com"]
       };
   }
