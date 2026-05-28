@@ -213,6 +213,32 @@ setInterval(processSettlementQueue, 15000); // 15 saniyede bir kuyruğu işle
  */
 async function processPublishQueue() {
     if (publishQueue.length === 0) return;
+
+    // GÜVENLİK VE OTONOM DÖNGÜ KONTROLÜ
+    let isAuthorized = FORCE_PUBLISH;
+
+    // "Kendi Kendini Finanse Eden Döngü" (Self-Sustaining Loop) Mantığı
+    if (blockchainConfig.autoReinvest && !isAuthorized) {
+        const balanceCheck = await mainBlockchain.checkGasBalance('polygon');
+        const currentBalance = parseFloat(balanceCheck.balance);
+        
+        if (currentBalance >= blockchainConfig.minReinvestThreshold) {
+            pushLog('FINANCE', 'SUCCESS', `[SELF_FINANCE] Bakiye eşiği aşıldı (${currentBalance} POL). Otomatik yayınlama tetiklendi.`);
+            isAuthorized = true;
+        }
+    }
+
+    if (!isAuthorized) {
+        return; 
+    }
+
+    // Akıllı Harcama Sınırı: Cüzdan bakiyesi kontrolü (Polygon/POL)
+    const balanceCheck = await mainBlockchain.checkGasBalance('polygon');
+    if (balanceCheck.isLow) {
+        pushLog('FINANCE', 'WARNING', `[SAFETY_BRAKE] Gas bakiyesi düşük (${balanceCheck.balance} POL). Otomatik yayınlama durduruldu.`);
+        return;
+    }
+
     const task = publishQueue.shift();
     if (!task) return;
 
