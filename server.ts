@@ -244,27 +244,29 @@ async function processPublishQueue() {
     // Akıllı Harcama Sınırı: Cüzdan bakiyesi kontrolü (Polygon/POL)
     const balanceCheck = await mainBlockchain.checkGasBalance('polygon');
     if (balanceCheck.isLow) {
-        pushLog('FINANCE', 'WARNING', `[SAFETY_BRAKE] Gaz bakiyesi yetersiz (${balanceCheck.balance} POL). Yayınlama askıda, Voucher üretimi arka planda devam ediyor.`);
+        pushLog('FINANCE', 'WARNING', `[SAFETY_BRAKE] Gaz bakiyesi yetersiz (${balanceCheck.balance} POL). Tahliye askıda, Voucher üretimi devam ediyor.`);
         return;
     }
 
-    const task = publishQueue.shift();
-    if (!task) return;
-
-    try {
-        // Yayın işlemini başlat ve sonucu bekle
-        const isPublished = await broadcastToGreenFinanceNetwork(task);
+    // OTONOM TAHLİYE OPTİMİZASYONU: Kuyruk kalabalıksa parti başına işlem sayısını artır
+    const drainRate = publishQueue.length > 50 ? 3 : 1;
     
-        if (isPublished) {
-            // Sadece ve sadece dış dünya onay verirse finansal süreci başlat
-            settlementQueue.push({ assetId: task.id, creditValue: parseFloat(String(task.value || 0)) });
-            pushLog('FINANCE', 'SUCCESS', `[ON_CHAIN_SYNC] ${task.id} başarıyla yayınlandı, mutabakat başlatılıyor.`);
+    for (let i = 0; i < drainRate; i++) {
+        const task = publishQueue.shift();
+        if (!task) break;
+
+        try {
+            const isPublished = await broadcastToGreenFinanceNetwork(task);
+            if (isPublished) {
+                settlementQueue.push({ assetId: task.id, creditValue: parseFloat(String(task.value || 0)) });
+                pushLog('FINANCE', 'SUCCESS', `[ON_CHAIN_SYNC] ${task.id} başarıyla yayınlandı.`);
+            }
+        } catch (err) {
+            pushLog('FINANCE', 'ERROR', `[PUBLISH_WORKER_ERROR] ${task.id}: ${err}`);
         }
-    } catch (err) {
-        pushLog('FINANCE', 'ERROR', `[PUBLISH_WORKER_ERROR] ${task.id}: ${err}`);
     }
 }
-setInterval(processPublishQueue, 20000); // 20 saniyede bir yayın kuyruğunu erit
+setInterval(processPublishQueue, 15000); // 15 saniyede bir tahliye kontrolü yap
 
 async function broadcastToGreenFinanceNetwork(proof: any): Promise<boolean> {
   try {
