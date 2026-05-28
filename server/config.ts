@@ -31,6 +31,7 @@ export const blockchainConfig = {
     commissionWallet: process.env.COMMISSION_WALLET || '0x71C7656EC7ab88b098defB751B7401B5f6d8976F', // Aracı firma cüzdanı
     commissionRate: parseFloat(process.env.COMMISSION_RATE || '0.10'), // %10 Komisyon oranı
     rpcUrl: process.env.RPC_URL || 'https://polygon-rpc.com', // Varsayılan olarak Polygon Mainnet RPC
+    rpcTimeout: parseInt(process.env.RPC_TIMEOUT || '60000'), // Ağ zaman aşımı süresi (Varsayılan 60sn)
     privateKey: process.env.PRIVATE_KEY || '',
     zeroGasActive: false,
     networkMode: process.env.NETWORK_MODE || 'mainnet',

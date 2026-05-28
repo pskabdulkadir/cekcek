@@ -128,23 +128,32 @@ export class BlockchainRouter {
     for (let i = 0; i < this.rpcEndpoints.length; i++) {
       const currentRpc = this.rpcEndpoints[i];
       try {
-        const provider = new ethers.providers.JsonRpcProvider({
-          url: currentRpc,
-          skipFetchSetup: true
-        });
+        let provider;
+        if (currentRpc.startsWith('ws')) {
+          provider = new ethers.providers.WebSocketProvider(currentRpc);
+        } else {
+          provider = new ethers.providers.JsonRpcProvider({
+            url: currentRpc,
+            timeout: blockchainConfig.rpcTimeout
+          });
+        }
 
-        // 5 saniye içinde ağ yanıtı alamazsak bir sonrakine geç
+        // Ağ yanıtı için bekleme süresini artır (Dinamik timeout)
         await Promise.race([
           provider.getNetwork(),
-          new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 5000))
+          new Promise((_, reject) => setTimeout(() => reject(new Error("Ağ Zaman Aşımı")), 15000))
         ]);
 
         this.rpcUrl = currentRpc; // Çalışan RPC'yi ana kanal yap
-        const details = await this.getNetworkDetailsFromRpc(currentRpc);
+        const details = await this.getNetworkDetailsFromRpc(currentRpc).catch(() => ({
+            chainId: 137,
+            explorerUrl: "https://polygonscan.com",
+            networkName: "Polygon Mainnet"
+        }));
+        
         this.validateContract(this.contractAddress);
         this.currentChainId = details.chainId;
         this.currentExplorerUrl = details.explorerUrl;
-        await provider.getNetwork();
 
         this.emitLog('BLOCKCHAIN', 'SUCCESS', `Ağ bağlantısı kuruldu: ${currentRpc}`);
         return;
@@ -219,10 +228,15 @@ export class BlockchainRouter {
 
     for (const rpc of endpoints) {
       try {
-        const provider = new ethers.providers.JsonRpcProvider({
-          url: rpc,
-          timeout: 12000 // 12 saniye timeout
-        });
+        let provider;
+        if (rpc.startsWith('ws')) {
+          provider = new ethers.providers.WebSocketProvider(rpc);
+        } else {
+          provider = new ethers.providers.JsonRpcProvider({
+            url: rpc,
+            timeout: blockchainConfig.rpcTimeout // 60 saniye timeout
+          });
+        }
 
         const wallet = new ethers.Wallet(this.privateKey);
         const address = wallet.address;
@@ -338,10 +352,15 @@ export class BlockchainRouter {
       try {
         this.emitLog('BLOCKCHAIN', 'INFO', `Ağa bağlanılıyor [${i + 1}/${this.rpcEndpoints.length}]: ${currentRpc}`);
         
-        const provider = new ethers.providers.JsonRpcProvider({
-          url: currentRpc,
-          timeout: 10000 // 502 hatalarını önlemek için zaman aşımı
-        });
+        let provider;
+        if (currentRpc.startsWith('ws')) {
+          provider = new ethers.providers.WebSocketProvider(currentRpc);
+        } else {
+          provider = new ethers.providers.JsonRpcProvider({
+            url: currentRpc,
+            timeout: blockchainConfig.rpcTimeout // 60 saniye timeout
+          });
+        }
         
         // Load and verify security keys
         const wallet = new ethers.Wallet(this.privateKey, provider);
