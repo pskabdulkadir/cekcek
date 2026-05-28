@@ -49,7 +49,7 @@ import { blockchainConfig, dbConfig } from "./server/config.ts";
 
 // --- SAF WEB3 FİNANSAL YAPILANDIRMA ---
 const web3Config = {
-    payoutWallet: process.env.PAYOUT_WALLET || process.env.CHANNEL_ROUTING_WALLET || "",
+    payoutWallet: blockchainConfig.payoutWallet,
     rpcUrl: process.env.POLYGON_RPC_URL || process.env.RPC_URL || "https://polygon-rpc.com",
     contractAddress: blockchainConfig.contractAddress // Use the contract address from blockchainConfig for consistency
 };
@@ -1177,6 +1177,15 @@ async function startServer() {
       
       // Blockchain kontrat ve cüzdan durumunu doğrula
       await mainBlockchain.validateOnChainStatus();
+
+      // GÜVENLİK VE SENKRONİZASYON KONTROLÜ
+      const derivedSigner = mainBlockchain.getWalletAddress();
+      const configPayout = web3Config.payoutWallet;
+      
+      console.log(`[IDENTITY] İşlem İmzalayıcı (Signer): ${derivedSigner}`);
+      console.log(`[IDENTITY] Ödeme Alıcı (Recipient): ${configPayout}`);
+      
+      pushLog('BLOCKCHAIN', 'INFO', `Sistem Kimliği: İmzalayıcı=${derivedSigner.slice(0,10)}... | Alıcı=${configPayout.slice(0,10)}...`);
 
       // CLI Komut Kontrolü: --force-publish-all
       if (FORCE_PUBLISH) {
