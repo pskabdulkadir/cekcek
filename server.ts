@@ -1178,14 +1178,18 @@ async function startServer() {
       // Blockchain kontrat ve cüzdan durumunu doğrula
       await mainBlockchain.validateOnChainStatus();
 
+      // İlk bakiye kontrolünü tetikle
+      const initialBalance = await mainBlockchain.checkGasBalance('polygon');
+
       // GÜVENLİK VE SENKRONİZASYON KONTROLÜ
       const derivedSigner = mainBlockchain.getWalletAddress();
       const configPayout = web3Config.payoutWallet;
       
       console.log(`[IDENTITY] İşlem İmzalayıcı (Signer): ${derivedSigner}`);
       console.log(`[IDENTITY] Ödeme Alıcı (Recipient): ${configPayout}`);
+      console.log(`[IDENTITY] Güncel Bakiye: ${initialBalance.balance} POL`);
       
-      pushLog('BLOCKCHAIN', 'INFO', `Sistem Kimliği: İmzalayıcı=${derivedSigner.slice(0,10)}... | Alıcı=${configPayout.slice(0,10)}...`);
+      pushLog('BLOCKCHAIN', 'INFO', `Sistem Kimliği: İmzalayıcı=${derivedSigner.slice(0,10)}... | Bakiye=${initialBalance.balance} POL`);
 
       // CLI Komut Kontrolü: --force-publish-all
       if (FORCE_PUBLISH) {

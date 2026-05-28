@@ -212,28 +212,39 @@ export class BlockchainRouter {
    * Cüzdan bakiyesini kontrol eder ve üretim modu için kritik eşik uyarısı verir.
    * Bu fonksiyon, ödeme emri öncesinde sistemin gas ücretini karşılayıp karşılayamayacağını denetler.
    */
-  public async checkGasBalance(network: 'polygon' | 'bsc' = 'bsc'): Promise<{ balance: string, isLow: boolean }> {
+  public async checkGasBalance(network: 'polygon' | 'bsc' = 'polygon'): Promise<{ balance: string, isLow: boolean }> {
     try {
       // Ağ tipine göre uygun RPC terminalini seç (BSC veya Polygon)
       const rpc = network === 'bsc' ? 'https://bsc-dataseed.binance.org/' : (this.rpcUrl || 'https://polygon-rpc.com');
+      
       // Render 502 hatalarını önlemek için kesin zaman aşımı (Timeout) ekle
       const provider = new ethers.providers.JsonRpcProvider({
         url: rpc,
-        timeout: 8000 // 8 saniye içinde cevap gelmezse iptal et
+        timeout: 10000 // 10 saniye içinde cevap gelmezse iptal et
       });
+
       const wallet = new ethers.Wallet(this.privateKey, provider);
+      const address = wallet.address;
       
+      const networkInfo = await provider.getNetwork();
+      if (network === 'polygon' && networkInfo.chainId !== 137) {
+        this.emitLog('BLOCKCHAIN', 'WARNING', `Ağ senkronizasyon hatası! Beklenen: 137, Tespit Edilen: ${networkInfo.chainId}`);
+      }
+
       const balance = await provider.getBalance(wallet.address);
       const balanceInEther = ethers.utils.formatEther(balance);
       
       const threshold = network === 'bsc' ? this.gasThresholds.bsc : this.gasThresholds.polygon;
       const isLow = parseFloat(balanceInEther) < parseFloat(threshold);
 
+      this.emitLog('BLOCKCHAIN', 'SUCCESS', `Gas Balance Check: ${parseFloat(balanceInEther).toFixed(4)} POL detected for ${address.slice(0, 6)}...${address.slice(-4)}`);
+
       if (isLow) {
-        this.emitLog('BLOCKCHAIN', 'WARNING', `DİKKAT: Üretim bakiyesi düşük (${balanceInEther} ${network === 'bsc' ? 'BNB' : 'POL'}) [Tespit Edilen Ağ: ${this.currentNetworkName}]. İşlem sürekliliği için bakiye ekleyin.`);
+        this.emitLog('BLOCKCHAIN', 'WARNING', `DİKKAT: Üretim bakiyesi düşük (${balanceInEther} POL) [Ağ: ${networkInfo.name}]. İşlem sürekliliği için bakiye ekleyin.`);
       }
       return { balance: balanceInEther, isLow };
-    } catch (err) {
+    } catch (err: any) {
+      this.emitLog('BLOCKCHAIN', 'ERROR', `Bakiye sorgulama hatası (RPC: ${this.rpcUrl}): ${err.message}`);
       // HATA KORUMASI: RPC hatası 500 döndürmemeli, sadece bakiyeyi 0 göstermeli
       return { balance: "0.000000", isLow: true };
     }
