@@ -85,19 +85,15 @@ export class BlockchainRouter {
   }
 
   private getInitialRpcEndpoints(primaryRpc: string, networkMode: string): string[] {
-    const endpoints = [primaryRpc];
-    if (networkMode === 'mainnet') {
-      endpoints.push(
-        'https://polygon-rpc.com',
-        'https://polygon.llamarpc.com',
-        'https://rpc.ankr.com/polygon',
-        'https://1rpc.io/matic'
-      );
-    } else {
-      endpoints.push(
-        'https://rpc-mumbai.maticvigil.com',
-        'https://rpc-amoy.polygon.technology'
-      );
+    // ACİL_STRATEJİ: Render kısıtlamalarını aşmak için çoklu taramayı devre dışı bırak.
+    // Eğer bir RPC tanımlıysa sadece onu kullan, havuzu şişirme.
+    const endpoints = [primaryRpc].filter(Boolean);
+    
+    // Eğer .env boşsa yedek olarak sadece en stabil olanı bırak
+    if (endpoints.length === 0) {
+      return networkMode === 'mainnet' 
+        ? ['https://polygon-rpc.com'] 
+        : ['https://rpc-amoy.polygon.technology'];
     }
     return Array.from(new Set(endpoints.filter(Boolean)));
   }
@@ -229,11 +225,16 @@ export class BlockchainRouter {
     for (const rpc of endpoints) {
       try {
         let provider;
-        if (rpc.startsWith('ws')) {
-          provider = new ethers.providers.WebSocketProvider(rpc);
+        // WebSocket (WSS) İyileştirmesi: Daha uzun bağlantı ömrü
+        if (rpc.includes('wss://') || rpc.startsWith('ws')) {
+          provider = new ethers.providers.WebSocketProvider(rpc, {
+            polling: true,
+            timeout: blockchainConfig.rpcTimeout
+          });
         } else {
           provider = new ethers.providers.JsonRpcProvider({
             url: rpc,
+            skipFetchSetup: true, // Render/Axios çakışmasını önle
             timeout: blockchainConfig.rpcTimeout // 60 saniye timeout
           });
         }

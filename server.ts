@@ -225,8 +225,11 @@ async function processPublishQueue() {
         if (currentBalance > 0 && currentBalance >= blockchainConfig.minReinvestThreshold) {
             pushLog('FINANCE', 'SUCCESS', `[SELF_FINANCE] Bakiye eşiği aşıldı (${currentBalance} POL). Otomatik yayınlama tetiklendi.`);
             isAuthorized = true;
-        } else if (currentBalance === 0) {
-            pushLog('FINANCE', 'WARNING', `[PASSIVE_MODE] Bakiye okunamadı veya 0 POL. Blokzinciri yayını askıya alındı, sadece Voucher üretimi yapılıyor.`);
+        } else {
+            // Eğer bakiye tam olarak 0 dönüyorsa (veya hata varsa), ağ hatası olma ihtimaline karşı yayını zorlama.
+            if (publishQueue.length > 0 && Math.random() > 0.9) { // Log kirliliğini önlemek için seyrek yaz
+                pushLog('FINANCE', 'WARNING', `[PASSIVE_MODE] Ağ bağlantısı bekleniyor. ${publishQueue.length} varlık mühürlü bekliyor.`);
+            }
         }
     }
 
