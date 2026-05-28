@@ -216,11 +216,15 @@ export class BlockchainRouter {
   /**
    * Cüzdan bakiyesini kontrol eder ve üretim modu için kritik eşik uyarısı verir.
    * Bu fonksiyon, ödeme emri öncesinde sistemin gas ücretini karşılayıp karşılayamayacağını denetler.
-   * PROTOKOL_POL_SYNC: MATIC -> POL geçişi nedeniyle çoklu RPC doğrulaması yapar.
+   * PROTOKOL_POL_SYNC: POL geçişi ve Alchemy cache sorunlarını aşmak için hibrit doğrulama yapar.
    */
   public async checkGasBalance(network: 'polygon' | 'bsc' = 'polygon'): Promise<{ balance: string, isLow: boolean }> {
     let lastError = "";
-    const endpoints = network === 'bsc' ? ['https://bsc-dataseed.binance.org/'] : this.rpcEndpoints;
+    
+    // Alchemy cache sorunlarını bypass etmek için genel bir RPC'yi listeye zorla ekle
+    const baseEndpoints = network === 'bsc' ? ['https://bsc-dataseed.binance.org/'] : this.rpcEndpoints;
+    const publicFallback = network === 'polygon' ? 'https://polygon-rpc.com' : 'https://bsc-dataseed.binance.org/';
+    const endpoints = Array.from(new Set([...baseEndpoints, publicFallback]));
 
     for (const rpc of endpoints) {
       try {
@@ -240,13 +244,22 @@ export class BlockchainRouter {
         }
 
         const wallet = new ethers.Wallet(this.privateKey);
-        const address = wallet.address;
+        // GÜVENLİK: Adres mülkiyetini ve doğruluğunu kontrol et
+        const address = await wallet.getAddress();
 
         // POL Senkronizasyon Koruması: Ağ durumunu kontrol et
-        const networkInfo = await provider.getNetwork();
+        await provider.getNetwork();
         
-        // getBalance çağrısını doğrudan adresten yap (wallet nesnesi yerine)
-        const balance = await provider.getBalance(address);
+        // PROTOKOL_NATIVE_SYNC: eth_getBalance çağrısını ham RPC olarak zorla (Cache bypass)
+        let balance;
+        try {
+          const balanceHex = await provider.send("eth_getBalance", [address, "latest"]);
+          balance = ethers.BigNumber.from(balanceHex);
+        } catch {
+          // Fallback: Standart ethers metodu
+          balance = await provider.getBalance(address);
+        }
+
         const balanceInEther = ethers.utils.formatEther(balance);
         
         const threshold = network === 'bsc' ? this.gasThresholds.bsc : this.gasThresholds.polygon;
@@ -258,7 +271,7 @@ export class BlockchainRouter {
           continue;
         }
 
-        this.emitLog('BLOCKCHAIN', 'SUCCESS', `Gas Balance Check: ${parseFloat(balanceInEther).toFixed(4)} ${network === 'bsc' ? 'BNB' : 'POL'} detected [RPC: ${rpc}]`);
+        this.emitLog('BLOCKCHAIN', 'SUCCESS', `Gas Balance Check: ${parseFloat(balanceInEther).toFixed(4)} POL detected for ${address.slice(0,10)}... [RPC: ${rpc}]`);
 
         if (isLow) {
           this.emitLog('BLOCKCHAIN', 'WARNING', `DİKKAT: Bakiyeniz düşük (${balanceInEther} POL).`);

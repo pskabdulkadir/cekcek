@@ -240,7 +240,7 @@ async function processPublishQueue() {
     // Akıllı Harcama Sınırı: Cüzdan bakiyesi kontrolü (Polygon/POL)
     const balanceCheck = await mainBlockchain.checkGasBalance('polygon');
     if (balanceCheck.isLow) {
-        pushLog('FINANCE', 'WARNING', `[SAFETY_BRAKE] Gas bakiyesi düşük (${balanceCheck.balance} POL). Otomatik yayınlama durduruldu.`);
+        pushLog('FINANCE', 'WARNING', `[SAFETY_BRAKE] Gaz bakiyesi yetersiz (${balanceCheck.balance} POL). Yayınlama askıda, Voucher üretimi arka planda devam ediyor.`);
         return;
     }
 
