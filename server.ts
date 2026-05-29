@@ -210,10 +210,13 @@ async function processSettlementQueue() {
     try {
         const settledAmount = await finalizeDataAssetAccess({ id: task.assetId, value: task.creditValue || 0 });
         serverState.totalAccessFeesCollected += settledAmount;
-        
-        // KRİTİK LOG GÜNCELLEMESİ: İşlem hash'i yoksa "SIMULATED" olarak işaretle
-        const statusPrefix = blockchainConfig.oceanProtocolUrl ? "ON_CHAIN" : "INTERNAL_LEDGER";
-        pushLog('MARKET', 'SUCCESS', `[${statusPrefix}_SETTLEMENT] ID: ${task.assetId} | Tutar: ${settledAmount.toFixed(4)} USDT | Status: MUTABAKAT_ONAYLANDI`);
+
+        // ŞEFFAF LOGLAMA: INTERNAL_LEDGER (Simülasyon) ve ON_CHAIN_SETTLEMENT (Gerçek) ayrımı
+        const isReal = !!blockchainConfig.oceanProtocolUrl && blockchainConfig.oceanProtocolUrl.length > 0;
+        const statusPrefix = isReal ? "ON_CHAIN_SETTLEMENT" : "INTERNAL_LEDGER";
+        const realityTag = isReal ? "GERÇEK İŞLEM" : "BU BİR SİMÜLASYONDUR";
+
+        pushLog('MARKET', 'SUCCESS', `[${statusPrefix}] ID: ${task.assetId} | Tutar: ${settledAmount.toFixed(4)} USDT | Durum: ${realityTag}`);
         
         // Nakit akışını Google Sheets'e işle
         await logDataAssetActivity({
@@ -305,38 +308,26 @@ async function processFailedExports() {
 
         pushLog('FINANCE', 'ANALYZE', `[RECOVERY] Başarısız varlık tekrar deneniyor: ${failedItem.assetId}`);
         
-        const wallet = new ethers.Wallet(process.env.PRIVATE_KEY!);
-        const signature = await wallet.signMessage(JSON.stringify(failedItem.ddo));
+        // ARTIK BYPASS YOK: Doğrudan Ocean'a göndermeyi deneyeceğiz.
+        // failedItem.ddo'dan co2AnalysisGrams ve proofHash çıkarımı
+        const co2AnalysisGrams = failedItem.ddo?.metadata?.additionalInformation?.proofData?.value || 0;
+        const proofHash = failedItem.ddo?.id; // Assuming DDO ID can be used as proofHash or derived
 
-        await apiClient.post(AQUARIUS_URL, failedItem.ddo, {
-            headers: {
-                'Content-Type': 'application/json',
-                'X-Ocean-Signature': signature,
-                'X-Ocean-Address': wallet.address
-            },
-            timeout: 120000
-        });
+        // Gerçek on-chain işlemi dene
+        const result = await mainBlockchain.submitDataInsightProof(co2AnalysisGrams, proofHash);
 
-        await FailedExportModel.deleteOne({ _id: failedItem._id });
-        pushLog('FINANCE', 'SUCCESS', `[RECOVERY_OK] ${failedItem.assetId} kurtarıldı ve mühürlendi.`);
+        if (result.success && !result.simulated) {
+            await FailedExportModel.deleteOne({ _id: failedItem._id });
+            pushLog('FINANCE', 'SUCCESS', `[RECOVERY_OK] ${failedItem.assetId} kurtarıldı ve mühürlendi. Tx: ${result.txHash}`);
+        } else {
+            throw new Error(result.error || "Kurtarma işlemi zincirde başarısız oldu.");
+        }
+
     } catch (err: any) {
-        // KRİTİK DÜZELTME: failedItem referansı ve BYPASS akışı kontrolü
         if (failedItem && failedItem.assetId) { 
-            // Eğer Ocean URL boşsa (BYPASS aktifse), recovery işlemini yerel settlement'a yönlendir
-            if (!blockchainConfig.oceanProtocolUrl) {
-                const credit = failedItem.ddo?.metadata?.additionalInformation?.proofData?.value || 0;
-                pushLog('FINANCE', 'INFO', `[RECOVERY_BYPASS] Ocean kapalı, ${failedItem.assetId} yerel mutabakata aktarıldı. Değer: ${credit} USDT`);
-                
-                settlementQueue.push({ assetId: failedItem.assetId, creditValue: parseFloat(String(credit)) });
-                
-                // Kayıt işlendiği için başarısızlar listesinden güvenle sil
-                await FailedExportModel.deleteOne({ _id: failedItem._id }); // Yerel mutabakata aktarıldıktan sonra FailedExport'tan sil
-                return;
-            }
-            // Ocean URL tanımlıysa ancak ağ hatası varsa, deneme sayısını artırarak havuzda tut
+            pushLog('FINANCE', 'ERROR', `[CRITICAL_BLOCKCHAIN_ERROR] ${failedItem.assetId} kurtarılamadı. Zincir erişimi kısıtlı! Hata: ${err.message}`);
             await FailedExportModel.updateOne({ assetId: failedItem.assetId }, { $inc: { attempts: 1 }, lastAttempt: new Date() });
         } else {
-            // findOne hatası veya veritabanı erişim sorunu
             pushLog('FINANCE', 'ERROR', `[RECOVERY_ERROR] Kurtarma için öğe alınamadı veya beklenmedik hata: ${err.message}`);
         }
     }
@@ -351,14 +342,24 @@ export async function triggerBulkSettlement() {
     await forcePublishAllAssets();
 }
 
+/**
+ * STRIKT ON-CHAIN ENGINE: Simülasyonu öldüren ve gerçek köprüyü kuran motor
+ */
 async function broadcastToGreenFinanceNetwork(proof: any): Promise<boolean> {
-  try {
-    pushLog('FINANCE', 'INFO', `[BYPASS] Render ağ kısıtlaması nedeniyle Ocean yayını atlandı. Varlık MongoDB ve Sheets üzerinde mühürleniyor.`);
-    return true; // İşlemi durdurmamak için true dönüyoruz
-  } catch (error: any) {
-    pushLog('FINANCE', 'ERROR', `[REAL_FAIL] Ocean bağlantısı sağlanamadı. Üretim askıya alındı: ${error.message}`);
-    return false;
-  }
+    pushLog('BLOCKCHAIN', 'INFO', `[REAL_DEAL] On-chain mühürleme başlatılıyor: ${proof.id}`);
+    try {
+        // mainBlockchain üzerinden gerçek bir Transaction tetikle
+        const result = await mainBlockchain.submitDataInsightProof(proof.value, proof.id);
+        
+        if (result.success && !result.simulated) {
+            pushLog('FINANCE', 'SUCCESS', `[ON_CHAIN_SYNC_OK] İşlem ağda onaylandı. Hash: ${result.txHash}`);
+            return true; 
+        }
+        throw new Error(result.error || "İşlem zincir tarafından reddedildi.");
+    } catch (err: any) {
+        pushLog('FINANCE', 'ERROR', `[CRITICAL_BLOCKCHAIN_ERROR] Zincir bağlantısı koptu veya işlem başarısız. Üretim durduruldu!`);
+        throw new Error(`BLOCKCHAIN_UNAVAILABLE: ${err.message}`); // Simülasyonu öldüren satır
+    }
 }
 
 async function finalizeDataAssetAccess(proof: any): Promise<number> {
