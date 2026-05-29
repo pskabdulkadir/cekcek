@@ -28,8 +28,10 @@ axios.defaults.timeout = 5000;
 dns.setDefaultResultOrder("ipv4first");
 
 // --- KRİTİK GÜVENLİK VE PROTOKOL MÜDAHALESİ ---
-// DNS Bypass: Ocean Protocol'ün genel ve kararlı v4 indeksleyicisini doğrudan kullan
-const AQUARIUS_URL = 'https://v4.oceanprotocol.com';
+// DNS Bypass: Ocean Protocol'ün ana ağ geçidini kullan.
+// Eğer ENOTFOUND devam ederse aşağıdaki Proxy adresini aktif edin:
+// const AQUARIUS_URL = 'https://api.allorigins.win/raw?url=https://aquarius.oceanprotocol.com';
+const AQUARIUS_URL = 'https://aquarius.oceanprotocol.com';
 
 // --- GÜVENLİK KATMANI: SÖZLEŞME BEYAZ LİSTESİ ---
 const ALLOWED_CONTRACTS = [
