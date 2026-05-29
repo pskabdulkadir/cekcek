@@ -346,6 +346,12 @@ async function broadcastToGreenFinanceNetwork(proof: any): Promise<boolean> {
       'X-Ocean-Address': wallet.address
     };
 
+    // HTTP/2 ve Keep-Alive Zorlaması için httpsAgent tanımla
+    const httpsAgent = new https.Agent({ 
+      keepAlive: true, 
+      maxSockets: 10, 
+      rejectUnauthorized: false 
+    });
     const maxRetries = 3;
     let attempts = 0;
     let response;
@@ -363,9 +369,9 @@ async function broadcastToGreenFinanceNetwork(proof: any): Promise<boolean> {
           headers: {
             ...commonHeaders,
             'Host': 'aquarius.oceanprotocol.com' // DNS Bypass için Host header zorunludur
-          },
-          httpsAgent: new https.Agent({ rejectUnauthorized: false }), // IP üzerinden HTTPS için sertifika doğrulamasını atla
-          timeout: 20000 // Global ağ gecikmeleri için süre artırıldı
+          }, 
+          httpsAgent: httpsAgent, // Tanımlanan agent'ı kullan
+          timeout: 60000 // Global ağ gecikmeleri için süre artırıldı
         });
         pushLog('FINANCE', 'SUCCESS', `[ASSET_PUBLISH_201_CREATED] Varlık Aquarius pazar dizinine mühürlendi.`);
 
@@ -382,7 +388,7 @@ async function broadcastToGreenFinanceNetwork(proof: any): Promise<boolean> {
         }, {
           headers: {
             ...commonHeaders, // Ortak başlıkları kullan
-          },
+          }, 
           timeout: 20000 // Global ağ gecikmeleri için süre 20 saniyeye çıkarıldı
         });
         success = true;
