@@ -296,8 +296,9 @@ setInterval(processPublishQueue, 30000); // 30 saniyede bir tahliye kontrolü (R
  * RECOVERY WORKER: Başarısız ihracatları (exported_failed) tek tek ve yavaşça tekrar dener.
  */
 async function processFailedExports() {
+    let failedItem; // failedItem değişkenini try bloğunun dışında tanımla
     try {
-        const failedItem = await FailedExportModel.findOne().sort({ lastAttempt: 1 });
+        failedItem = await FailedExportModel.findOne().sort({ lastAttempt: 1 });
         if (!failedItem) return;
 
         pushLog('FINANCE', 'ANALYZE', `[RECOVERY] Başarısız varlık tekrar deneniyor: ${failedItem.assetId}`);
@@ -317,14 +318,20 @@ async function processFailedExports() {
         await FailedExportModel.deleteOne({ _id: failedItem._id });
         pushLog('FINANCE', 'SUCCESS', `[RECOVERY_OK] ${failedItem.assetId} kurtarıldı ve mühürlendi.`);
     } catch (err: any) {
-        // Eğer Ocean URL boşsa (BYPASS aktifse), recovery işlemini yerel settlement'a yönlendir
-        if (!blockchainConfig.oceanProtocolUrl) {
-            pushLog('FINANCE', 'INFO', `[RECOVERY_BYPASS] Ocean kapalı, yerel mühürleme yapılıyor: ${failedItem.assetId}`);
-            settlementQueue.push({ assetId: failedItem.assetId, creditValue: failedItem.ddo?.metadata?.additionalInformation?.proofData?.value || 0 });
-            await FailedExportModel.deleteOne({ _id: failedItem._id });
-            return;
+        if (failedItem) { // failedItem'ın tanımlı olduğundan emin ol
+            // Eğer Ocean URL boşsa (BYPASS aktifse), recovery işlemini yerel settlement'a yönlendir
+            if (!blockchainConfig.oceanProtocolUrl) {
+                pushLog('FINANCE', 'INFO', `[RECOVERY_BYPASS] Ocean kapalı, yerel mühürleme yapılıyor: ${failedItem.assetId}`);
+                settlementQueue.push({ assetId: failedItem.assetId, creditValue: failedItem.ddo?.metadata?.additionalInformation?.proofData?.value || 0 });
+                await FailedExportModel.deleteOne({ _id: failedItem._id }); // Yerel mutabakata aktarıldıktan sonra FailedExport'tan sil
+                return;
+            }
+            // Ocean URL boş değilse ve kurtarma başarısız olursa, deneme sayısını artır
+            await FailedExportModel.updateOne({ assetId: failedItem.assetId }, { $inc: { attempts: 1 }, lastAttempt: new Date() });
+        } else {
+            // failedItem tanımlı değilse, yani hata findOne() sırasında oluştuysa
+            pushLog('FINANCE', 'ERROR', `[RECOVERY_ERROR] Kurtarma için öğe alınamadı veya beklenmedik hata: ${err.message}`);
         }
-        await FailedExportModel.updateOne({ assetId: err.assetId }, { $inc: { attempts: 1 }, lastAttempt: new Date() });
     }
 }
 setInterval(processFailedExports, 45000); // Çok yavaş bir döngü ile Render filtresini by-pass et
