@@ -405,20 +405,28 @@ export class BlockchainRouter {
         // --- DİNAMİK GAZ FİYATI TAHMİNİ ---
         const feeData = await provider.getFeeData();
         const txOverrides: ethers.providers.TransactionRequest = {};
+        
+        // Polygon anti-spam koruması için minimum 30 Gwei öncelik ücreti (Priority Fee) zorunludur.
+        const minPriorityFee = ethers.utils.parseUnits("30", "gwei");
 
         if (feeData.maxFeePerGas && feeData.maxPriorityFeePerGas) {
-            // Ağın önerdiği maxFeePerGas'a biraz ek pay ekleyerek işlemin daha hızlı onaylanmasını sağla
-            txOverrides.maxFeePerGas = feeData.maxFeePerGas.add(ethers.utils.parseUnits("1", "gwei")); 
-            txOverrides.maxPriorityFeePerGas = feeData.maxPriorityFeePerGas;
-            this.emitLog('BLOCKCHAIN', 'INFO', `Dinamik Gas (EIP-1559) kullanılıyor: MaxFee=${ethers.utils.formatUnits(txOverrides.maxFeePerGas, "gwei")} gwei, PriorityFee=${ethers.utils.formatUnits(txOverrides.maxPriorityFeePerGas, "gwei")} gwei`);
+            // AGRESİF POLİTİKA: Ağın önerdiği öncelik ücreti ile 30 Gwei arasından yüksek olanı seç ve %20 marj ekle
+            let targetPriorityFee = feeData.maxPriorityFeePerGas.gt(minPriorityFee) 
+                ? feeData.maxPriorityFeePerGas.mul(120).div(100) 
+                : minPriorityFee;
+
+            txOverrides.maxPriorityFeePerGas = targetPriorityFee;
+            // Toplam ücreti (MaxFee), baz ücretin 1.5 katı + yeni öncelik ücreti olarak belirle
+            txOverrides.maxFeePerGas = feeData.maxFeePerGas.mul(150).div(100).add(targetPriorityFee);
+            
+            this.emitLog('BLOCKCHAIN', 'INFO', `Agresif Gas (EIP-1559) Tetiklendi: MaxFee=${ethers.utils.formatUnits(txOverrides.maxFeePerGas, "gwei")} gwei, PriorityFee=${ethers.utils.formatUnits(txOverrides.maxPriorityFeePerGas, "gwei")} gwei`);
         } else if (feeData.gasPrice) {
-            // EIP-1559 desteklemeyen ağlar için (fallback), gasPrice'a ek pay ekle
-            txOverrides.gasPrice = feeData.gasPrice.add(ethers.utils.parseUnits("1", "gwei")); 
+            // Legacy ağlar için standart fiyatı %50 artır
+            txOverrides.gasPrice = feeData.gasPrice.mul(150).div(100);
             this.emitLog('BLOCKCHAIN', 'INFO', `Dinamik Gas (Legacy) kullanılıyor: GasPrice=${ethers.utils.formatUnits(txOverrides.gasPrice, "gwei")} gwei`);
         } else {
-            // Eğer feeData beklenmedik bir şekilde boşsa, makul bir varsayılan kullan
-            txOverrides.gasPrice = ethers.utils.parseUnits("30", "gwei"); // Polygon için makul bir varsayılan
-            this.emitLog('BLOCKCHAIN', 'WARNING', `Gas fiyatı alınamadı, varsayılan ${ethers.utils.formatUnits(txOverrides.gasPrice, "gwei")} gwei kullanılıyor.`);
+            txOverrides.gasPrice = ethers.utils.parseUnits("50", "gwei");
+            this.emitLog('BLOCKCHAIN', 'WARNING', `Gas verisi alınamadı, güvenli varsayılan 50 gwei kullanılıyor.`);
         }
 
         // Check if contract is zero-address to trigger Direct Proof anchoring on-chain
