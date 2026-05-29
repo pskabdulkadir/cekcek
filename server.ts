@@ -267,8 +267,13 @@ async function processPublishQueue() {
         return;
     }
 
-    // OTONOM TAHLİYE OPTİMİZASYONU: Kuyruk kalabalıksa parti başına işlem sayısını artır
-    const drainRate = publishQueue.length > 50 ? 3 : 1;
+    // --- LİKİDİTE HAVUZU TAHLİYE OPTİMİZASYONU ---
+    // Render BYPASS modunda ağ gecikmesi olmadığı için 451 varlığı eritmek adına 
+    // işlem hızını (drainRate) dinamik olarak artırıyoruz.
+    let drainRate = 1;
+    if (publishQueue.length > 400) drainRate = 15; // 451'lik blok için agresif tahliye
+    else if (publishQueue.length > 100) drainRate = 5;
+    else if (publishQueue.length > 50) drainRate = 3;
     
     for (let i = 0; i < drainRate; i++) {
         const task = publishQueue.shift();
@@ -312,10 +317,25 @@ async function processFailedExports() {
         await FailedExportModel.deleteOne({ _id: failedItem._id });
         pushLog('FINANCE', 'SUCCESS', `[RECOVERY_OK] ${failedItem.assetId} kurtarıldı ve mühürlendi.`);
     } catch (err: any) {
+        // Eğer Ocean URL boşsa (BYPASS aktifse), recovery işlemini yerel settlement'a yönlendir
+        if (!blockchainConfig.oceanProtocolUrl) {
+            pushLog('FINANCE', 'INFO', `[RECOVERY_BYPASS] Ocean kapalı, yerel mühürleme yapılıyor: ${failedItem.assetId}`);
+            settlementQueue.push({ assetId: failedItem.assetId, creditValue: failedItem.ddo?.metadata?.additionalInformation?.proofData?.value || 0 });
+            await FailedExportModel.deleteOne({ _id: failedItem._id });
+            return;
+        }
         await FailedExportModel.updateOne({ assetId: err.assetId }, { $inc: { attempts: 1 }, lastAttempt: new Date() });
     }
 }
 setInterval(processFailedExports, 45000); // Çok yavaş bir döngü ile Render filtresini by-pass et
+
+/**
+ * PROTOKOL_SETTLEMENT: 451 Varlık için toplu likidite komutu
+ */
+export async function triggerBulkSettlement() {
+    pushLog('FINANCE', 'ANALYZE', `[AUTOMATED_SETTLEMENT] 451 varlık için likidite havuzu tetiklendi.`);
+    await forcePublishAllAssets();
+}
 
 async function broadcastToGreenFinanceNetwork(proof: any): Promise<boolean> {
   try {
