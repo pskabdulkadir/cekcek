@@ -14,6 +14,7 @@ if (envResult.error && !process.env.PRIVATE_KEY) {
 // Debug: Ortam değişkenlerini kontrol et
 console.log("DEBUG: PRIVATE_KEY kontrolü:", process.env.PRIVATE_KEY ? "YÜKLÜ" : "BOŞ!");
 console.log("DEBUG: MONGO_URI kontrolü:", process.env.MONGO_URI ? "YÜKLÜ" : "BOŞ (varsayılan kullanılacak)");
+console.log("DEBUG: CONFIG_OVERRIDE kontrolü:", process.env.CONFIG_OVERRIDE ? "TRUE" : "FALSE (varsayılan kullanılacak)");
 
 // GÜVENLİK KRİTİK: Üretim modunda gizli değişkenler zorunludur
 if (process.env.NODE_ENV === 'production') {
