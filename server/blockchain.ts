@@ -121,6 +121,10 @@ export class BlockchainRouter {
   public async validateOnChainStatus() { // Metodu public yaptık
     this.emitLog('BLOCKCHAIN', 'INFO', `Ağ geçitleri taranıyor: ${this.rpcEndpoints.length} düğüm aktif.`);
 
+    if (blockchainConfig.configOverride) {
+      this.emitLog('BLOCKCHAIN', 'INFO', `Stabilizasyon Modu Aktif: Render ağ kısıtlamaları için optimize ediliyor.`);
+    }
+
     for (let i = 0; i < this.rpcEndpoints.length; i++) {
       const currentRpc = this.rpcEndpoints[i];
       try {
@@ -134,10 +138,12 @@ export class BlockchainRouter {
           });
         }
 
-        // Ağ yanıtı için bekleme süresini artır (Dinamik timeout)
+        // CONFIG_OVERRIDE durumunda daha uzun sabır süresi
+        const waitTime = blockchainConfig.configOverride ? 25000 : 15000;
+
         await Promise.race([
           provider.getNetwork(),
-          new Promise((_, reject) => setTimeout(() => reject(new Error("Ağ Zaman Aşımı")), 15000))
+          new Promise((_, reject) => setTimeout(() => reject(new Error("Ağ Zaman Aşımı")), waitTime))
         ]);
 
         this.rpcUrl = currentRpc; // Çalışan RPC'yi ana kanal yap

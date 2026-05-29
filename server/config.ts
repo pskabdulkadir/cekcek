@@ -27,6 +27,7 @@ const mongoUri = process.env.MONGO_URI || 'mongodb://localhost:27017/dev_db';
 export const blockchainConfig = {
     geminiApiKey: process.env.GEMINI_API_KEY || '',
     appUrl: process.env.APP_URL || '',
+    configOverride: process.env.CONFIG_OVERRIDE === 'true',
     contractAddress: process.env.CONTRACT_ADDRESS || process.env.SMART_GATE_CONTRACT_ADDRESS || '0x0000000000000000000000000000000000000000', // Data NFT Factory veya Veri Erişim Kontratı
     payoutWallet: process.env.PAYOUT_WALLET || process.env.CHANNEL_ROUTING_WALLET || '', // Gelirlerin gideceği ana adres
     commissionWallet: process.env.COMMISSION_WALLET || '0x71C7656EC7ab88b098defB751B7401B5f6d8976F', // Aracı firma cüzdanı
