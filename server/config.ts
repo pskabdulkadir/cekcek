@@ -35,7 +35,7 @@ export const blockchainConfig = {
     commissionRate: parseFloat(process.env.COMMISSION_RATE || '0.10'), // %10 Komisyon oranı
     rpcUrl: process.env.RPC_URL || 'https://polygon-mainnet.g.alchemy.com/v2/UVwOeS22SVrUka4yMOobQ', // Varsayılan olarak Polygon Mainnet RPC
     rpcTimeout: parseInt(process.env.RPC_TIMEOUT || '60000'), // Ağ zaman aşımı süresi (Varsayılan 60sn)
-    publishBatchSize: parseInt(process.env.PUBLISH_BATCH_SIZE || '25'), // Toplu yayınlama parti büyüklüğü
+    publishBatchSize: parseInt(process.env.PUBLISH_BATCH_SIZE || '1'), // Trafik kısıtlamaları için tekli mühürleme (seri işleme)
     privateKey: process.env.PRIVATE_KEY || '',
     zeroGasActive: false,
     networkMode: process.env.NETWORK_MODE || 'mainnet',

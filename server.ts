@@ -9,6 +9,7 @@
 
 import mongoose from "mongoose";
 import express from "express";
+import http from "http";
 import path from "path";
 import helmet from "helmet";
 import cors from "cors";
@@ -22,11 +23,24 @@ import https from "https";
 // Load environment variables
 dotenv.config();
 
-// Network Safety: API yanıt vermezse sistemi kilitlememesi için global timeout
-axios.defaults.timeout = 5000;
-
 // DNS Workaround: IPv6 önceliği nedeniyle oluşan ENOTFOUND hatalarını engelle
 dns.setDefaultResultOrder("ipv4first");
+
+// --- PERSISTENT CONNECTION CONFIGURATION ---
+// Render'ın 10 saniyelik "Idle Timeout" bariyerini aşmak için Keep-Alive tüneli oluşturuluyor
+const persistentAgent = new https.Agent({
+    keepAlive: true,
+    keepAliveMsecs: 60000,
+    maxSockets: 10,
+    maxFreeSockets: 10,
+    rejectUnauthorized: false // IP tabanlı erişimde SSL sertifika hatasını önler
+});
+
+const apiClient = axios.create({
+    httpsAgent: persistentAgent,
+    timeout: 60000, // Tüm istekler için 60 saniye sınırı
+    headers: { 'Connection': 'keep-alive' }
+});
 
 // --- KRİTİK GÜVENLİK VE PROTOKOL MÜDAHALESİ ---
 // DNS Bypass: Ocean Protocol'ün ana ağ geçidini kullan.
@@ -346,12 +360,6 @@ async function broadcastToGreenFinanceNetwork(proof: any): Promise<boolean> {
       'X-Ocean-Address': wallet.address
     };
 
-    // HTTP/2 ve Keep-Alive Zorlaması için httpsAgent tanımla
-    const httpsAgent = new https.Agent({ 
-      keepAlive: true, 
-      maxSockets: 10, 
-      rejectUnauthorized: false 
-    });
     const maxRetries = 3;
     let attempts = 0;
     let response;
@@ -365,20 +373,19 @@ async function broadcastToGreenFinanceNetwork(proof: any): Promise<boolean> {
         // 1. ADIM: Metadata'ya kaydet (Aquarius Servisi)
         const metadataUrl = `${currentAquarius}/api/aquarius/assets/ddo`;
         pushLog('FINANCE', 'INFO', `[METADATA_PUBLISH] Varlık dizine ekleniyor: ${currentAquarius}`);
-        await axios.post(metadataUrl, ddoPayload, {
+        await apiClient.post(metadataUrl, ddoPayload, {
           headers: {
             ...commonHeaders,
             'Host': 'aquarius.oceanprotocol.com' // DNS Bypass için Host header zorunludur
-          }, 
-          httpsAgent: httpsAgent, // Tanımlanan agent'ı kullan
-          timeout: 60000 // Global ağ gecikmeleri için süre artırıldı
+          },
+          timeout: 60000 // 60 saniyelik limit zorlanıyor
         });
         pushLog('FINANCE', 'SUCCESS', `[ASSET_PUBLISH_201_CREATED] Varlık Aquarius pazar dizinine mühürlendi.`);
 
         // 2. ADIM: Provider'a bildir (Servisi başlat)
         const providerUrl = `${currentProvider}/api/services/initialize`;
         pushLog('FINANCE', 'INFO', `[PROVIDER_INITIALIZING] Erişim katmanı oluşturuluyor: ${currentProvider}`);
-        response = await axios.post(providerUrl, {
+        response = await apiClient.post(providerUrl, {
           document: ddoPayload, // Tam DDO objesi
           serviceId: ddoPayload.services[0].id, // DDO içindeki ilk servisin ID'si
           datatokenAddress: ddoPayload.services[0].datatokenAddress,
@@ -387,9 +394,9 @@ async function broadcastToGreenFinanceNetwork(proof: any): Promise<boolean> {
           chainId: 137 // Polygon Mainnet doğrulaması
         }, {
           headers: {
-            ...commonHeaders, // Ortak başlıkları kullan
-          }, 
-          timeout: 20000 // Global ağ gecikmeleri için süre 20 saniyeye çıkarıldı
+            ...commonHeaders,
+          },
+          timeout: 60000 // 60 saniyelik limit zorlanıyor
         });
         success = true;
       } catch (error: any) {
@@ -706,7 +713,7 @@ async function broadcastToAllMarkets(item: any) {
             }
 
             // Render/Node ortamında axios kullanımı daha stabildir
-            await axios.post(channel.url, payload, { timeout: 10000 });
+            await apiClient.post(channel.url, payload, { timeout: 60000 });
 
             if (channel.name === "GoogleSheets") {
                 const msg = item.type === "CASH_FLOW" ? "Nakit akışı raporu işlendi." : "Veri aktarım sinyali gönderildi.";
