@@ -551,7 +551,8 @@ export async function sellAllReadyAssets(maxItems?: number) {
             const result = await mainBlockchain.bulkRegisterDataAssets(assetsToRegister);
 
             if (result.success) {
-                // Veritabanını bu paket için güncelle
+                pushLog('FINANCE', 'SUCCESS', `[CHUNK_OK] ${result.count} varlık mühürlendi. Tx: ${result.txHash.slice(0, 16)}`);
+                
                 await ReadyToSellModel.updateMany(
                     { id: { $in: chunkIds } },
                     { $set: { isListedOnChain: true, listingTxHash: result.txHash } }

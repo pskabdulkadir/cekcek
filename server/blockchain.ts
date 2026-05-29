@@ -525,8 +525,15 @@ export class BlockchainRouter {
     this.emitLog('BLOCKCHAIN', 'INFO', `${assets.length} varlık için toplu mühürleme başlatılıyor...`);
     
     try {
-      const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl);
+      const provider = new ethers.providers.JsonRpcProvider({
+        url: this.rpcUrl,
+        timeout: blockchainConfig.rpcTimeout
+      });
       const wallet = new ethers.Wallet(this.privateKey, provider);
+
+      if (this.contractAddress === ethers.constants.AddressZero) {
+        throw new Error("Toplu kayıt için geçerli bir akıllı kontrat adresi gereklidir.");
+      }
       
       // Sözleşme kontrolü
       const contract = new ethers.Contract(this.contractAddress, [
@@ -536,15 +543,32 @@ export class BlockchainRouter {
       const amounts = assets.map(a => ethers.utils.parseUnits(a.co2Value.toFixed(18), 18));
       const proofs = assets.map(a => a.proofHash);
 
-      // Gas Tahmini
+      // --- DİNAMİK GAZ STRATEJİSİ (POLYGON UYUMLU) ---
       const feeData = await provider.getFeeData();
-      const txOverrides = {
-        maxPriorityFeePerGas: feeData.maxPriorityFeePerGas || ethers.utils.parseUnits("35", "gwei"),
-        maxFeePerGas: feeData.maxFeePerGas || ethers.utils.parseUnits("50", "gwei"),
-        gasLimit: Math.max(500000, assets.length * 50000) // Dinamik limit
-      };
+      const txOverrides: any = {};
+      
+      const minPriorityFee = ethers.utils.parseUnits("30", "gwei");
 
-      this.emitLog('BLOCKCHAIN', 'ANALYZE', `[BULK_TX] İşlem ağa gönderiliyor...`);
+      if (feeData.maxFeePerGas && feeData.maxPriorityFeePerGas) {
+          let targetPriorityFee = feeData.maxPriorityFeePerGas.gt(minPriorityFee) 
+              ? feeData.maxPriorityFeePerGas.mul(125).div(100) 
+              : minPriorityFee;
+
+          txOverrides.maxPriorityFeePerGas = targetPriorityFee;
+          txOverrides.maxFeePerGas = feeData.maxFeePerGas.mul(160).div(100).add(targetPriorityFee);
+      } else {
+          txOverrides.gasPrice = feeData.gasPrice?.mul(150).div(100) || ethers.utils.parseUnits("150", "gwei");
+      }
+
+      // Hassas Gas Limit Tahmini
+      try {
+          const estimatedGas = await contract.estimateGas.bulkRegister(amounts, proofs);
+          txOverrides.gasLimit = estimatedGas.mul(120).div(100); // %20 Güvenlik marjı
+      } catch (estError) {
+          txOverrides.gasLimit = Math.max(800000, assets.length * 70000);
+      }
+
+      this.emitLog('BLOCKCHAIN', 'ANALYZE', `[BULK_TX] ${assets.length} varlık için agresif gas ile ağa çıkılıyor...`);
       const tx = await contract.bulkRegister(amounts, proofs, txOverrides);
       const receipt = await tx.wait();
 
