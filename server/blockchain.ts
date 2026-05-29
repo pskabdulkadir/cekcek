@@ -402,6 +402,25 @@ export class BlockchainRouter {
         }
         this.emitLog('BLOCKCHAIN', 'INFO', `Sıcak cüzdan doğrulandı: ${wallet.address} | Bakiye: ${ethers.utils.formatEther(balance)} MATIC/POL`);
 
+        // --- DİNAMİK GAZ FİYATI TAHMİNİ ---
+        const feeData = await provider.getFeeData();
+        const txOverrides: ethers.providers.TransactionRequest = {};
+
+        if (feeData.maxFeePerGas && feeData.maxPriorityFeePerGas) {
+            // Ağın önerdiği maxFeePerGas'a biraz ek pay ekleyerek işlemin daha hızlı onaylanmasını sağla
+            txOverrides.maxFeePerGas = feeData.maxFeePerGas.add(ethers.utils.parseUnits("1", "gwei")); 
+            txOverrides.maxPriorityFeePerGas = feeData.maxPriorityFeePerGas;
+            this.emitLog('BLOCKCHAIN', 'INFO', `Dinamik Gas (EIP-1559) kullanılıyor: MaxFee=${ethers.utils.formatUnits(txOverrides.maxFeePerGas, "gwei")} gwei, PriorityFee=${ethers.utils.formatUnits(txOverrides.maxPriorityFeePerGas, "gwei")} gwei`);
+        } else if (feeData.gasPrice) {
+            // EIP-1559 desteklemeyen ağlar için (fallback), gasPrice'a ek pay ekle
+            txOverrides.gasPrice = feeData.gasPrice.add(ethers.utils.parseUnits("1", "gwei")); 
+            this.emitLog('BLOCKCHAIN', 'INFO', `Dinamik Gas (Legacy) kullanılıyor: GasPrice=${ethers.utils.formatUnits(txOverrides.gasPrice, "gwei")} gwei`);
+        } else {
+            // Eğer feeData beklenmedik bir şekilde boşsa, makul bir varsayılan kullan
+            txOverrides.gasPrice = ethers.utils.parseUnits("30", "gwei"); // Polygon için makul bir varsayılan
+            this.emitLog('BLOCKCHAIN', 'WARNING', `Gas fiyatı alınamadı, varsayılan ${ethers.utils.formatUnits(txOverrides.gasPrice, "gwei")} gwei kullanılıyor.`);
+        }
+
         // Check if contract is zero-address to trigger Direct Proof anchoring on-chain
         const isZeroContract = this.contractAddress === ethers.constants.AddressZero;
 
@@ -415,7 +434,8 @@ export class BlockchainRouter {
             to: wallet.address, // Self-transaction safely stores immutable record
             value: ethers.utils.parseEther("0"),
             data: memoBytes,
-            gasLimit: 30000
+            gasLimit: 30000, // Memo transaction'lar için gasLimit düşük tutulabilir
+            ...txOverrides // Dinamik gas fiyatlarını uygula
           });
 
           this.emitLog('BLOCKCHAIN', 'INFO', `Veri analitiği kanıt işlemi ağa başarıyla iletildi. Blok onayı bekleniyor... İşlem Kodu: ${tx.hash}`);
@@ -440,7 +460,8 @@ export class BlockchainRouter {
           try {
             this.emitLog('BLOCKCHAIN', 'INFO', `Deneme 1: registerDataAsset fonksiyonu çağrılıyor...`);
             tx = await contract.registerDataAsset(amountWei, proofHash, {
-              gasLimit: 150000
+              gasLimit: 150000, // Kontrat çağrısı için daha yüksek gasLimit
+              ...txOverrides // Dinamik gas fiyatlarını uygula
             });
           } catch (firstErr: any) {
             this.emitLog('BLOCKCHAIN', 'WARNING', `mintAndSwap başarısız oldu: ${firstErr.message}. Deneme 2: submitProof çağrılıyor...`);
@@ -457,7 +478,8 @@ export class BlockchainRouter {
             
             // submitProof (bytes32 proofHash, uint256 amount)
             tx = await contract.submitProof(bytes32Proof, amountWei, { // submitProof hala geçerli
-              gasLimit: 150000
+              gasLimit: 150000, // Kontrat çağrısı için daha yüksek gasLimit
+              ...txOverrides // Dinamik gas fiyatlarını uygula
             });
           }
 
