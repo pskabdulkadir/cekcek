@@ -557,6 +557,18 @@ export async function sellAllReadyAssets(maxItems?: number) {
                     { $set: { isListedOnChain: true, listingTxHash: result.txHash } }
                 );
                 
+                // Toplu işlemi ana işlem defterine (TransactionModel) işle
+                if (mongoose.connection.readyState === 1) {
+                    const chunkCo2Sum = chunk.reduce((sum, item) => sum + (item.co2AnalysisGrams || 0), 0);
+                    await TransactionModel.create({
+                        url: `TOPLU_LISTELEME_PAKETI_${Math.floor(i / CHUNK_SIZE) + 1}`,
+                        proofHash: result.txHash.slice(0, 16) + "...",
+                        co2AnalysisGrams: chunkCo2Sum,
+                        txHash: result.txHash,
+                        timestamp: new Date()
+                    });
+                }
+
                 pushLog('FINANCE', 'SUCCESS', `[CHUNK_OK] ${result.count} varlık mühürlendi. Tx: ${result.txHash.slice(0, 10)}...`);
                 
                 // RPC ve Nonce çakışmasını önlemek için paketler arası 5 saniye bekle
