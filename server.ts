@@ -28,8 +28,8 @@ axios.defaults.timeout = 5000;
 dns.setDefaultResultOrder("ipv4first");
 
 // --- KRİTİK GÜVENLİK VE PROTOKOL MÜDAHALESİ ---
-// Sistem genelinde Aquarius uç noktasını Polygon ana ağına zorla (Hard-Override)
-process.env.METADATA_CACHE_URI = 'https://aquarius.polygon.oceanprotocol.com';
+// DNS Bypass: Daha kararlı olan genel Ocean v4 indeksleyicisini kullan
+const AQUARIUS_URL = process.env.METADATA_CACHE_URI || 'https://v4.oceanprotocol.com';
 
 // --- GÜVENLİK KATMANI: SÖZLEŞME BEYAZ LİSTESİ ---
 const ALLOWED_CONTRACTS = [
@@ -77,27 +77,27 @@ const getOceanEndpoints = (chainId: number) => {
   switch (chainId) {
     case 56: // BSC Mainnet
       return {
-        aquarius: [process.env.METADATA_CACHE_URI || "https://aquarius.polygon.oceanprotocol.com"],
+        aquarius: [AQUARIUS_URL],
         provider: [process.env.OCEAN_PROVIDER_URL || "https://v4.provider.bsc.oceanprotocol.com", "https://provider.bsc.oceanprotocol.com"]
       };
     case 97: // BSC Testnet
       return {
-        aquarius: [process.env.METADATA_CACHE_URI || "https://aquarius.polygon.oceanprotocol.com"],
+        aquarius: [AQUARIUS_URL],
         provider: [process.env.OCEAN_PROVIDER_URL || "https://v4.provider.chapel.oceanprotocol.com", "https://provider.chapel.oceanprotocol.com"]
       };
     case 137: // Polygon Mainnet
       return {
-        aquarius: [process.env.METADATA_CACHE_URI || "https://aquarius.polygon.oceanprotocol.com"],
+        aquarius: [AQUARIUS_URL],
         provider: [process.env.OCEAN_PROVIDER_URL || "https://v4.provider.polygon.oceanprotocol.com", "https://provider.mainnet.oceanprotocol.com"]
       };
     case 80001: // Polygon Mumbai Testnet
       return {
-        aquarius: [process.env.METADATA_CACHE_URI || "https://aquarius.polygon.oceanprotocol.com"],
+        aquarius: [AQUARIUS_URL],
         provider: [process.env.OCEAN_PROVIDER_URL || "https://v4.provider.mumbai.oceanprotocol.com", "https://provider.mumbai.oceanprotocol.com"]
       };
     default: // Fallback to Polygon Mainnet if unknown
       return {
-        aquarius: [process.env.METADATA_CACHE_URI || "https://aquarius.polygon.oceanprotocol.com"],
+        aquarius: [AQUARIUS_URL],
         provider: [process.env.OCEAN_PROVIDER_URL || "https://v4.provider.polygon.oceanprotocol.com", "https://provider.mainnet.oceanprotocol.com"]
       };
   }
