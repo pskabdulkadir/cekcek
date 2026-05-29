@@ -42,12 +42,9 @@ const apiClient = axios.create({
     headers: { 'Connection': 'keep-alive' }
 });
 
-// --- KRİTİK GÜVENLİK VE PROTOKOL MÜDAHALESİ ---
-// DNS Bypass: Ocean Protocol'ün ana ağ geçidini kullan.
-// Eğer ENOTFOUND devam ederse aşağıdaki Proxy adresini aktif edin:
-// Gölge İhracat: Render'ın filtrelerini aşmak için trafiği bir "tünel" (Proxy) üzerinden gönderiyoruz.
-const TARGET_AQUARIUS = 'https://aquarius.oceanprotocol.com';
-const AQUARIUS_URL = `https://api.allorigins.win/raw?url=${encodeURIComponent(TARGET_AQUARIUS)}`;
+// --- DECENTRALIZED GATEWAY CONFIGURATION ---
+// Render'ın DNS engellerini aşmak için Aquarius yerine alternatif Subgraph uç noktasını kullanıyoruz.
+const AQUARIUS_URL = blockchainConfig.oceanProtocolUrl;
 
 // --- GÜVENLİK KATMANI: SÖZLEŞME BEYAZ LİSTESİ ---
 const ALLOWED_CONTRACTS = [
@@ -288,7 +285,37 @@ async function processPublishQueue() {
         }
     }
 }
-setInterval(processPublishQueue, 15000); // 15 saniyede bir tahliye kontrolü yap
+setInterval(processPublishQueue, 30000); // 30 saniyede bir tahliye kontrolü (Render Egress Throttling)
+
+/**
+ * RECOVERY WORKER: Başarısız ihracatları (exported_failed) tek tek ve yavaşça tekrar dener.
+ */
+async function processFailedExports() {
+    try {
+        const failedItem = await FailedExportModel.findOne().sort({ lastAttempt: 1 });
+        if (!failedItem) return;
+
+        pushLog('FINANCE', 'ANALYZE', `[RECOVERY] Başarısız varlık tekrar deneniyor: ${failedItem.assetId}`);
+        
+        const wallet = new ethers.Wallet(process.env.PRIVATE_KEY!);
+        const signature = await wallet.signMessage(JSON.stringify(failedItem.ddo));
+
+        await apiClient.post(AQUARIUS_URL, failedItem.ddo, {
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Ocean-Signature': signature,
+                'X-Ocean-Address': wallet.address
+            },
+            timeout: 120000
+        });
+
+        await FailedExportModel.deleteOne({ _id: failedItem._id });
+        pushLog('FINANCE', 'SUCCESS', `[RECOVERY_OK] ${failedItem.assetId} kurtarıldı ve mühürlendi.`);
+    } catch (err: any) {
+        await FailedExportModel.updateOne({ assetId: err.assetId }, { $inc: { attempts: 1 }, lastAttempt: new Date() });
+    }
+}
+setInterval(processFailedExports, 45000); // Çok yavaş bir döngü ile Render filtresini by-pass et
 
 async function broadcastToGreenFinanceNetwork(proof: any): Promise<boolean> {
   try {
@@ -369,25 +396,26 @@ async function broadcastToGreenFinanceNetwork(proof: any): Promise<boolean> {
     let success = false;
 
     while (attempts < maxRetries && !success) {
-      const currentAquarius = oceanEndpoints.aquarius[attempts % oceanEndpoints.aquarius.length];
       const currentProvider = oceanEndpoints.provider[attempts % oceanEndpoints.provider.length];
       attempts++;
       try {
         // 1. ADIM: Metadata'ya kaydet (Aquarius Servisi)
-        const metadataUrl = `${AQUARIUS_URL}/api/aquarius/assets/ddo`;
-        pushLog('FINANCE', 'INFO', `[SHADOW_EXPORT] Tünel üzerinden mühürleniyor: ${TARGET_AQUARIUS}`);
+        const metadataUrl = `${AQUARIUS_URL}`; // Subgraph tabanlı erişim
+        pushLog('FINANCE', 'INFO', `[DECENTRALIZED_EXPORT] Gateway üzerinden mühürleniyor: ${AQUARIUS_URL}`);
         
-        // Fire-and-Forget (Ateşle ve Unut) yaklaşımı: 
-        // Yanıtın gelmesini beklerken ana döngüyü bloklamıyoruz.
         apiClient.post(metadataUrl, ddoPayload, {
           headers: commonHeaders,
-          timeout: 30000 
+          timeout: 120000 // Render için genişletilmiş süre
         }).then(() => {
           pushLog('FINANCE', 'SUCCESS', `[EXPORT_SUCCESS] ${proof.id} başarıyla mühürlendi.`);
-        }).catch((err) => {
-          pushLog('FINANCE', 'WARNING', `[EXPORT_QUEUED] Bağlantı yavaş, arka planda tekrar denenecek.`);
-          // Başarısız olanları MongoDB'ye işaretle (Opsiyonel: manual_retry için)
-          ReadyToSellModel.updateOne({ id: proof.id }, { $set: { export_error: err.message } }).catch(() => {});
+        }).catch(async (err) => {
+          pushLog('FINANCE', 'WARNING', `[EXPORT_FAILED] Bağlantı engellendi, yerel kurtarma kuyruğuna alındı.`);
+          // KRİTİK: Başarısız ihracatı MongoDB'ye mühürle
+          await FailedExportModel.findOneAndUpdate(
+            { assetId: proof.id },
+            { ddo: ddoPayload, error: err.message, $inc: { attempts: 1 }, lastAttempt: new Date() },
+            { upsert: true }
+          );
         });
 
         // Aquarius işlemi asenkron olduğu için doğrudan Provider adımına geçebiliriz
@@ -488,6 +516,15 @@ async function logDataAssetActivity(data: any) {
 // --- DARPHANE MOTORU BİTİŞİ ---
 
 // --- MONGODB MODELLERİ (GERÇEK VERİ İÇİN) ---
+const FailedExportSchema = new mongoose.Schema({
+    assetId: { type: String, required: true },
+    ddo: { type: Object, required: true },
+    error: String,
+    attempts: { type: Number, default: 0 },
+    lastAttempt: { type: Date, default: Date.now }
+});
+const FailedExportModel = mongoose.model("FailedExport", FailedExportSchema);
+
 const TransactionSchema = new mongoose.Schema({
   url: String,
   proofHash: String,

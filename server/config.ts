@@ -45,7 +45,7 @@ export const blockchainConfig = {
     autoReinvest: process.env.AUTO_REINVEST === 'true',
     minReinvestThreshold: parseFloat(process.env.MIN_REINVEST_THRESHOLD || '5'),
     marketplaceApiUrl: process.env.MARKETPLACE_API_URL || '', // Geçersiz domain temizlendi
-    oceanProtocolUrl: 'https://aquarius.oceanprotocol.com', // Standart URL (server.ts'de proxy ile ezilir)
+    oceanProtocolUrl: process.env.OCEAN_ENDPOINT || 'https://subgraph.mainnet.oceanprotocol.com/subgraphs/name/oceanprotocol/ocean-subgraph', // DNS Bypass: Subgraph veya IPFS Gateway
     middlewareWebhookUrl: process.env.MIDDLEWARE_URL || 'https://hook.make.com/your-webhook-id',
     openSeaApiUrl: process.env.OPENSEA_API_URL || 'https://api.opensea.io/v1/asset/create',
     googleSheetsUrl: process.env.GOOGLE_SHEETS_URL || 'https://script.google.com/macros/s/AKfycbxmke0-Fu1FuY0_W6dliNvjm7eH9tOlW2tfOzxJgkEZr2uLY7FIPZ4iDKmn1ZSoV8vo/exec',
