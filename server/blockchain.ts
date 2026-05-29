@@ -138,12 +138,12 @@ export class BlockchainRouter {
           });
         }
 
-        // CONFIG_OVERRIDE durumunda daha uzun sabır süresi
-        const waitTime = blockchainConfig.configOverride ? 25000 : 15000;
+        // Render ağ kısıtlamalarını aşmak için dinamik bekleme süresi
+        const waitTime = process.env.CONFIG_OVERRIDE === 'true' ? 30000 : 15000;
 
         await Promise.race([
           provider.getNetwork(),
-          new Promise((_, reject) => setTimeout(() => reject(new Error("Ağ Zaman Aşımı")), waitTime))
+          new Promise((_, reject) => setTimeout(() => reject(new Error("Ağ Yanıt Vermedi (Timeout)")), waitTime))
         ]);
 
         this.rpcUrl = currentRpc; // Çalışan RPC'yi ana kanal yap
