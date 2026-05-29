@@ -249,7 +249,10 @@ async function processPublishQueue() {
         const balanceCheck = await mainBlockchain.checkGasBalance('polygon');
         const currentBalance = parseFloat(balanceCheck.balance);
         
-        if (currentBalance > 0 && currentBalance >= blockchainConfig.minReinvestThreshold) {
+        // POL geçişi sonrası hassas bakiye kontrolü (4.99 POL, 5.0 eşiğine takılmasın)
+        const effectiveThreshold = blockchainConfig.minReinvestThreshold * 0.95; 
+
+        if (currentBalance > 0 && currentBalance >= effectiveThreshold) {
             pushLog('FINANCE', 'SUCCESS', `[SELF_FINANCE] Bakiye eşiği aşıldı (${currentBalance} POL). Otomatik yayınlama tetiklendi.`);
             isAuthorized = true;
         } else {
@@ -1193,7 +1196,7 @@ app.post("/api/optimize-url", async (req, res) => {
         co2AnalysisGrams: savings.co2SavingsGrams, // Use co2AnalysisGrams
       extractedKeywords: ["asset", "real-data", "mined"],
       reportSummary: `Doğrulanmış Karbon Varlığı: ${url} üzerinden ${savings.co2SavingsGrams.toFixed(4)}g CO2 tasarrufu mühürlendi.`,
-      marketPriceUSD: valuation,
+      accessPriceUSD: valuation,
       isSold: false,
       timestamp: new Date().toISOString()
     };
