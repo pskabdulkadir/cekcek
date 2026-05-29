@@ -318,18 +318,23 @@ async function processFailedExports() {
         await FailedExportModel.deleteOne({ _id: failedItem._id });
         pushLog('FINANCE', 'SUCCESS', `[RECOVERY_OK] ${failedItem.assetId} kurtarıldı ve mühürlendi.`);
     } catch (err: any) {
-        if (failedItem) { // failedItem'ın tanımlı olduğundan emin ol
+        // KRİTİK DÜZELTME: failedItem referansı ve BYPASS akışı kontrolü
+        if (failedItem && failedItem.assetId) { 
             // Eğer Ocean URL boşsa (BYPASS aktifse), recovery işlemini yerel settlement'a yönlendir
             if (!blockchainConfig.oceanProtocolUrl) {
-                pushLog('FINANCE', 'INFO', `[RECOVERY_BYPASS] Ocean kapalı, yerel mühürleme yapılıyor: ${failedItem.assetId}`);
-                settlementQueue.push({ assetId: failedItem.assetId, creditValue: failedItem.ddo?.metadata?.additionalInformation?.proofData?.value || 0 });
+                const credit = failedItem.ddo?.metadata?.additionalInformation?.proofData?.value || 0;
+                pushLog('FINANCE', 'INFO', `[RECOVERY_BYPASS] Ocean kapalı, ${failedItem.assetId} yerel mutabakata aktarıldı. Değer: ${credit} USDT`);
+                
+                settlementQueue.push({ assetId: failedItem.assetId, creditValue: parseFloat(String(credit)) });
+                
+                // Kayıt işlendiği için başarısızlar listesinden güvenle sil
                 await FailedExportModel.deleteOne({ _id: failedItem._id }); // Yerel mutabakata aktarıldıktan sonra FailedExport'tan sil
                 return;
             }
-            // Ocean URL boş değilse ve kurtarma başarısız olursa, deneme sayısını artır
+            // Ocean URL tanımlıysa ancak ağ hatası varsa, deneme sayısını artırarak havuzda tut
             await FailedExportModel.updateOne({ assetId: failedItem.assetId }, { $inc: { attempts: 1 }, lastAttempt: new Date() });
         } else {
-            // failedItem tanımlı değilse, yani hata findOne() sırasında oluştuysa
+            // findOne hatası veya veritabanı erişim sorunu
             pushLog('FINANCE', 'ERROR', `[RECOVERY_ERROR] Kurtarma için öğe alınamadı veya beklenmedik hata: ${err.message}`);
         }
     }
