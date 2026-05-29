@@ -955,6 +955,13 @@ app.post("/api/admin/command", (req, res) => {
     return res.json({ success: true, message: "Autonomous mode activated." });
   }
   
+  if (command.startsWith("RUN_BULK_SELL")) {
+    const limit = parseInt(command.split(" ")[1]) || 500;
+    pushLog('SYSTEM', 'INFO', `Admin komutu: Toplu satış başlatılıyor. Hedef: ${limit} varlık.`);
+    sellAllReadyAssets(limit); 
+    return res.json({ success: true, message: "Bulk sell task started in background." });
+  }
+
   if (command.startsWith("SET_THRESHOLD")) {
     const val = parseInt(command.split(" ")[1]);
     if (!isNaN(val)) {
