@@ -15,7 +15,7 @@ if (envResult.error && !process.env.PRIVATE_KEY) {
 console.log("DEBUG: PRIVATE_KEY kontrolü:", process.env.PRIVATE_KEY ? "YÜKLÜ" : "BOŞ!");
 console.log("DEBUG: MONGO_URI kontrolü:", process.env.MONGO_URI ? "YÜKLÜ" : "BOŞ (varsayılan kullanılacak)");
 console.log("DEBUG: CONFIG_OVERRIDE kontrolü:", process.env.CONFIG_OVERRIDE ? "TRUE" : "FALSE (varsayılan kullanılacak)");
-console.log("DEBUG: AQUARIUS_URL:", process.env.METADATA_CACHE_URI || "https://v4.oceanprotocol.com");
+console.log("DEBUG: AQUARIUS_URL:", 'https://v4.oceanprotocol.com'); // Doğrudan tanımlı v4 adresi
 
 // GÜVENLİK KRİTİK: Üretim modunda gizli değişkenler zorunludur
 if (process.env.NODE_ENV === 'production') {
@@ -45,7 +45,7 @@ export const blockchainConfig = {
     autoReinvest: process.env.AUTO_REINVEST === 'true',
     minReinvestThreshold: parseFloat(process.env.MIN_REINVEST_THRESHOLD || '5'),
     marketplaceApiUrl: process.env.MARKETPLACE_API_URL || '', // Geçersiz domain temizlendi
-    oceanProtocolUrl: process.env.METADATA_CACHE_URI || 'https://v4.oceanprotocol.com',
+    oceanProtocolUrl: 'https://v4.oceanprotocol.com', // Doğrudan tanımlı v4 adresi
     middlewareWebhookUrl: process.env.MIDDLEWARE_URL || 'https://hook.make.com/your-webhook-id',
     openSeaApiUrl: process.env.OPENSEA_API_URL || 'https://api.opensea.io/v1/asset/create',
     googleSheetsUrl: process.env.GOOGLE_SHEETS_URL || 'https://script.google.com/macros/s/AKfycbxmke0-Fu1FuY0_W6dliNvjm7eH9tOlW2tfOzxJgkEZr2uLY7FIPZ4iDKmn1ZSoV8vo/exec',

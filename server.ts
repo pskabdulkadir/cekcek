@@ -28,8 +28,8 @@ axios.defaults.timeout = 5000;
 dns.setDefaultResultOrder("ipv4first");
 
 // --- KRİTİK GÜVENLİK VE PROTOKOL MÜDAHALESİ ---
-// DNS Bypass: Daha kararlı olan genel Ocean v4 indeksleyicisini kullan
-const AQUARIUS_URL = process.env.METADATA_CACHE_URI || 'https://v4.oceanprotocol.com';
+// DNS Bypass: Ocean Protocol'ün genel ve kararlı v4 indeksleyicisini doğrudan kullan
+const AQUARIUS_URL = 'https://v4.oceanprotocol.com';
 
 // --- GÜVENLİK KATMANI: SÖZLEŞME BEYAZ LİSTESİ ---
 const ALLOWED_CONTRACTS = [
