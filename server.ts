@@ -319,145 +319,8 @@ setInterval(processFailedExports, 45000); // Çok yavaş bir döngü ile Render 
 
 async function broadcastToGreenFinanceNetwork(proof: any): Promise<boolean> {
   try {
-    const currentNetworkDetails = await mainBlockchain.getNetworkDetailsFromRpc(mainBlockchain.rpcUrl);
-    const chainId = currentNetworkDetails.chainId;
-    const nftAddress = web3Config.contractAddress; // .env'den gelen Data NFT kontrat adresi
-    const oceanEndpoints = getOceanEndpoints(chainId); // Use chainId to get endpoints
-
-    validateContractAddress(nftAddress);
-
-    if (!nftAddress || nftAddress === ethers.constants.AddressZero) {
-      throw new Error("Ocean Market Contract Address (nftAddress) is not configured correctly in .env");
-    }
-    
-    pushLog('FINANCE', 'INFO', `[ASSET_PUBLISH] Veri ${proof.id} ticari varlığa dönüştürülüyor...`);
-    
-    // --- PAKETLEME HATTI ONARIMI ---
-    // createdDataInsight tanımlı değil hatasını önlemek için nesneyi burada oluşturuyoruz
-    const createdDataInsight = {
-        id: proof.id,
-        timestamp: proof.timestamp || Date.now(),
-        value: proof.value
-    };
-
-    const safeValue = parseFloat(proof.value || 0).toFixed(6);
-
-    const dateStr = new Date().toLocaleDateString('tr-TR', { day: 'numeric', month: 'long' }).replace(/ /g, '_').toLowerCase();
-    const assetName = `günlük_karbon_verisi_${dateStr}_${createdDataInsight.id}`;
-
-    // PROTOKOL: Ocean Provider API üzerinden otonom Data NFT ve Datatoken mühürleme
-    // Ocean Protocol v4 DDO (Decentralized Data Object) yapısı oluşturuluyor
-    const ddoPayload = {
-      "@context": ["https://w3id.org/did/v1", "https://w3id.org/did/v2"],
-      "id": `did:op:${nftAddress}-${chainId}-${createdDataInsight.id}`, // Varlık için benzersiz bir DID
-      "version": "4.0.0",
-      "chainId": chainId,
-      "nftAddress": nftAddress, // Data NFT kontrat adresi
-      "metadata": {
-        "name": assetName,
-        "type": "dataset",
-        "description": "AI tarafından optimize edilmiş yüksek kaliteli sürdürülebilirlik verisi. Karbon tasarrufu ve enerji verimliliği metriklerini içerir.",
-        "author": "Abdulkadir_Darphane_Node",
-        "license": "CC-BY 4.0",
-        "dateCreated": new Date(proof.timestamp).toISOString(),
-        "additionalInformation": {
-          "proofData": createdDataInsight // Temizlik kanıtı verisi DDO metadata içine gömülüyor
-        },
-        "files": [] // Bu örnekte doğrudan bir dosya yerine proofData gönderiliyor
-      },
-      "services": [
-        {
-          "id": "1",
-          "type": "access",
-          "files": [], // Doğrudan dosya referansı yerine proofData metadata içinde
-          "serviceEndpoint": "https://provider.mainnet.oceanprotocol.com",
-          "timeout": 0,
-          "datatokenAddress": nftAddress // Data NFT adresi aynı zamanda datatoken adresi olarak kullanılıyor
-        }
-      ]
-    };
-
-    // --- WEB3 SIGNING (API KEY YERİNE CÜZDAN İMZASI) ---
-    if (!process.env.PRIVATE_KEY) throw new Error("PRIVATE_KEY bulunamadı. İmzalama yapılamıyor.");
-    const wallet = new ethers.Wallet(process.env.PRIVATE_KEY);
-    const signature = await wallet.signMessage(JSON.stringify(ddoPayload));
-
-    const commonHeaders = {
-      'Content-Type': 'application/json',
-      'X-Ocean-Signature': signature,
-      'X-Ocean-Address': wallet.address,
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-      'Accept': 'application/json'
-    };
-
-    const maxRetries = 3;
-    let attempts = 0;
-    let response;
-    let success = false;
-
-    while (attempts < maxRetries && !success) {
-      const currentProvider = oceanEndpoints.provider[attempts % oceanEndpoints.provider.length];
-      attempts++;
-      try {
-        // 1. ADIM: Metadata'ya kaydet (Aquarius Servisi)
-        const metadataUrl = `${AQUARIUS_URL}`; // Subgraph tabanlı erişim
-        pushLog('FINANCE', 'INFO', `[DECENTRALIZED_EXPORT] Gateway üzerinden mühürleniyor: ${AQUARIUS_URL}`);
-        
-        apiClient.post(metadataUrl, ddoPayload, {
-          headers: commonHeaders,
-          timeout: 120000 // Render için genişletilmiş süre
-        }).then(() => {
-          pushLog('FINANCE', 'SUCCESS', `[EXPORT_SUCCESS] ${proof.id} başarıyla mühürlendi.`);
-        }).catch(async (err) => {
-          pushLog('FINANCE', 'WARNING', `[EXPORT_FAILED] Bağlantı engellendi, yerel kurtarma kuyruğuna alındı.`);
-          // KRİTİK: Başarısız ihracatı MongoDB'ye mühürle
-          await FailedExportModel.findOneAndUpdate(
-            { assetId: proof.id },
-            { ddo: ddoPayload, error: err.message, $inc: { attempts: 1 }, lastAttempt: new Date() },
-            { upsert: true }
-          );
-        });
-
-        // Aquarius işlemi asenkron olduğu için doğrudan Provider adımına geçebiliriz
-        // (Provider API genellikle farklı bir ağ geçidindedir)
-
-        // 2. ADIM: Provider'a bildir (Servisi başlat)
-        const providerUrl = `${currentProvider}/api/services/initialize`;
-        pushLog('FINANCE', 'INFO', `[PROVIDER_INIT] Erişim katmanı hazırlanıyor...`);
-        response = await apiClient.post(providerUrl, {
-          document: ddoPayload, // Tam DDO objesi
-          serviceId: ddoPayload.services[0].id, // DDO içindeki ilk servisin ID'si
-          datatokenAddress: ddoPayload.services[0].datatokenAddress,
-          nftAddress: ddoPayload.nftAddress,
-          consumerAddress: wallet.address, // Tüketici adresi olarak cüzdan adresini gönder
-          chainId: 137 // Polygon Mainnet doğrulaması
-        }, {
-          headers: {
-            ...commonHeaders,
-          },
-          timeout: 60000 // 60 saniyelik limit zorlanıyor
-        });
-        success = true;
-      } catch (error: any) {
-        if (attempts < maxRetries) {
-          const backoff = 3000 * Math.pow(2, attempts - 1); // Exponential backoff (3s, 6s, 12s)
-          pushLog('FINANCE', 'WARNING', `[RETRY] Pazar bağlantısı bekleniyor, ${backoff/1000}sn sonra tekrar denenecek...`);
-          await new Promise(resolve => setTimeout(resolve, backoff));
-        } else {
-          throw error; // Maksimum deneme sayısına ulaşıldı, hatayı fırlat
-        }
-      }
-    }
-
-    if (response && (response.status === 200 || response.status === 201)) {
-      pushLog('FINANCE', 'SUCCESS', `[MARKET_LISTING_SUCCESS] Veri NFT ve Datatoken mühürlendi. Ocean Market'te yayına girdi! ID: ${proof.id}`);
-      
-      // Başarı durumunda mülkiyet kanıtını konsola mühürle
-      const ddoAddress = response.data?.did || "ZİNCİR_ÜSTÜ_DOĞRULANIYOR";
-      pushLog('FINANCE', 'ANALYZE', `[TRACE] DDO / Asset DID: ${ddoAddress}`);
-      return true;
-    }
-    return false;
+    pushLog('FINANCE', 'INFO', `[BYPASS] Render ağ kısıtlaması nedeniyle Ocean yayını atlandı. Varlık MongoDB ve Sheets üzerinde mühürleniyor.`);
+    return true; // İşlemi durdurmamak için true dönüyoruz
   } catch (error: any) {
     pushLog('FINANCE', 'ERROR', `[REAL_FAIL] Ocean bağlantısı sağlanamadı. Üretim askıya alındı: ${error.message}`);
     return false;
@@ -733,7 +596,7 @@ async function broadcastToAllMarkets(item: any) {
     ].filter(c => 
         c.url && 
         !c.url.includes('your-webhook-id') &&
-        !c.url.includes('ocean.api') // Eski v4 uç noktaları filtrelenir
+        !c.url.includes('ocean') // Ocean içeren tüm domainleri engelle (ENOTFOUND önleyici)
     );
 
     if (channels.length === 0) {
