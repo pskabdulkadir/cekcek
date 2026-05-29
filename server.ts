@@ -507,8 +507,9 @@ async function forcePublishAllAssets() {
 
 /**
  * PROTOKOL_SELL_ALL: Envanterdeki tüm hazır varlıkları 100'lük paketler halinde zincire sunar.
+ * @param maxItems İşlenecek maksimum toplam varlık sayısı (Gas yönetimi için)
  */
-export async function sellAllReadyAssets() {
+export async function sellAllReadyAssets(maxItems?: number) {
     if (isBulkListingRunning) {
         pushLog('FINANCE', 'WARNING', "Toplu satış işlemi zaten devam ediyor. Çakışma önlendi.");
         return;
@@ -516,7 +517,10 @@ export async function sellAllReadyAssets() {
 
     try {
         isBulkListingRunning = true;
-        const pendingItems = await ReadyToSellModel.find({ isSold: false, isListedOnChain: { $ne: true } });
+        let query = ReadyToSellModel.find({ isSold: false, isListedOnChain: { $ne: true } });
+        if (maxItems) query = query.limit(maxItems);
+        
+        const pendingItems = await query;
         
         if (pendingItems.length === 0) {
             pushLog('MARKET', 'INFO', "Satışa sunulacak yeni varlık bulunamadı.");
@@ -917,8 +921,9 @@ app.post("/api/market/publish-all", async (req, res) => {
  * Manuel Toplu Satış Tetikleyici (2330 varlık için)
  */
 app.post("/api/market/sell-all", async (req, res) => {
-    pushLog('SYSTEM', 'INFO', "Manuel toplu satış tetiği alındı.");
-    sellAllReadyAssets(); // Arka planda çalıştır
+    const limit = req.body.limit ? parseInt(req.body.limit) : undefined;
+    pushLog('SYSTEM', 'INFO', `Manuel toplu satış tetiği alındı. Hedef limit: ${limit || 'Sınırsız'}`);
+    sellAllReadyAssets(limit); // Arka planda çalıştır
     res.json({ success: true, message: "Toplu satış işlemi başlatıldı." });
 });
 
