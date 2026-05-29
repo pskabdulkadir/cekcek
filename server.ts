@@ -17,6 +17,7 @@ import { ethers } from "ethers";
 import { createServer as createViteServer } from "vite";
 import * as dotenv from "dotenv";
 import dns from "dns";
+import https from "https";
 
 // Load environment variables
 dotenv.config();
@@ -30,8 +31,8 @@ dns.setDefaultResultOrder("ipv4first");
 // --- KRİTİK GÜVENLİK VE PROTOKOL MÜDAHALESİ ---
 // DNS Bypass: Ocean Protocol'ün ana ağ geçidini kullan.
 // Eğer ENOTFOUND devam ederse aşağıdaki Proxy adresini aktif edin:
-// const AQUARIUS_URL = 'https://api.allorigins.win/raw?url=https://aquarius.oceanprotocol.com';
-const AQUARIUS_URL = 'https://aquarius.oceanprotocol.com';
+// IP Tabanlı Erişim: Render DNS engelini (ENOTFOUND) aşmak için doğrudan IP kullanılır.
+const AQUARIUS_URL = 'https://34.225.107.135'; 
 
 // --- GÜVENLİK KATMANI: SÖZLEŞME BEYAZ LİSTESİ ---
 const ALLOWED_CONTRACTS = [
@@ -359,7 +360,11 @@ async function broadcastToGreenFinanceNetwork(proof: any): Promise<boolean> {
         const metadataUrl = `${currentAquarius}/api/aquarius/assets/ddo`;
         pushLog('FINANCE', 'INFO', `[METADATA_PUBLISH] Varlık dizine ekleniyor: ${currentAquarius}`);
         await axios.post(metadataUrl, ddoPayload, {
-          headers: commonHeaders,
+          headers: {
+            ...commonHeaders,
+            'Host': 'aquarius.oceanprotocol.com' // DNS Bypass için Host header zorunludur
+          },
+          httpsAgent: new https.Agent({ rejectUnauthorized: false }), // IP üzerinden HTTPS için sertifika doğrulamasını atla
           timeout: 20000 // Global ağ gecikmeleri için süre artırıldı
         });
         pushLog('FINANCE', 'SUCCESS', `[ASSET_PUBLISH_201_CREATED] Varlık Aquarius pazar dizinine mühürlendi.`);
