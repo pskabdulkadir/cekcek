@@ -517,4 +517,49 @@ export class BlockchainRouter {
     };
   }
 
+  /**
+   * PROTOKOL_BULK: Çok sayıda veri varlığını tek bir işlemle zincire mühürler.
+   * @param assets Toplu halde gönderilecek varlık listesi
+   */
+  public async bulkRegisterDataAssets(assets: { co2Value: number, proofHash: string }[]): Promise<{ success: boolean; txHash: string; count: number; error?: string }> {
+    this.emitLog('BLOCKCHAIN', 'INFO', `${assets.length} varlık için toplu mühürleme başlatılıyor...`);
+    
+    try {
+      const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl);
+      const wallet = new ethers.Wallet(this.privateKey, provider);
+      
+      // Sözleşme kontrolü
+      const contract = new ethers.Contract(this.contractAddress, [
+        "function bulkRegister(uint256[] memory amounts, string[] memory proofs) public returns (bool)"
+      ], wallet);
+
+      const amounts = assets.map(a => ethers.utils.parseUnits(a.co2Value.toFixed(18), 18));
+      const proofs = assets.map(a => a.proofHash);
+
+      // Gas Tahmini
+      const feeData = await provider.getFeeData();
+      const txOverrides = {
+        maxPriorityFeePerGas: feeData.maxPriorityFeePerGas || ethers.utils.parseUnits("35", "gwei"),
+        maxFeePerGas: feeData.maxFeePerGas || ethers.utils.parseUnits("50", "gwei"),
+        gasLimit: Math.max(500000, assets.length * 50000) // Dinamik limit
+      };
+
+      this.emitLog('BLOCKCHAIN', 'ANALYZE', `[BULK_TX] İşlem ağa gönderiliyor...`);
+      const tx = await contract.bulkRegister(amounts, proofs, txOverrides);
+      const receipt = await tx.wait();
+
+      this.emitLog('BLOCKCHAIN', 'SUCCESS', `Toplu işlem onaylandı! ${assets.length} varlık mühürlendi. Tx: ${tx.hash}`);
+      
+      return {
+        success: true,
+        txHash: tx.hash,
+        count: assets.length
+      };
+    } catch (err: any) {
+      const errorMsg = this.parseBlockchainError(err);
+      this.emitLog('BLOCKCHAIN', 'ERROR', `Toplu işlem hatası: ${errorMsg}`);
+      return { success: false, txHash: '', count: 0, error: errorMsg };
+    }
+  }
+
 }

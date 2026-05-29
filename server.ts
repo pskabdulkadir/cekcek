@@ -138,6 +138,9 @@ export const mainCrawler = new WebCrawler({
   maxQueueSize: 1000
 });
 
+// --- CONCURRENCY CONTROL ---
+let isBulkListingRunning = false;
+
 // 1. HEDEF BELİRLEME (Seed URLs)
 const crawlerSeeds = [
   "https://wikipedia.org",
@@ -443,7 +446,9 @@ const ReadyToSellSchema = new mongoose.Schema({
   timestamp: { type: Date, default: Date.now },
   accessVoucherSignature: String,
   publisherAddress: String,
-  accessPriceWei: String 
+  accessPriceWei: String,
+  isListedOnChain: { type: Boolean, default: false },
+  listingTxHash: String
 });
 
 TransactionSchema.index({ timestamp: -1 });
@@ -498,6 +503,67 @@ async function forcePublishAllAssets() {
   } catch (err: any) {
     pushLog('SYSTEM', 'ERROR', `Toplu yayınlama hatası: ${err.message}`);
   }
+}
+
+/**
+ * PROTOKOL_SELL_ALL: Envanterdeki tüm hazır varlıkları 100'lük paketler halinde zincire sunar.
+ */
+export async function sellAllReadyAssets() {
+    if (isBulkListingRunning) {
+        pushLog('FINANCE', 'WARNING', "Toplu satış işlemi zaten devam ediyor. Çakışma önlendi.");
+        return;
+    }
+
+    try {
+        isBulkListingRunning = true;
+        const pendingItems = await ReadyToSellModel.find({ isSold: false, isListedOnChain: { $ne: true } });
+        
+        if (pendingItems.length === 0) {
+            pushLog('MARKET', 'INFO', "Satışa sunulacak yeni varlık bulunamadı.");
+            return;
+        }
+
+        const totalItems = pendingItems.length;
+        const CHUNK_SIZE = 100; // Polygon blok gas limitine uygun paket büyüklüğü
+        
+        pushLog('FINANCE', 'ANALYZE', `[BULK_SELL_START] ${totalItems} varlık paketleniyor...`);
+
+        for (let i = 0; i < totalItems; i += CHUNK_SIZE) {
+            const chunk = pendingItems.slice(i, i + CHUNK_SIZE);
+            const chunkIds = chunk.map(item => item.id);
+            
+            pushLog('FINANCE', 'INFO', `[CHUNK_PROCESS] Paket ${Math.floor(i / CHUNK_SIZE) + 1} gönderiliyor...`);
+
+            // Verileri blockchain formatına hazırla
+            const assetsToRegister = chunk.map(item => ({
+                co2Value: item.co2AnalysisGrams || 0,
+                proofHash: item.proofHash
+            }));
+
+            // Blockchain modülünü çağır
+            const result = await mainBlockchain.bulkRegisterDataAssets(assetsToRegister);
+
+            if (result.success) {
+                // Veritabanını bu paket için güncelle
+                await ReadyToSellModel.updateMany(
+                    { id: { $in: chunkIds } },
+                    { $set: { isListedOnChain: true, listingTxHash: result.txHash } }
+                );
+                
+                pushLog('FINANCE', 'SUCCESS', `[CHUNK_OK] ${result.count} varlık mühürlendi. Tx: ${result.txHash.slice(0, 10)}...`);
+                
+                // RPC ve Nonce çakışmasını önlemek için paketler arası 5 saniye bekle
+                await new Promise(resolve => setTimeout(resolve, 5000));
+            } else {
+                pushLog('FINANCE', 'ERROR', `Paket işleme başarısız, durduruluyor: ${result.error}`);
+                break; 
+            }
+        }
+    } catch (err: any) {
+        pushLog('FINANCE', 'ERROR', `Kritik toplu satış hatası: ${err.message}`);
+    } finally {
+        isBulkListingRunning = false;
+    }
 }
 
 // UNHANDLED ERROR CATCHER - Prevent 502 by keeping process alive
@@ -845,6 +911,15 @@ app.post("/api/market/publish-all", async (req, res) => {
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
+});
+
+/**
+ * Manuel Toplu Satış Tetikleyici (2330 varlık için)
+ */
+app.post("/api/market/sell-all", async (req, res) => {
+    pushLog('SYSTEM', 'INFO', "Manuel toplu satış tetiği alındı.");
+    sellAllReadyAssets(); // Arka planda çalıştır
+    res.json({ success: true, message: "Toplu satış işlemi başlatıldı." });
 });
 
 /**
