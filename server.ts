@@ -932,8 +932,9 @@ async function generateStatusReport() {
   try {
     const totalAssets = await ReadyToSellModel.countDocuments({});
     const readyToSellVouchers = await ReadyToSellModel.countDocuments({ isSold: false, accessVoucherSignature: { $exists: true } });
+    const listedOnChain = await ReadyToSellModel.countDocuments({ isSold: false, isListedOnChain: true });
+    const pendingRegistration = await ReadyToSellModel.countDocuments({ isSold: false, accessVoucherSignature: { $exists: true }, isListedOnChain: { $ne: true } });
     const soldAssets = await ReadyToSellModel.countDocuments({ isSold: true });
-    const pendingForVoucher = await ReadyToSellModel.countDocuments({ isSold: false, accessVoucherSignature: { $exists: false } });
     
     // Finansal Değerleme: Satışa hazır voucher'ların toplam USD karşılığı
     const valuation = await ReadyToSellModel.aggregate([
@@ -944,7 +945,9 @@ async function generateStatusReport() {
 
     pushLog('FINANCE', 'ANALYZE', `--- ŞEBEKE STOK RAPORU ---`);
     pushLog('FINANCE', 'ANALYZE', `Envanter Değeri: $${totalValueUSD.toFixed(4)} USDT`);
-    pushLog('FINANCE', 'ANALYZE', `Hazır Voucher: ${readyToSellVouchers} Adet | Toplam Üretim: ${totalAssets}`);
+    pushLog('FINANCE', 'ANALYZE', `Voucher Durumu: ${readyToSellVouchers} Hazır | ${soldAssets} Satılan`);
+    pushLog('FINANCE', 'ANALYZE', `Zincir Durumu: ${listedOnChain} Mühürlü | ${pendingRegistration} Kayıt Bekliyor`);
+    pushLog('FINANCE', 'ANALYZE', `Toplam Üretim: ${totalAssets} Varlık`);
     pushLog('FINANCE', 'ANALYZE', `--------------------------`);
   } catch (error: any) {
     pushLog('SYSTEM', 'ERROR', `Stok analitiği raporu oluşturulurken hata: ${error.message}`);
