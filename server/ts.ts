@@ -921,27 +921,6 @@ async function runRecyclingMining() {
   }
 }
 
-/**
- * STOK ANALİTİĞİ: Mevcut eco-varlık envanterini raporlar.
- */
-async function generateStatusReport() {
-  try {
-    const totalAssets = await ReadyToSellModel.countDocuments({});
-    const readyToSellVouchers = await ReadyToSellModel.countDocuments({ isSold: false, accessVoucherSignature: { $exists: true } });
-    const soldAssets = await ReadyToSellModel.countDocuments({ isSold: true });
-    const pendingForVoucher = await ReadyToSellModel.countDocuments({ isSold: false, accessVoucherSignature: { $exists: false } });
-
-    pushLog('SYSTEM', 'INFO', '--- STOK ANALİTİĞİ RAPORU ---');
-    pushLog('SYSTEM', 'INFO', `Toplam Üretilen eco-Varlık: ${totalAssets} adet`);
-    pushLog('SYSTEM', 'INFO', `Satışa Hazır Voucher (İmzalı): ${readyToSellVouchers} adet`);
-    pushLog('SYSTEM', 'INFO', `Voucher Bekleyen (İmzasız): ${pendingForVoucher} adet`);
-    pushLog('SYSTEM', 'INFO', `Satılan eco-Varlık: ${soldAssets} adet`);
-    pushLog('SYSTEM', 'INFO', '-----------------------------');
-  } catch (error: any) {
-    pushLog('SYSTEM', 'ERROR', `Stok analitiği raporu oluşturulurken hata: ${error.message}`);
-  }
-}
-
 mainBlockchain.registerLogger((module, level, msg) => {
   pushLog(module, level, msg);
 });
@@ -998,11 +977,6 @@ app.post("/api/admin/command", async (req, res) => {
     return res.json({ success: true, message: "Autonomous mode activated." });
   }
   
-  if (command === "GET_STATUS_REPORT") {
-    await generateStatusReport();
-    return res.json({ success: true, message: "Stok analitiği raporu oluşturuldu." });
-  }
-
   if (command.startsWith("RUN_BULK_SELL")) {
     const limit = parseInt(command.split(" ")[1]) || 500;
     pushLog('SYSTEM', 'INFO', `Admin komutu: Toplu satış başlatılıyor. Hedef: ${limit} varlık.`);
