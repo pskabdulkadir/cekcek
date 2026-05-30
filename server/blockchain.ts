@@ -36,7 +36,8 @@ export class BlockchainRouter {
   // Mint function definition support including submitted CarbonHarvester contract requested by user
   private contractAbi = [
     "function registerDataAsset(uint256 amount, string memory proof) public returns (bool)", // Mint yerine register
-    "function submitProof(bytes32 proofHash, uint256 amount) external returns (bool)"
+    "function submitProof(bytes32 proofHash, uint256 amount) external returns (bool)",
+    "function settle(string memory id) public returns (bool)" // DEX Settlement fonksiyonu eklendi
   ];
 
   /**
@@ -595,6 +596,40 @@ export class BlockchainRouter {
       const errorMsg = this.parseBlockchainError(err);
       this.emitLog('BLOCKCHAIN', 'ERROR', `Toplu işlem hatası: ${errorMsg}`);
       return { success: false, txHash: '', count: 0, error: errorMsg };
+    }
+  }
+
+  /**
+   * PROTOKOL_DEX: Varlığı doğrudan zincir üstü likidite havuzunda takas eder.
+   * API (DeFi-Router) gerektirmez, doğrudan kontrat seviyesinde çalışır.
+   */
+  public async settleAssetOnChain(assetId: string): Promise<{ success: boolean; txHash: string; error?: string }> {
+    this.emitLog('BLOCKCHAIN', 'INFO', `[DEX_SWAP] Varlık için atomik uzlaşma başlatılıyor: ${assetId}`);
+    
+    try {
+      const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl);
+      const wallet = new ethers.Wallet(this.privateKey, provider);
+      const contract = new ethers.Contract(this.contractAddress, this.contractAbi, wallet);
+
+      // Agresif Gaz Ayarları
+      const feeData = await provider.getFeeData();
+      const txOverrides = {
+        gasLimit: 300000,
+        maxPriorityFeePerGas: ethers.utils.parseUnits("35", "gwei"),
+        maxFeePerGas: feeData.maxFeePerGas?.mul(150).div(100) || ethers.utils.parseUnits("100", "gwei")
+      };
+
+      const tx = await contract.settle(assetId, txOverrides);
+      this.emitLog('BLOCKCHAIN', 'SUCCESS', `[DEX_PENDING] Uzlaşma işlemi ağa iletildi: ${tx.hash}`);
+      
+      const receipt = await tx.wait();
+      this.emitLog('BLOCKCHAIN', 'SUCCESS', `[SETTLE_OK] Varlık başarıyla nakde çevrildi! Blok: ${receipt.blockNumber}`);
+      
+      return { success: true, txHash: tx.hash };
+    } catch (err: any) {
+      const errorMsg = this.parseBlockchainError(err);
+      this.emitLog('BLOCKCHAIN', 'ERROR', `[SETTLE_FAILED] ${assetId}: ${errorMsg}`);
+      return { success: false, txHash: '', error: errorMsg };
     }
   }
 

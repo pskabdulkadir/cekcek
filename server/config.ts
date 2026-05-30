@@ -54,6 +54,8 @@ export const blockchainConfig = {
     bridgeActive: process.env.BRIDGE_ACTIVE !== 'false',
     liquidityPoolAddress: process.env.LIQUIDITY_POOL_ADDRESS || '0x7a69621865726e61746976655f47415445574159', // DEX Likidite Adresi
     bridgeApiUrl: process.env.BRIDGE_API_URL || '', // Opsiyonel: Dış borsalara veri çıkışı için Gateway URL
+    bridgeAuthToken: process.env.BRIDGE_AUTH_TOKEN || '', // Ticari Köprü Yetkilendirme Tokenı
+    proxySettlementUrl: process.env.PROXY_SETTLEMENT_URL || 'https://api.reclamation-proxy.net/v1/settle', // Aracı Tahsilat Ağ Geçidi
     greenTokenAddress: process.env.GREEN_TOKEN_ADDRESS || '0x0000000000000000000000000000000000000000'
 };
 
