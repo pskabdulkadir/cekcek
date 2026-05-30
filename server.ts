@@ -1000,9 +1000,9 @@ async function generateStatusReport() {
         ? "⚠️ HATALI AĞ (BSC seçili, Polygon olmalı!)" 
         : "✓ DOĞRU AĞ (Polygon)";
     
-    const balanceAudit = parseFloat(greenTokenBalance) > 0 
+    const balanceAudit = (parseFloat(greenTokenBalance) > 0 || !blockchainConfig.greenTokenAddress.includes('0x000'))
         ? "✓ SATILABİLİR VARLIK VAR" 
-        : "⚠️ SATILACAK TOKEN YOK (Cüzdan boş veya Token Adresi hatalı)";
+        : "⚠️ KRİTİK: GREEN_TOKEN_ADDRESS .env dosyasında eksik!";
 
     const tokenAudit = (!blockchainConfig.greenTokenAddress || blockchainConfig.greenTokenAddress.includes('0x000'))
         ? "⚠️ TOKEN ADRESİ EKSİK!"
@@ -1011,7 +1011,10 @@ async function generateStatusReport() {
     pushLog('FINANCE', 'ANALYZE', `--- ŞEBEKE STOK RAPORU ---`);
     pushLog('FINANCE', 'ANALYZE', `Ağ Denetimi: ${networkAudit} | Mod: ${blockchainConfig.networkMode.toUpperCase()}`);
     pushLog('FINANCE', 'ANALYZE', `Varlık Denetimi: ${networkAudit === "✓ DOĞRU AĞ (Polygon)" ? tokenAudit : "AĞ HATASI NEDENİYLE ATLANDI"}`);
-    pushLog('FINANCE', 'ANALYZE', `Bakiye Denetimi: ${balanceAudit}`);
+    if (tokenAudit.includes('⚠️')) {
+        pushLog('SYSTEM', 'ERROR', "LÜTFEN DİKKAT: .env dosyasına GREEN_TOKEN_ADDRESS eklemeden nakit girişi sağlanamaz.");
+    }
+    
     pushLog('FINANCE', 'ANALYZE', `Envanter Değeri (Bekleyen): $${totalValueUSD.toFixed(4)} USDT`);
     pushLog('FINANCE', 'ANALYZE', `Sistem Tahsilat Kaydı (DB): $${totalRealizedUSD.toFixed(4)} USDT`);
     pushLog('FINANCE', 'ANALYZE', `CÜZDAN DURUMU: ${actualUsdtBalance} USDT | ${greenTokenBalance} GREEN`);
