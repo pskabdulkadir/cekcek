@@ -17,6 +17,11 @@ const USER_AGENTS = [
   'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36'
 ];
 
+// CRAWLER GÜVENLİĞİ: Sadece bu domainlerden veri çek
+const WHITELISTED_DOMAINS = [
+  'wikipedia.org',
+];
+
 export interface CrawlerOptions {
   delayMs?: number;
   targetLimit?: number;
@@ -78,6 +83,14 @@ export class WebCrawler {
     try {
       const parsedUrl = new URL(urlString);
       if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
+        return;
+      }
+      
+      // Beyaz liste kontrolü
+      const hostname = parsedUrl.hostname;
+      const isWhitelisted = WHITELISTED_DOMAINS.some(domain => hostname === domain || hostname.endsWith(`.${domain}`));
+      if (!isWhitelisted) {
+        this.emitLog('CRAWLER', 'WARNING', `[WHITELIST_BLOCKED] Düğüm atlandı (Beyaz listede değil): ${urlString}`);
         return;
       }
       const cleanUrl = parsedUrl.origin + parsedUrl.pathname + parsedUrl.search;
