@@ -988,12 +988,33 @@ async function generateStatusReport() {
     const totalRealizedUSD = realizedEarnings[0]?.total || 0;
 
     // ON-CHAIN VERİSİ: Cüzdandaki gerçek USDT bakiyesi
-    const actualUsdtBalance = await mainBlockchain.getUSDTBalance();
+    const actualUsdtBalance = await mainBlockchain.getUSDTBalance(blockchainConfig.payoutWallet);
+    
+    // Yeşil Token Bakiyesi Sorgusu
+    const greenTokenBalance = blockchainConfig.greenTokenAddress && !blockchainConfig.greenTokenAddress.includes('0x000')
+        ? await mainBlockchain.getTokenBalance(blockchainConfig.greenTokenAddress, mainBlockchain.getWalletAddress())
+        : "0.00";
+    
+    // KONFİGÜRASYON DENETİMİ (Audit)
+    const networkAudit = blockchainConfig.rpcUrl.includes('binance') || blockchainConfig.rpcUrl.includes('bsc') 
+        ? "⚠️ HATALI AĞ (BSC seçili, Polygon olmalı!)" 
+        : "✓ DOĞRU AĞ (Polygon)";
+    
+    const balanceAudit = parseFloat(greenTokenBalance) > 0 
+        ? "✓ SATILABİLİR VARLIK VAR" 
+        : "⚠️ SATILACAK TOKEN YOK (Cüzdan boş veya Token Adresi hatalı)";
+
+    const tokenAudit = (!blockchainConfig.greenTokenAddress || blockchainConfig.greenTokenAddress.includes('0x000'))
+        ? "⚠️ TOKEN ADRESİ EKSİK!"
+        : "✓ TOKEN TANIMLI";
 
     pushLog('FINANCE', 'ANALYZE', `--- ŞEBEKE STOK RAPORU ---`);
+    pushLog('FINANCE', 'ANALYZE', `Ağ Denetimi: ${networkAudit} | Mod: ${blockchainConfig.networkMode.toUpperCase()}`);
+    pushLog('FINANCE', 'ANALYZE', `Varlık Denetimi: ${networkAudit === "✓ DOĞRU AĞ (Polygon)" ? tokenAudit : "AĞ HATASI NEDENİYLE ATLANDI"}`);
+    pushLog('FINANCE', 'ANALYZE', `Bakiye Denetimi: ${balanceAudit}`);
     pushLog('FINANCE', 'ANALYZE', `Envanter Değeri (Bekleyen): $${totalValueUSD.toFixed(4)} USDT`);
     pushLog('FINANCE', 'ANALYZE', `Sistem Tahsilat Kaydı (DB): $${totalRealizedUSD.toFixed(4)} USDT`);
-    pushLog('FINANCE', 'ANALYZE', `Cüzdan Gerçek Bakiyesi (USDT): ${actualUsdtBalance} USDT`);
+    pushLog('FINANCE', 'ANALYZE', `CÜZDAN DURUMU: ${actualUsdtBalance} USDT | ${greenTokenBalance} GREEN`);
     pushLog('FINANCE', 'ANALYZE', `Voucher Durumu: ${readyToSellVouchers} Hazır | ${soldAssets} Satılan`);
     pushLog('FINANCE', 'ANALYZE', `Zincir Durumu: ${listedOnChain} Mühürlü | ${pendingRegistration} Kayıt Bekliyor`);
     pushLog('FINANCE', 'ANALYZE', `Toplam Üretim: ${totalAssets} Varlık`);

@@ -206,12 +206,12 @@ export class BlockchainRouter {
   /**
    * Cüzdandaki gerçek USDT (Polygon) bakiyesini sorgular.
    */
-  public async getUSDTBalance(): Promise<string> {
+  public async getUSDTBalance(targetAddress?: string): Promise<string> {
     const usdtAddress = "0xc2132D05D31c914a87C6611C10748AEb04B58e8F"; // Polygon USDT Contract
     try {
       const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl);
       const contract = new ethers.Contract(usdtAddress, ["function balanceOf(address owner) view returns (uint256)"], provider);
-      const walletAddress = this.getWalletAddress();
+      const walletAddress = targetAddress || this.getWalletAddress() || blockchainConfig.payoutWallet;
       
       if (!walletAddress) return "0.00";
 
@@ -219,6 +219,26 @@ export class BlockchainRouter {
       // Polygon'da USDT 6 decimal kullanır
       return ethers.utils.formatUnits(balance, 6);
     } catch (err) {
+      return "0.00";
+    }
+  }
+
+  /**
+   * Herhangi bir ERC-20 tokenının bakiyesini sorgular (GREEN, MATIC vb.)
+   */
+  public async getTokenBalance(tokenAddress: string, accountAddress: string): Promise<string> {
+    try {
+      const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl);
+      const contract = new ethers.Contract(tokenAddress, [
+        "function balanceOf(address owner) view returns (uint256)",
+        "function decimals() view returns (uint8)"
+      ], provider);
+      const [balance, decimals] = await Promise.all([
+        contract.balanceOf(accountAddress),
+        contract.decimals().catch(() => 18)
+      ]);
+      return ethers.utils.formatUnits(balance, decimals);
+    } catch {
       return "0.00";
     }
   }
@@ -564,8 +584,11 @@ export class BlockchainRouter {
     this.emitLog('BLOCKCHAIN', 'INFO', `[DEX_DIRECT] Doğrudan borsa takası başlatılıyor (QuickSwap -> USDT)...`);
     
     try {
-      if (!blockchainConfig.greenTokenAddress || blockchainConfig.greenTokenAddress === ethers.constants.AddressZero) {
-        throw new Error("GREEN_TOKEN_ADDRESS tanımlanmamış. .env dosyasını kontrol edin.");
+      const tokenAddr = blockchainConfig.greenTokenAddress;
+      if (!tokenAddr || tokenAddr === ethers.constants.AddressZero || tokenAddr === '0x0000000000000000000000000000000000000000') {
+        const errMsg = "KRİTİK EKSİKLİK: GREEN_TOKEN_ADDRESS (Yeşil Token Adresi) tanımlanmamış! Takas yapılamaz.";
+        this.emitLog('BLOCKCHAIN', 'ERROR', errMsg);
+        return { success: false, txHash: '', error: errMsg };
       }
 
       const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl);
@@ -608,7 +631,7 @@ export class BlockchainRouter {
         tokenAmountWei,
         0, // amountOutMin: Kayma toleransı %100 (likidite azlığı ihtimaline karşı)
         path,
-        blockchainConfig.payoutWallet || wallet.address, // Kazancı Payout Wallet'a gönder
+        blockchainConfig.payoutWallet || wallet.address, // Kazancın gideceği kritik adres
         deadline,
         txOverrides
       );
