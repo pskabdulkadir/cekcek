@@ -132,9 +132,9 @@ export const mainBlockchain = new BlockchainRouter({
 });
 
 export const mainCrawler = new WebCrawler({
-  delayMs: 5000, // Her istek arasında 5 saniye bekle
+  delayMs: 1500, // AGRESİF MOD: 1.5 saniye bekleme süresi
   targetLimit: 999999,
-  maxConcurrentRequests: 5,
+  maxConcurrentRequests: 12, // Daha fazla eşzamanlı işlem
   maxQueueSize: 1000
 });
 
@@ -148,6 +148,20 @@ const crawlerSeeds = [
   "https://www.w3.org/Consortium/mission",
   "https://en.wikipedia.org/wiki/Sustainable_computing"
 ];
+
+// --- TİCARİ KÖPRÜ AKTİVASYON MODÜLÜ ---
+const commercialBridge = {
+  status: "INITIALIZING",
+  mode: "AUTO_SALE",
+  targetNetwork: "POLYGON_MAINNET",
+  settlementCurrency: "USDT",
+  liquidityPool: blockchainConfig.liquidityPoolAddress,
+  
+  activate: function() {
+    this.status = "ACTIVE";
+    pushLog('SYSTEM', 'SUCCESS', "[BRIDGE_READY] Ticari köprü kuruldu. Satış modu otonom.");
+  }
+};
 
 // 2. ATIK TANIMI & FİLTRELEME KRİTERLERİ
 const isRecyclableWaste = (html: string): boolean => {
@@ -689,6 +703,11 @@ async function signDataAssetAccessVoucher(dataAssetId: string) {
       });
       pushLog('BLOCKCHAIN', 'SUCCESS', `[VOUCHER_CREATED] ${dataAssetId} için kriptografik erişim voucheri mühürlendi. Alıcı bekleniyor.`);
 
+      // TİCARİ KÖPRÜ: Varlığı anında blokzinciri borsasına (Mint) ihraç et
+      if (blockchainConfig.bridgeActive) {
+        await mainBlockchain.mintCarbonAsset(dataAssetId, item.co2AnalysisGrams || 0);
+      }
+
       // PROTOKOL_EXPORT: Varlığı tüm pazar yeri kanallarına aynı anda ihraç et
       await broadcastToAllMarkets({
         id: dataAssetId,
@@ -713,7 +732,8 @@ async function broadcastToAllMarkets(item: any) {
     const channels = [
         { name: "OceanProtocol", url: blockchainConfig.oceanProtocolUrl },
         { name: "Middleware (Make.com)", url: blockchainConfig.middlewareWebhookUrl },
-        { name: "GoogleSheets", url: blockchainConfig.googleSheetsUrl }
+        { name: "GoogleSheets", url: blockchainConfig.googleSheetsUrl },
+        { name: "DeFi-Router", url: blockchainConfig.liquidityPoolAddress }
     ].filter(c => 
         c.url && 
         !c.url.includes('your-webhook-id') &&
@@ -1269,6 +1289,9 @@ async function startServer() {
       // PROTOKOL_RESET: Canlıya geçerken temizlik yap
       await initializeSystem();
       
+      // Ticari Köprü Aktivasyonu
+      commercialBridge.activate();
+
       // Blockchain kontrat ve cüzdan durumunu doğrula
       await mainBlockchain.validateOnChainStatus();
 

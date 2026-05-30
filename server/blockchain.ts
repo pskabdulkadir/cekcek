@@ -39,6 +39,15 @@ export class BlockchainRouter {
     "function submitProof(bytes32 proofHash, uint256 amount) external returns (bool)"
   ];
 
+  /**
+   * PROTOKOL_BRIDGE: Ticari Köprü üzerinden varlık basımını (mint) gerçekleştirir.
+   */
+  public async mintCarbonAsset(assetId: string, co2Value: number): Promise<boolean> {
+    this.emitLog('BLOCKCHAIN', 'INFO', `[BRIDGE_MINT] Ticari varlık blokzincirine ihraç ediliyor: ${assetId}`);
+    const result = await this.submitDataInsightProof(co2Value, assetId);
+    return result.success;
+  }
+
   constructor(options: { rpcUrl?: string; privateKey?: string; contractAddress?: string } = {}) {
     let rpc = options.rpcUrl || blockchainConfig.rpcUrl;
     let pkey = options.privateKey || blockchainConfig.privateKey;
