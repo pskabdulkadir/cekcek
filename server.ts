@@ -1070,6 +1070,12 @@ app.post("/api/admin/command", async (req, res) => {
         for (const item of items) {
             await executeProxySettlement(item.id, item.accessPriceUSD || 0);
             await new Promise(r => setTimeout(r, 2000)); // Nonce koruması
+            
+            // Satış sonrası anlık bakiye raporu (Her 5 işlemde bir)
+            if (items.indexOf(item) % 5 === 0) {
+                const bal = await mainBlockchain.checkGasBalance('polygon');
+                pushLog('FINANCE', 'ANALYZE', `[BALANCE_UPDATE] Güncel Cüzdan Bakiyesi: ${parseFloat(bal.balance).toFixed(6)} POL`);
+            }
         }
     })();
     
