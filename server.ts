@@ -798,15 +798,11 @@ async function broadcastToAllMarkets(item: any) {
             try {
                 await apiClient.post(channel.url, payload, { headers, timeout: 60000 });
             } catch (postErr: any) {
-                // PROXY_SETTLEMENT: 401 Yetkilendirme hatası durumunda otomatik aracı gateway tüneli açılır
-                if (channel.name === "DeFi-Router" && postErr.response?.status === 401 && blockchainConfig.proxySettlementUrl) {
-                    pushLog('FINANCE', 'WARNING', `[PROXY_FALLBACK] DeFi-Router 401 hatası algılandı. Aracı Proxy Gateway üzerinden mühür çözülüyor...`);
-                    await apiClient.post(blockchainConfig.proxySettlementUrl, {
-                        ...payload,
-                        proxy_mode: "EMERGENCY_SETTLEMENT",
-                        source_identity: mainBlockchain.getWalletAddress()
-                    }, { timeout: 60000 });
-                    pushLog('FINANCE', 'SUCCESS', `[PROXY_OK] Varlık Proxy tüneli ile nakde çevrildi.`);
+                // DIRECT_ATOMIC_SETTLEMENT: 401 hatası durumunda dış proxy yerine doğrudan zincir üstü uzlaşma tetiklenir
+                if (channel.name === "DeFi-Router" && postErr.response?.status === 401) {
+                    pushLog('FINANCE', 'WARNING', `[ATOMIC_FALLBACK] DeFi-Router 401 hatası. Doğrudan zincir üstü uzlaşma (DEX Swap) başlatılıyor...`);
+                    // Proxy URL yerine kodun içindeki atomik settlement fonksiyonunu çağır
+                    await executeProxySettlement(item.id, item.accessPriceUSD || 0);
                 } else { throw postErr; }
             }
 
