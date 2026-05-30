@@ -611,6 +611,16 @@ export class BlockchainRouter {
       const wallet = new ethers.Wallet(this.privateKey, provider);
       const contract = new ethers.Contract(this.contractAddress, this.contractAbi, wallet);
 
+      // GÜVENLİK KİLİDİ: Tahsilat öncesi bakiye kontrolü
+      const balance = await provider.getBalance(wallet.address);
+      const balanceInEther = parseFloat(ethers.utils.formatEther(balance));
+      const threshold = parseFloat(this.gasThresholds.polygon);
+      if (balanceInEther < threshold && this.isRealMode) {
+        const errMsg = `BAKİYE YETERSİZ: Tahsilat için en az ${threshold} POL gereklidir. Mevcut: ${balanceInEther.toFixed(4)} POL`;
+        this.emitLog('BLOCKCHAIN', 'ERROR', `[SETTLE_ABORTED] ${errMsg}`);
+        return { success: false, txHash: '', error: errMsg };
+      }
+
       // Agresif Gaz Ayarları
       const feeData = await provider.getFeeData();
       const txOverrides = {

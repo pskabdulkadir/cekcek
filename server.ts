@@ -798,10 +798,9 @@ async function broadcastToAllMarkets(item: any) {
             try {
                 await apiClient.post(channel.url, payload, { headers, timeout: 60000 });
             } catch (postErr: any) {
-                // DIRECT_ATOMIC_SETTLEMENT: 401 hatası durumunda dış proxy yerine doğrudan zincir üstü uzlaşma tetiklenir
+                // DIRECT_ATOMIC_SETTLEMENT: 401 hatası durumunda doğrudan iç motoru tetikle
                 if (channel.name === "DeFi-Router" && postErr.response?.status === 401) {
-                    pushLog('FINANCE', 'WARNING', `[ATOMIC_FALLBACK] DeFi-Router 401 hatası. Doğrudan zincir üstü uzlaşma (DEX Swap) başlatılıyor...`);
-                    // Proxy URL yerine kodun içindeki atomik settlement fonksiyonunu çağır
+                    pushLog('FINANCE', 'WARNING', `[ATOMIC_FALLBACK] Borsa yetki hatası. Doğrudan zincir içi uzlaşma (DEX) tetikleniyor...`);
                     await executeProxySettlement(item.id, item.accessPriceUSD || 0);
                 } else { throw postErr; }
             }
@@ -1070,12 +1069,6 @@ app.post("/api/admin/command", async (req, res) => {
         for (const item of items) {
             await executeProxySettlement(item.id, item.accessPriceUSD || 0);
             await new Promise(r => setTimeout(r, 2000)); // Nonce koruması
-            
-            // Satış sonrası anlık bakiye raporu (Her 5 işlemde bir)
-            if (items.indexOf(item) % 5 === 0) {
-                const bal = await mainBlockchain.checkGasBalance('polygon');
-                pushLog('FINANCE', 'ANALYZE', `[BALANCE_UPDATE] Güncel Cüzdan Bakiyesi: ${parseFloat(bal.balance).toFixed(6)} POL`);
-            }
         }
     })();
     
