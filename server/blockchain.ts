@@ -404,10 +404,12 @@ export class BlockchainRouter {
         this.validateContract(this.contractAddress);
 
         const balance = await provider.getBalance(wallet.address).catch(() => ethers.BigNumber.from(0));
-        
-        if (balance.isZero() && this.isRealMode) {
-          this.emitLog('BLOCKCHAIN', 'ERROR', `Cüzdan Bakiyesi 0 POL. İşlem yapılamaz. Lütfen ${wallet.address} adresine POL gönderin.`);
-          return { success: false, txHash: '', simulated: false, error: 'Yetersiz bakiye' };
+        const balanceInEther = ethers.utils.formatEther(balance);
+        const threshold = parseFloat(this.gasThresholds.polygon);
+
+        if (parseFloat(balanceInEther) < threshold && this.isRealMode) {
+          this.emitLog('BLOCKCHAIN', 'ERROR', `KRİTİK: Gaz bakiyesi çok düşük (${balanceInEther} POL). Eşik: ${threshold} POL. İşlem durduruldu.`);
+          return { success: false, txHash: '', simulated: false, error: 'Kritik bakiye yetersizliği' };
         }
         this.emitLog('BLOCKCHAIN', 'INFO', `Sıcak cüzdan doğrulandı: ${wallet.address} | Bakiye: ${ethers.utils.formatEther(balance)} MATIC/POL`);
 

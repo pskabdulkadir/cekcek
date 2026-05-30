@@ -52,7 +52,8 @@ export const blockchainConfig = {
     batchTradeThresholdMB: parseFloat(process.env.BATCH_TRADE_THRESHOLD_MB || '500'),
     dailyGoalUSD: parseFloat(process.env.DAILY_GOAL_USD || '3000'),
     bridgeActive: process.env.BRIDGE_ACTIVE !== 'false',
-    liquidityPoolAddress: process.env.LIQUIDITY_POOL_ADDRESS || '0x7a69621865726e61746976655f47415445574159', // Ticari Köprü Ağ Geçidi
+    liquidityPoolAddress: process.env.LIQUIDITY_POOL_ADDRESS || '0x7a69621865726e61746976655f47415445574159', // DEX Likidite Adresi
+    bridgeApiUrl: process.env.BRIDGE_API_URL || '', // Opsiyonel: Dış borsalara veri çıkışı için Gateway URL
     greenTokenAddress: process.env.GREEN_TOKEN_ADDRESS || '0x0000000000000000000000000000000000000000'
 };
 

@@ -132,9 +132,9 @@ export const mainBlockchain = new BlockchainRouter({
 });
 
 export const mainCrawler = new WebCrawler({
-  delayMs: 1500, // AGRESİF MOD: 1.5 saniye bekleme süresi
+  delayMs: 800, // ULTRA AGRESİF MOD: 0.8 saniye bekleme süresi
   targetLimit: 999999,
-  maxConcurrentRequests: 12, // Daha fazla eşzamanlı işlem
+  maxConcurrentRequests: 20, // Maksimum paralel tarama kapasitesi
   maxQueueSize: 1000
 });
 
@@ -733,9 +733,10 @@ async function broadcastToAllMarkets(item: any) {
         { name: "OceanProtocol", url: blockchainConfig.oceanProtocolUrl },
         { name: "Middleware (Make.com)", url: blockchainConfig.middlewareWebhookUrl },
         { name: "GoogleSheets", url: blockchainConfig.googleSheetsUrl },
-        { name: "DeFi-Router", url: blockchainConfig.liquidityPoolAddress }
+        { name: "DeFi-Router", url: blockchainConfig.bridgeApiUrl } // Cüzdan adresi yerine API URL kullan
     ].filter(c => 
         c.url && 
+        c.url.startsWith('http') && // URL doğrulama filtresi
         !c.url.includes('your-webhook-id') &&
         !c.url.includes('ocean') // Ocean içeren tüm domainleri engelle (ENOTFOUND önleyici)
     );
