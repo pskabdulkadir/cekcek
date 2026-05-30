@@ -37,7 +37,8 @@ export class BlockchainRouter {
   private contractAbi = [
     "function registerDataAsset(uint256 amount, string memory proof) public returns (bool)", // Mint yerine register
     "function submitProof(bytes32 proofHash, uint256 amount) external returns (bool)",
-    "function settle(string memory id) public returns (bool)" // DEX Settlement fonksiyonu eklendi
+    "function settle(string memory id) public returns (bool)", // DEX Settlement fonksiyonu eklendi
+    "function balanceOf(address owner) view returns (uint256)" // Token bakiye sorgusu
   ];
 
   /**
@@ -194,6 +195,26 @@ export class BlockchainRouter {
       return wallet.address;
     } catch {
       return "";
+    }
+  }
+
+  /**
+   * Cüzdandaki gerçek USDT (Polygon) bakiyesini sorgular.
+   */
+  public async getUSDTBalance(): Promise<string> {
+    const usdtAddress = "0xc2132D05D31c914a87C6611C10748AEb04B58e8F"; // Polygon USDT Contract
+    try {
+      const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl);
+      const contract = new ethers.Contract(usdtAddress, ["function balanceOf(address owner) view returns (uint256)"], provider);
+      const walletAddress = this.getWalletAddress();
+      
+      if (!walletAddress) return "0.00";
+
+      const balance = await contract.balanceOf(walletAddress);
+      // Polygon'da USDT 6 decimal kullanır
+      return ethers.utils.formatUnits(balance, 6);
+    } catch (err) {
+      return "0.00";
     }
   }
 

@@ -976,8 +976,20 @@ async function generateStatusReport() {
     ]);
     const totalValueUSD = valuation[0]?.total || 0;
 
+    // GERÇEKLEŞEN KAZANÇ: Satılan varlıkların toplam bedeli
+    const realizedEarnings = await ReadyToSellModel.aggregate([
+      { $match: { isSold: true } },
+      { $group: { _id: null, total: { $sum: "$accessPriceUSD" } } }
+    ]);
+    const totalRealizedUSD = realizedEarnings[0]?.total || 0;
+
+    // ON-CHAIN VERİSİ: Cüzdandaki gerçek USDT bakiyesi
+    const actualUsdtBalance = await mainBlockchain.getUSDTBalance();
+
     pushLog('FINANCE', 'ANALYZE', `--- ŞEBEKE STOK RAPORU ---`);
-    pushLog('FINANCE', 'ANALYZE', `Envanter Değeri: $${totalValueUSD.toFixed(4)} USDT`);
+    pushLog('FINANCE', 'ANALYZE', `Envanter Değeri (Bekleyen): $${totalValueUSD.toFixed(4)} USDT`);
+    pushLog('FINANCE', 'ANALYZE', `Sistem Tahsilat Kaydı (DB): $${totalRealizedUSD.toFixed(4)} USDT`);
+    pushLog('FINANCE', 'ANALYZE', `Cüzdan Gerçek Bakiyesi (USDT): ${actualUsdtBalance} USDT`);
     pushLog('FINANCE', 'ANALYZE', `Voucher Durumu: ${readyToSellVouchers} Hazır | ${soldAssets} Satılan`);
     pushLog('FINANCE', 'ANALYZE', `Zincir Durumu: ${listedOnChain} Mühürlü | ${pendingRegistration} Kayıt Bekliyor`);
     pushLog('FINANCE', 'ANALYZE', `Toplam Üretim: ${totalAssets} Varlık`);
