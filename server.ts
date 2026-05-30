@@ -732,14 +732,18 @@ async function broadcastToAllMarkets(item: any) {
     const channels = [
         { name: "OceanProtocol", url: blockchainConfig.oceanProtocolUrl },
         { name: "Middleware (Make.com)", url: blockchainConfig.middlewareWebhookUrl },
-        { name: "GoogleSheets", url: blockchainConfig.googleSheetsUrl },
-        { name: "DeFi-Router", url: blockchainConfig.bridgeApiUrl } // Cüzdan adresi yerine API URL kullan
+        { name: "GoogleSheets", url: blockchainConfig.googleSheetsUrl }
     ].filter(c => 
         c.url && 
         c.url.startsWith('http') && // URL doğrulama filtresi
         !c.url.includes('your-webhook-id') &&
         !c.url.includes('ocean') // Ocean içeren tüm domainleri engelle (ENOTFOUND önleyici)
     );
+    
+    // Ticari Köprü (DeFi-Router) sadece aktifse ve Auth hatası yoksa eklenir
+    if (blockchainConfig.bridgeActive && blockchainConfig.bridgeApiUrl) {
+        channels.push({ name: "DeFi-Router", url: blockchainConfig.bridgeApiUrl });
+    }
 
     if (channels.length === 0) {
         pushLog('MARKET', 'WARNING', `[EXPORT_IDLE] Aktif borsa kanalı bulunamadı. Lütfen .env dosyasına gerçek API adreslerini girin.`);
@@ -930,13 +934,18 @@ async function generateStatusReport() {
     const readyToSellVouchers = await ReadyToSellModel.countDocuments({ isSold: false, accessVoucherSignature: { $exists: true } });
     const soldAssets = await ReadyToSellModel.countDocuments({ isSold: true });
     const pendingForVoucher = await ReadyToSellModel.countDocuments({ isSold: false, accessVoucherSignature: { $exists: false } });
+    
+    // Finansal Değerleme: Satışa hazır voucher'ların toplam USD karşılığı
+    const valuation = await ReadyToSellModel.aggregate([
+      { $match: { isSold: false, accessVoucherSignature: { $exists: true } } },
+      { $group: { _id: null, total: { $sum: "$accessPriceUSD" } } }
+    ]);
+    const totalValueUSD = valuation[0]?.total || 0;
 
-    pushLog('SYSTEM', 'INFO', '--- STOK ANALİTİĞİ RAPORU ---');
-    pushLog('SYSTEM', 'INFO', `Toplam Üretilen eco-Varlık: ${totalAssets} adet`);
-    pushLog('SYSTEM', 'INFO', `Satışa Hazır Voucher (İmzalı): ${readyToSellVouchers} adet`);
-    pushLog('SYSTEM', 'INFO', `Voucher Bekleyen (İmzasız): ${pendingForVoucher} adet`);
-    pushLog('SYSTEM', 'INFO', `Satılan eco-Varlık: ${soldAssets} adet`);
-    pushLog('SYSTEM', 'INFO', '-----------------------------');
+    pushLog('FINANCE', 'ANALYZE', `--- ŞEBEKE STOK RAPORU ---`);
+    pushLog('FINANCE', 'ANALYZE', `Envanter Değeri: $${totalValueUSD.toFixed(4)} USDT`);
+    pushLog('FINANCE', 'ANALYZE', `Hazır Voucher: ${readyToSellVouchers} Adet | Toplam Üretim: ${totalAssets}`);
+    pushLog('FINANCE', 'ANALYZE', `--------------------------`);
   } catch (error: any) {
     pushLog('SYSTEM', 'ERROR', `Stok analitiği raporu oluşturulurken hata: ${error.message}`);
   }
