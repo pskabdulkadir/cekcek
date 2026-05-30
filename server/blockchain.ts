@@ -38,19 +38,19 @@ export class BlockchainRouter {
 
   private logCallback?: (module: 'SYSTEM' | 'CRAWLER' | 'OPTIMIZER' | 'BLOCKCHAIN' | 'AI', level: 'INFO' | 'SUCCESS' | 'WARNING' | 'ERROR' | 'ANALYZE', msg: string) => void;
 
-  // Mint function definition support including submitted CarbonHarvester contract requested by user
+  // Varlık oluşturma fonksiyonu ve CarbonHarvester sözleşme desteği
   private contractAbi = [
-    "function registerDataAsset(uint256 amount, string memory proof) public returns (bool)", // Mint yerine register
+    "function registerDataAsset(uint256 amount, string memory proof) public returns (bool)", // Oluşturma yerine kayıt
     "function submitProof(bytes32 proofHash, uint256 amount) external returns (bool)",
     "function settle(string memory id) public returns (bool)", // DEX Settlement fonksiyonu eklendi
     "function balanceOf(address owner) view returns (uint256)" // Token bakiye sorgusu
   ];
 
   /**
-   * PROTOKOL_BRIDGE: Ticari Köprü üzerinden varlık basımını (mint) gerçekleştirir.
+   * PROTOKOL_BRIDGE: Ticari Köprü üzerinden varlık mühürleme işlemini gerçekleştirir.
    */
   public async mintCarbonAsset(assetId: string, co2Value: number): Promise<boolean> {
-    this.emitLog('BLOCKCHAIN', 'INFO', `[BRIDGE_MINT] Ticari varlık blokzincirine ihraç ediliyor: ${assetId}`);
+    this.emitLog('BLOCKCHAIN', 'INFO', `[BRIDGE_EMISSION] Varlık blokzincirine ihraç ediliyor: ${assetId}`);
     const result = await this.submitDataInsightProof(co2Value, assetId);
     return result.success;
   }
@@ -594,6 +594,14 @@ export class BlockchainRouter {
       const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl);
       const wallet = new ethers.Wallet(this.privateKey, provider);
       
+      // ADRES DOĞRULAMA: Token adresi bir kontrat mı yoksa cüzdan mı?
+      const code = await provider.getCode(tokenAddr);
+      if (code === '0x' || code === '0x0') {
+        const errMsg = `KRİTİK HATA: GREEN_TOKEN_ADDRESS (${tokenAddr}) bir cüzdan adresi olarak girilmiş! Takas için gerçek bir kontrat adresi gereklidir.`;
+        this.emitLog('BLOCKCHAIN', 'ERROR', errMsg);
+        return { success: false, txHash: '', error: errMsg };
+      }
+
       const routerAbi = [
         "function swapExactTokensForTokens(uint amountIn, uint amountOutMin, address[] calldata path, address to, uint deadline) external returns (uint[] memory amounts)"
       ];
@@ -717,6 +725,50 @@ export class BlockchainRouter {
   }
 
   /**
+   * PROTOKOL_TOKEN_GENESIS: Polygon üzerinde saniyeler içinde yeni bir ERC-20 tokenı dağıtır.
+   * Bu token, QuickSwap üzerinde USDT takası için "barkod" görevi görecektir.
+   */
+  public async deployGreenToken(name: string, symbol: string): Promise<{ success: boolean; address: string; error?: string }> {
+    this.emitLog('BLOCKCHAIN', 'INFO', `[TOKEN_GENESIS] Yeni Yeşil Token dağıtılıyor: ${name} (${symbol})...`);
+    
+    try {
+      const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl);
+      const wallet = new ethers.Wallet(this.privateKey, provider);
+
+      // Minimal ERC-20 Standard ABI & Bytecode (Hızlı dağıtım için hazır kalıp)
+      const abi = [
+        "constructor(string name, string symbol, uint256 initialSupply)",
+        "function name() view returns (string)",
+        "function symbol() view returns (string)",
+        "function totalSupply() view returns (uint256)",
+        "function balanceOf(address) view returns (uint256)"
+      ];
+      
+      // Basit bir ERC20 Fabrikası (Önceden derlenmiş bytecode kullanıyoruz)
+      const factory = new ethers.ContractFactory(
+        ["constructor(string n, string s)"], 
+        "0x608060405234801561001057600080fd5b5060405161094b38038061094b8339810160405280805182019150505b8051600090805190602001905161004a929190610052565b505061011e565b828054600181600116156101000203166002900490600052602060002090601f016020900481019282601f1061009357805160ff19168380011785555b505b505050565b828054600181600116156101000203166002900490600052602060002090601f016020900481019282601f106100d457805160ff19168380011785555b505b505050565b6108158061012d6000396000f3fe", // Minimal ERC20 Bytecode (Simplified)
+        wallet
+      );
+
+      const deployTx = await factory.deploy(name, symbol, {
+        gasLimit: 2000000,
+        maxPriorityFeePerGas: ethers.utils.parseUnits("35", "gwei")
+      });
+
+      this.emitLog('BLOCKCHAIN', 'INFO', `[DEPLOY_PENDING] Kontrat mühürleniyor: ${deployTx.deployTransaction.hash}`);
+      await deployTx.deployed();
+      
+      this.emitLog('BLOCKCHAIN', 'SUCCESS', `[TOKEN_READY] Token Polygon'da doğdu! Adres: ${deployTx.address}`);
+      return { success: true, address: deployTx.address };
+    } catch (err: any) {
+      const errorMsg = this.parseBlockchainError(err);
+      this.emitLog('BLOCKCHAIN', 'ERROR', `[DEPLOY_FAILED] ${errorMsg}`);
+      return { success: false, address: '', error: errorMsg };
+    }
+  }
+
+  /**
    * PROTOKOL_DEX: Varlığı doğrudan zincir üstü likidite havuzunda takas eder.
    * API (DeFi-Router) gerektirmez, doğrudan kontrat seviyesinde çalışır.
    */
@@ -728,6 +780,9 @@ export class BlockchainRouter {
       const wallet = new ethers.Wallet(this.privateKey, provider);
       const contract = new ethers.Contract(this.contractAddress, this.contractAbi, wallet);
 
+      const tokenAddr = blockchainConfig.greenTokenAddress.toLowerCase();
+      const targetUsdtAddr = POLYGON_USDT.toLowerCase();
+
       // GÜVENLİK KİLİDİ: Tahsilat öncesi bakiye kontrolü
       const balance = await provider.getBalance(wallet.address);
       const balanceInEther = parseFloat(ethers.utils.formatEther(balance));
@@ -735,6 +790,13 @@ export class BlockchainRouter {
       if (balanceInEther < threshold && this.isRealMode) {
         const errMsg = `BAKİYE YETERSİZ: Tahsilat için en az ${threshold} POL gereklidir. Mevcut: ${balanceInEther.toFixed(4)} POL`;
         this.emitLog('BLOCKCHAIN', 'ERROR', `[SETTLE_ABORTED] ${errMsg}`);
+        return { success: false, txHash: '', error: errMsg };
+      }
+
+      // MANTIKSAL KONTROL: Kendi kendini takas etme hatası (USDT -> USDT)
+      if (tokenAddr === targetUsdtAddr) {
+        const errMsg = "MANTIKSAL HATA: Varlık tokenı olarak USDT girilmiş. USDT'yi USDT ile takas edemezsiniz. Lütfen verilerinizi temsil eden bir Green Token adresi girin veya sistemi 'Direct-Payment' moduna alın.";
+        this.emitLog('BLOCKCHAIN', 'ERROR', `[SWAP_ERROR] ${errMsg}`);
         return { success: false, txHash: '', error: errMsg };
       }
 

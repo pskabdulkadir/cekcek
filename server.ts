@@ -411,7 +411,7 @@ async function finalizeDataAssetAccess(proof: any): Promise<number> {
     return (proof.value || 0) * 0.98; // Ağ komisyonları sonrası kalan hizmet bedeli
 }
 
-// --- İNSANSIZ DARPHANE MOTORU (YEŞİL FİNANS ÇEKİRDEĞİ) ---
+// --- OTONOM VARLIK ÜRETİM SİSTEMİ (YEŞİL FİNANS ÇEKİRDEĞİ) ---
 // Amaç: Dijital atığı "Yeşil Kredi"ye dönüştürmek
 async function processDataInsight(assetId: string, kiloByte: number, source: string = "Global Open Data", license: string = "CC-BY 4.0") {
     try {
@@ -454,7 +454,7 @@ async function logDataAssetActivity(data: any) {
     
     await broadcastToAllMarkets(report);
 }
-// --- DARPHANE MOTORU BİTİŞİ ---
+// --- ÜRETİM MOTORU BİTİŞİ ---
 
 // --- MONGODB MODELLERİ (GERÇEK VERİ İÇİN) ---
 const FailedExportSchema = new mongoose.Schema({
@@ -1000,9 +1000,22 @@ async function generateStatusReport() {
         ? "⚠️ HATALI AĞ (BSC seçili, Polygon olmalı!)" 
         : "✓ DOĞRU AĞ (Polygon)";
     
-    const balanceAudit = (parseFloat(greenTokenBalance) > 0 || !blockchainConfig.greenTokenAddress.includes('0x000'))
-        ? "✓ SATILABİLİR VARLIK VAR" 
-        : "⚠️ KRİTİK: GREEN_TOKEN_ADDRESS .env dosyasında eksik!";
+    const tokenAddrLower = blockchainConfig.greenTokenAddress.toLowerCase();
+    const usdtAddrLower = "0xc2132D05D31c914a87C6611C10748AEb04B58e8F".toLowerCase();
+
+    // Token ve Cüzdan Çakışması Kontrolü
+    const isTokenSameAsWallet = tokenAddrLower === mainBlockchain.getWalletAddress().toLowerCase() || 
+                                 tokenAddrLower === blockchainConfig.payoutWallet.toLowerCase();
+
+    const isTokenUsdt = tokenAddrLower === usdtAddrLower;
+
+    const balanceAudit = isTokenSameAsWallet 
+        ? "⚠️ KRİTİK HATA: Token adresi olarak cüzdan adresinizi girdiniz!" 
+        : isTokenUsdt
+            ? "⚠️ HATA: Token adresi USDT ile aynı. Takas yapılamaz!"
+            : (parseFloat(greenTokenBalance) > 0 || !blockchainConfig.greenTokenAddress.includes('0x000'))
+                ? "✓ SATILABİLİR VARLIK VAR" 
+                : "⚠️ KRİTİK: GREEN_TOKEN_ADDRESS eksik!";
 
     const tokenAudit = (!blockchainConfig.greenTokenAddress || blockchainConfig.greenTokenAddress.includes('0x000'))
         ? "⚠️ TOKEN ADRESİ EKSİK!"
@@ -1011,8 +1024,10 @@ async function generateStatusReport() {
     pushLog('FINANCE', 'ANALYZE', `--- ŞEBEKE STOK RAPORU ---`);
     pushLog('FINANCE', 'ANALYZE', `Ağ Denetimi: ${networkAudit} | Mod: ${blockchainConfig.networkMode.toUpperCase()}`);
     pushLog('FINANCE', 'ANALYZE', `Varlık Denetimi: ${networkAudit === "✓ DOĞRU AĞ (Polygon)" ? tokenAudit : "AĞ HATASI NEDENİYLE ATLANDI"}`);
-    if (tokenAudit.includes('⚠️')) {
-        pushLog('SYSTEM', 'ERROR', "LÜTFEN DİKKAT: .env dosyasına GREEN_TOKEN_ADDRESS eklemeden nakit girişi sağlanamaz.");
+    if (isTokenSameAsWallet) {
+        pushLog('SYSTEM', 'ERROR', "ACİL DÜZELTME: .env dosyasındaki GREEN_TOKEN_ADDRESS kısmından cüzdan adresinizi silin.");
+    } else if (tokenAudit.includes('⚠️')) {
+        pushLog('SYSTEM', 'ERROR', "LÜTFEN DİKKAT: .env dosyasına geçerli bir kontrat adresi eklemeden satış yapılamaz.");
     }
     
     pushLog('FINANCE', 'ANALYZE', `Envanter Değeri (Bekleyen): $${totalValueUSD.toFixed(4)} USDT`);
@@ -1113,6 +1128,20 @@ app.post("/api/admin/command", async (req, res) => {
     })();
     
     return res.json({ success: true, message: "DEX settlement process pushed to background." });
+  }
+
+  if (command.startsWith("GENERATE_GREEN_TOKEN")) {
+    const parts = command.split(" ");
+    const name = parts[1] || "KADIR_ECO";
+    const symbol = parts[2] || "KECO";
+    
+    (async () => {
+        const result = await mainBlockchain.deployGreenToken(name, symbol);
+        if (result.success) {
+            pushLog('SYSTEM', 'SUCCESS', `!!! KRİTİK !!! Yeni Token Adresiniz: ${result.address}. Lütfen bu adresi .env dosyanızdaki GREEN_TOKEN_ADDRESS kısmına yapıştırın.`);
+        }
+    })();
+    return res.json({ success: true, message: "Token deployment started." });
   }
 
   if (command === "PAUSE_SCRAPER") {
