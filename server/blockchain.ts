@@ -16,6 +16,11 @@ const ALLOWED_CONTRACTS = [
   "0x71C7656EC7ab88b098defB751B7401B5f6d8976F"  // Smart Gate
 ].map(addr => addr.toLowerCase());
 
+// --- DEX YAPILANDIRMASI (QuickSwap Polygon) ---
+const QUICK_ROUTER_ADDRESS = "0xa5E0829CaCEd8fFDD052420551415491D6993E2F";
+const POLYGON_USDT = "0xc2132D05D31c914a87C6611C10748AEb04B58e8F";
+const WMATIC = "0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270";
+
 export class BlockchainRouter {
   public rpcUrl: string;
   public rpcEndpoints: string[] = [];
@@ -549,6 +554,74 @@ export class BlockchainRouter {
       simulated: false,
       error: this.parseBlockchainError(lastError)
     };
+  }
+
+  /**
+   * PROTOKOL_DIRECT_DEX: Varlıkları doğrudan QuickSwap üzerinden USDT'ye çevirir.
+   * @param tokenAmountWei Takas edilecek miktar (Wei biriminde)
+   */
+  public async performDEXSwap(tokenAmountWei: string): Promise<{ success: boolean; txHash: string; error?: string }> {
+    this.emitLog('BLOCKCHAIN', 'INFO', `[DEX_DIRECT] Doğrudan borsa takası başlatılıyor (QuickSwap -> USDT)...`);
+    
+    try {
+      if (!blockchainConfig.greenTokenAddress || blockchainConfig.greenTokenAddress === ethers.constants.AddressZero) {
+        throw new Error("GREEN_TOKEN_ADDRESS tanımlanmamış. .env dosyasını kontrol edin.");
+      }
+
+      const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl);
+      const wallet = new ethers.Wallet(this.privateKey, provider);
+      
+      const routerAbi = [
+        "function swapExactTokensForTokens(uint amountIn, uint amountOutMin, address[] calldata path, address to, uint deadline) external returns (uint[] memory amounts)"
+      ];
+      const erc20Abi = [
+        "function approve(address spender, uint256 amount) public returns (bool)",
+        "function allowance(address owner, address spender) view returns (uint256)"
+      ];
+
+      const router = new ethers.Contract(QUICK_ROUTER_ADDRESS, routerAbi, wallet);
+      const tokenContract = new ethers.Contract(blockchainConfig.greenTokenAddress, erc20Abi, wallet);
+
+      // 1. ONAY (Approval) KONTROLÜ
+      const currentAllowance = await tokenContract.allowance(wallet.address, QUICK_ROUTER_ADDRESS);
+      if (currentAllowance.lt(tokenAmountWei)) {
+        this.emitLog('BLOCKCHAIN', 'INFO', `[DEX_APPROVE] Borsa için harcama onayı veriliyor...`);
+        const approveTx = await tokenContract.approve(QUICK_ROUTER_ADDRESS, ethers.constants.MaxUint256);
+        await approveTx.wait();
+      }
+
+      // 2. TAKAS (Swap) PARAMETRELERİ
+      const path = [blockchainConfig.greenTokenAddress, POLYGON_USDT];
+      const deadline = Math.floor(Date.now() / 1000) + 60 * 20; // 20 dakika
+
+      // Agresif Gaz Ayarları
+      const feeData = await provider.getFeeData();
+      const txOverrides = {
+        gasLimit: 300000,
+        maxPriorityFeePerGas: ethers.utils.parseUnits("35", "gwei"),
+        maxFeePerGas: feeData.maxFeePerGas?.mul(150).div(100) || ethers.utils.parseUnits("100", "gwei")
+      };
+
+      this.emitLog('BLOCKCHAIN', 'INFO', `[DEX_EXECUTE] Takas emri iletiliyor (Miktar: ${ethers.utils.formatUnits(tokenAmountWei, 18)})...`);
+      
+      const swapTx = await router.swapExactTokensForTokens(
+        tokenAmountWei,
+        0, // amountOutMin: Kayma toleransı %100 (likidite azlığı ihtimaline karşı)
+        path,
+        blockchainConfig.payoutWallet || wallet.address, // Kazancı Payout Wallet'a gönder
+        deadline,
+        txOverrides
+      );
+
+      const receipt = await swapTx.wait();
+      this.emitLog('BLOCKCHAIN', 'SUCCESS', `[DEX_OK] Takas başarılı! USDT cüzdanınıza aktarıldı. Tx: ${swapTx.hash}`);
+      
+      return { success: true, txHash: swapTx.hash };
+    } catch (err: any) {
+      const errorMsg = this.parseBlockchainError(err);
+      this.emitLog('BLOCKCHAIN', 'ERROR', `[DEX_FAILED] Takas hatası: ${errorMsg}`);
+      return { success: false, txHash: '', error: errorMsg };
+    }
   }
 
   /**

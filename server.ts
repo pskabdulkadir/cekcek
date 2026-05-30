@@ -164,11 +164,15 @@ const commercialBridge = {
 };
 
 // --- PROXY SETTLEMENT MODÜLÜ ---
-async function executeProxySettlement(voucherId: string, amount: number) {
-  pushLog('SYSTEM', 'MARKET', `[PROXY_START] Proxy Settlement başlatılıyor: ${voucherId}`);
+async function executeProxySettlement(voucherId: string, amountUSD: number, co2Grams: number = 0) {
+  pushLog('SYSTEM', 'MARKET', `[DEX_TAKAS_START] Varlık USDT'ye çevriliyor: ${voucherId}`);
   try {
-    // API engellerini aşmak için doğrudan zincir üstü uzlaşmayı tetikle (DEX Modu)
-    const result = await mainBlockchain.settleAssetOnChain(voucherId);
+    // 1 Varlık = CO2 Gramı kadar Token varsayımıyla Wei hesapla
+    // Eğer co2Grams 0 ise, minimum 1 tokenlık bir takas dene
+    const tokenAmountWei = ethers.utils.parseUnits((co2Grams || 1).toFixed(18), 18).toString();
+
+    // Doğrudan DEX (QuickSwap) üzerinden takası tetikle
+    const result = await mainBlockchain.performDEXSwap(tokenAmountWei);
     
     if (result.success) {
       await ReadyToSellModel.updateOne({ id: voucherId }, { isSold: true });
@@ -1079,7 +1083,7 @@ app.post("/api/admin/command", async (req, res) => {
             return;
         }
         for (const item of items) {
-            await executeProxySettlement(item.id, item.accessPriceUSD || 0);
+            await executeProxySettlement(item.id, item.accessPriceUSD || 0, item.co2AnalysisGrams || 0);
             await new Promise(r => setTimeout(r, 2000)); // Nonce koruması
         }
     })();
