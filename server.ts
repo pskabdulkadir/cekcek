@@ -56,7 +56,8 @@ const ALLOWED_CONTRACTS = [
     "0xa5E0829CaCEd8fFDD052420551415491D6993E2F", // QuickSwap Router Default
     process.env.ROUTER_ADDRESS || "0xa5E0829CaCEd8fFDD052420551415491D6993E2F",
     process.env.GREEN_TOKEN_ADDRESS || "",
-    "0xc2132D05D31c914a87C6611C10748AEb04B58e8F"  // USDT
+    "0xc2132D05D31c914a87C6611C10748AEb04B58e8F", // USDT
+    "0x0d500b1d8e8ef31e21c99d1db9a6444d3adf1270"  // WMATIC
 ].map(addr => addr.toLowerCase());
 
 function validateContractAddress(address: string) {
@@ -1149,6 +1150,20 @@ app.post("/api/admin/command", async (req, res) => {
         }
     })();
     return res.json({ success: true, message: "Token deployment started." });
+  }
+
+  if (command.startsWith("INIT_DEX_LIQUIDITY")) {
+    const parts = command.split(" ");
+    const polAmount = parts[1] || "2.0"; // Örn: 2 POL
+    const tokenAmount = parts[2] || "1000000"; // Örn: 1 Milyon KECO
+    
+    (async () => {
+        const result = await mainBlockchain.initializeLiquidityPool(polAmount, tokenAmount);
+        if (result.success) {
+            pushLog('SYSTEM', 'SUCCESS', `Pazar Yeri Hazır! Fiyat belirlendi ve havuz açıldı.`);
+        }
+    })();
+    return res.json({ success: true, message: "Liquidity initialization started in background." });
   }
 
   if (command === "PAUSE_SCRAPER") {

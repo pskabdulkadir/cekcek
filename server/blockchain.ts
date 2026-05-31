@@ -16,6 +16,7 @@ const ALLOWED_CONTRACTS = [
   "0x71C7656EC7ab88b098defB751B7401B5f6d8976F", // Smart Gate
   "0xa5E0829CaCEd8fFDD052420551415491D6993E2F", // QuickSwap Router
   "0xc2132D05D31c914a87C6611C10748AEb04B58e8F", // USDT
+  "0x0d500b1d8e8ef31e21c99d1db9a6444d3adf1270", // WMATIC
   blockchainConfig.greenTokenAddress,
   blockchainConfig.routerAddress
 ].map(addr => addr.toLowerCase());
@@ -274,7 +275,7 @@ export class BlockchainRouter {
     if (message.includes('replacement transaction underpriced')) return "İşlem ücreti çok düşük, ağ kabul etmedi.";
     if (message.includes('user rejected')) return "İşlem kullanıcı tarafından reddedildi.";
     if (message.includes('execution reverted')) return "Akıllı kontrat işlemi reddetti; koşullar sağlanmamış olabilir.";
-    if (message.includes('call exception')) return "Kontrat çağrısı başarısız; likidite havuzu bulunamadı veya adres hatalı.";
+    if (message.includes('call exception')) return "Kontrat çağrısı başarısız. MUHTEMEL NEDEN: QuickSwap üzerinde henüz likidite havuzu (Pair) oluşturulmamış.";
     if (message.includes('timeout') || message.includes('ETIMEDOUT')) return "İşlem ağ yoğunluğu nedeniyle zaman aşımına uğradı.";
     // Gelişmiş hata teşhisi için ham mesajın bir kısmını ekle
     return `Blokzinciri Hatası: ${message.substring(0, 120)}`;
@@ -614,21 +615,27 @@ export class BlockchainRouter {
         "function approve(address spender, uint256 amount) public returns (bool)",
         "function allowance(address owner, address spender) view returns (uint256)"
       ];
-      
+
       const routerAddr = (blockchainConfig.routerAddress || "0xa5e0829caced8ffdd052420551415491d6993e2f").toLowerCase();
       const router = new ethers.Contract(routerAddr, routerAbi, wallet);
       const tokenContract = new ethers.Contract(tokenAddr.toLowerCase(), erc20Abi, wallet);
 
       // 1. ONAY (Approval) KONTROLÜ
-      const currentAllowance = await tokenContract.allowance(wallet.address, routerAddr);
+      // B Planı: Eğer SMART_GATE_CONTRACT_ADDRESS tanımlıysa, KECO token'ı üzerinde ona onay ver.
+      // Aksi takdirde, doğrudan QuickSwap Router'a onay ver.
+      const spenderAddress = blockchainConfig.contractAddress && blockchainConfig.contractAddress !== ethers.constants.AddressZero
+        ? blockchainConfig.contractAddress.toLowerCase()
+        : routerAddr;
+      const currentAllowance = await tokenContract.allowance(wallet.address, spenderAddress);
       if (currentAllowance.lt(tokenAmountWei)) {
         this.emitLog('BLOCKCHAIN', 'INFO', `[DEX_APPROVE] Borsa için harcama onayı veriliyor...`);
-        const approveTx = await tokenContract.approve(routerAddr, ethers.constants.MaxUint256);
+        const approveTx = await tokenContract.approve(spenderAddress, ethers.constants.MaxUint256);
         await approveTx.wait();
       }
 
       // 2. TAKAS (Swap) PARAMETRELERİ
-      const path = [tokenAddr.toLowerCase(), POLYGON_USDT.toLowerCase()];
+      // Güzergah: KECO -> WMATIC -> USDT (Daha fazla likidite şansı için standart yol)
+      const path = [tokenAddr.toLowerCase(), WMATIC.toLowerCase(), POLYGON_USDT.toLowerCase()];
       const deadline = Math.floor(Date.now() / 1000) + 60 * 20; // 20 dakika
 
       // Agresif Gaz Ayarları
@@ -837,6 +844,67 @@ export class BlockchainRouter {
     } catch (err: any) {
       const errorMsg = this.parseBlockchainError(err);
       this.emitLog('BLOCKCHAIN', 'ERROR', `[SETTLE_FAILED] ${assetId}: ${errorMsg}`);
+      return { success: false, txHash: '', error: errorMsg };
+    }
+  }
+
+  /**
+   * PROTOKOL_LIQUIDITY_GENESIS: QuickSwap üzerinde KECO/POL havuzunu otomatik oluşturur.
+   * Bu işlem borsa takas yolunu açmak için SADECE BİR KEZ yapılmalıdır.
+   */
+  public async initializeLiquidityPool(polAmount: string, tokenAmount: string): Promise<{ success: boolean; txHash: string; error?: string }> {
+    this.emitLog('BLOCKCHAIN', 'INFO', `[LIQUIDITY_INIT] Piyasa yapıcı modülü başlatılıyor: ${polAmount} POL / ${tokenAmount} KECO...`);
+    
+    try {
+      const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl);
+      const wallet = new ethers.Wallet(this.privateKey, provider);
+      const tokenAddr = blockchainConfig.greenTokenAddress;
+      const routerAddr = (blockchainConfig.routerAddress || "0xa5e0829caced8ffdd052420551415491d6993e2f").toLowerCase();
+
+      const routerAbi = [
+        "function addLiquidityETH(address token, uint amountTokenDesired, uint amountTokenMin, uint amountETHMin, address to, uint deadline) external payable returns (uint amountToken, uint amountETH, uint liquidity)"
+      ];
+      const erc20Abi = [
+        "function approve(address spender, uint256 amount) public returns (bool)"
+      ];
+
+      const router = new ethers.Contract(routerAddr, routerAbi, wallet);
+      const tokenContract = new ethers.Contract(tokenAddr, erc20Abi, wallet);
+
+      const tokenWei = ethers.utils.parseUnits(tokenAmount, 18);
+      const polWei = ethers.utils.parseUnits(polAmount, 18);
+
+      // 1. Onay: Router'ın tokenları çekmesine izin ver
+      this.emitLog('BLOCKCHAIN', 'INFO', `[DEX_APPROVE] Likidite havuzu için token harcama onayı veriliyor...`);
+      const appTx = await tokenContract.approve(routerAddr, ethers.constants.MaxUint256);
+      await appTx.wait();
+
+      // 2. Havuz Oluştur ve Likidite Ekle
+      const deadline = Math.floor(Date.now() / 1000) + 60 * 20; // 20 dk
+      
+      this.emitLog('BLOCKCHAIN', 'INFO', `[DEX_POOL] QuickSwap havuzuna likidite enjekte ediliyor...`);
+      
+      const tx = await router.addLiquidityETH(
+        tokenAddr,
+        tokenWei,
+        0, // amountTokenMin
+        0, // amountETHMin
+        wallet.address,
+        deadline,
+        { 
+          value: polWei,
+          gasLimit: 3000000, // Havuz oluşturma yüksek gas ister
+          maxPriorityFeePerGas: ethers.utils.parseUnits("35", "gwei")
+        }
+      );
+
+      const receipt = await tx.wait();
+      this.emitLog('BLOCKCHAIN', 'SUCCESS', `[MARKET_READY] Likidite havuzu başarıyla kuruldu! Artık satış yapılabilir. Tx: ${tx.hash}`);
+      
+      return { success: true, txHash: tx.hash };
+    } catch (err: any) {
+      const errorMsg = this.parseBlockchainError(err);
+      this.emitLog('BLOCKCHAIN', 'ERROR', `[POOL_FAILED] Havuz kurulum hatası: ${errorMsg}`);
       return { success: false, txHash: '', error: errorMsg };
     }
   }
