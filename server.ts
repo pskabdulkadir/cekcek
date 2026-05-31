@@ -422,9 +422,10 @@ async function processDataInsight(assetId: string, kiloByte: number, source: str
 
         // 2. ADIM: YEŞİL FİNANS BORSASINA/LEDGER'A İMZALI KAYIT
         const dataRecord = {
+            id: assetId, // assetRef yerine id kullanılarak 'tanımsız' hatası giderildi
+            price: insightValue, // Google Sheets için
+            accessPriceUSD: parseFloat(insightValue), // Takas motoru için
             type: "DATA_INSIGHT_INDEX",
-            creditValue: insightValue,
-            assetRef: assetId,
             source: source,
             license: license,
             timestamp: new Date().toISOString()
