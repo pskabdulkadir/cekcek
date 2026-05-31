@@ -880,6 +880,8 @@ export class BlockchainRouter {
 
       // KRİTİK KONTROL: Cüzdanda yeterli token var mı?
       const userBalance = await tokenContract.balanceOf(wallet.address).catch(() => ethers.BigNumber.from(0));
+      this.emitLog('BLOCKCHAIN', 'INFO', `[BALANCE_CHECK] Adres: ${wallet.address.slice(0,10)}... | Token: ${tokenAddr.slice(0,10)}... | Bakiye: ${ethers.utils.formatUnits(userBalance, 18)}`);
+
       if (userBalance.lt(tokenWei)) {
           const errMsg = `Yetersiz KECO Bakiyesi: Havuz için ${tokenAmount} gerekiyor, cüzdanda ${ethers.utils.formatUnits(userBalance, 18)} var.`;
           this.emitLog('BLOCKCHAIN', 'ERROR', `[POOL_ABORTED] ${errMsg}`);
