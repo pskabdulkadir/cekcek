@@ -744,15 +744,16 @@ export class BlockchainRouter {
         "function balanceOf(address) view returns (uint256)"
       ];
       
-      // Basit bir ERC20 Fabrikası (Önceden derlenmiş bytecode kullanıyoruz)
+      // Basit bir ERC20 Fabrikası (Önceden derlenmiş bytecode kullanıyoruz) - Constructor: (string name, string symbol, uint256 initialSupply)
       const factory = new ethers.ContractFactory(
-        ["constructor(string n, string s)"], 
+        abi, // Tam ABI'yi kullan
         "0x608060405234801561001057600080fd5b5060405161094b38038061094b8339810160405280805182019150505b8051600090805190602001905161004a929190610052565b505061011e565b828054600181600116156101000203166002900490600052602060002090601f016020900481019282601f1061009357805160ff19168380011785555b505b505050565b828054600181600116156101000203166002900490600052602060002090601f016020900481019282601f106100d457805160ff19168380011785555b505b505050565b6108158061012d6000396000f3fe", // Minimal ERC20 Bytecode (Simplified)
         wallet
       );
 
-      const deployTx = await factory.deploy(name, symbol, {
-        gasLimit: 2000000,
+      const initialSupply = ethers.utils.parseUnits("1000000000", 18); // 1 Milyar token
+      const deployTx = await factory.deploy(name, symbol, initialSupply, {
+        gasLimit: 3000000, // Dağıtım için gas limitini artırdık
         maxPriorityFeePerGas: ethers.utils.parseUnits("35", "gwei")
       });
 
