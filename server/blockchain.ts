@@ -914,10 +914,21 @@ export class BlockchainRouter {
           return { success: false, txHash: '', error: errMsg };
       }
 
+      // Agresif Gaz Ayarları (EIP-1559)
+      const feeData = await provider.getFeeData();
+      const txOverrides: any = {
+        value: polWei,
+        maxPriorityFeePerGas: ethers.utils.parseUnits("35", "gwei"),
+        maxFeePerGas: feeData.maxFeePerGas?.mul(160).div(100).add(ethers.utils.parseUnits("35", "gwei")) || ethers.utils.parseUnits("150", "gwei")
+      };
+
       // 1. Onay: Router'ın tokenları çekmesine izin ver
       this.emitLog('BLOCKCHAIN', 'INFO', `[DEX_APPROVE] Likidite havuzu için token harcama onayı veriliyor...`);
       try {
-          const appTx = await tokenContract.approve(routerAddr, ethers.constants.MaxUint256, { gasLimit: 100000 });
+          const appTx = await tokenContract.approve(routerAddr, ethers.constants.MaxUint256, { 
+            maxPriorityFeePerGas: txOverrides.maxPriorityFeePerGas,
+            maxFeePerGas: txOverrides.maxFeePerGas
+          });
           await appTx.wait();
       } catch (appErr: any) {
           throw new Error(`Onay (Approve) işlemi başarısız: ${appErr.message}`);
@@ -928,18 +939,18 @@ export class BlockchainRouter {
       
       this.emitLog('BLOCKCHAIN', 'INFO', `[DEX_POOL] QuickSwap havuzuna likidite enjekte ediliyor...`);
       
+      // Güvenlik Simülasyonu
+      try {
+        const estimatedGas = await router.estimateGas.addLiquidityETH(
+          tokenAddr, tokenWei, 0, 0, wallet.address, deadline, { value: polWei }
+        );
+        txOverrides.gasLimit = estimatedGas.mul(120).div(100);
+      } catch (e) {
+        txOverrides.gasLimit = 3000000; // Tahmin başarısızsa güvenli sınır
+      }
+
       const tx = await router.addLiquidityETH(
-        tokenAddr,
-        tokenWei,
-        0, // amountTokenMin
-        0, // amountETHMin
-        wallet.address,
-        deadline,
-        { 
-          value: polWei,
-          gasLimit: 3000000, // Havuz oluşturma yüksek gas ister
-          maxPriorityFeePerGas: ethers.utils.parseUnits("35", "gwei")
-        }
+        tokenAddr, tokenWei, 0, 0, wallet.address, deadline, txOverrides
       );
 
       const receipt = await tx.wait();
