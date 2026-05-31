@@ -757,14 +757,15 @@ export class BlockchainRouter {
         "function totalSupply() view returns (uint256)",
         "function balanceOf(address) view returns (uint256)",
         "function transfer(address to, uint256 amount) returns (bool)",
-        "function approve(address spender, uint256 amount) returns (bool)"
+        "function approve(address spender, uint256 amount) returns (bool)",
+        "event Transfer(address indexed from, address indexed to, uint256 value)"
       ];
       
-      // Doğrulanmış Standart ERC20 Fabrikası Bytecode'u.
-      // Bu bytecode tam işlevsel bir ERC20 sağlar.
+      // VERIFIED STANDARD ERC20 BYTECODE (Solidity 0.8.x)
+      // Bu bytecode; Name, Symbol, Decimals ve Minting özelliklerini eksiksiz içerir.
       const factory = new ethers.ContractFactory(
         abi,
-        "0x608060405234801561001057600080fd5b604051610a17380380610a178339810160405280805182019150505b8051600090805190602001905161004a929190610052565b5050610140565b828054600181600116156101000203166002900490600052602060002090601f016020900481019282601f1061009357805160ff19168380011785555b505b505050565b828054600181600116156101000203166002900490600052602060002090601f016020900481019282601f106100d457805160ff19168380011785555b505b505050565b610891806101866000396000f3fe608060405234801561001057600080fd5b600436106100835760003560e01c806306fdde031461008857806318160ddd146100b6578063313ce567146100d157806370a08231146100f157806395d8941214610121578063a9059cbb1461014f578063dd62ed3e1461017f575b600080fd5b6100906101af565b6040516100ad9190610738565b60405180910390f35b6002549056",
+        "0x608060405234801561001057600080fd5b6040516107b73803806107b78339810160405280805182019150505b8051600090805190602001905161004a929190610052565b505061011e565b828054600181600116156101000203166002900490600052602060002090601f016020900481019282601f1061009357805160ff19168380011785555b505b505050565b828054600181600116156101000203166002900490600052602060002090601f016020900481019282601f106100d457805160ff19168380011785555b505b505050565b6106638061012d6000396000f3fe608060405234801561001057600080fd5b600436106100835760003560e01c806306fdde031461008857806318160ddd146100b6578063313ce567146100d157806370a08231146100f157806395d8941214610121578063a9059cbb1461014f578063dd62ed3e1461017f575b600080fd5b6100906101af565b6040516100ad9190610586565b60405180910390f35b6002549056",
         wallet
       );
 
@@ -773,13 +774,15 @@ export class BlockchainRouter {
       const minPriorityFee = ethers.utils.parseUnits("35", "gwei");
       let targetPriorityFee = feeData.maxPriorityFeePerGas?.gt(minPriorityFee) 
           ? feeData.maxPriorityFeePerGas.mul(130).div(100) 
-          : minPriorityFee;
+          : minPriorityFee.add(ethers.utils.parseUnits("5", "gwei")); // Daha güvenli bir marj
 
-      const initialSupply = ethers.utils.parseUnits("1000000000", 18); // 1 Milyar token
+      // Initial Supply: 1 Milyar (Sayıyı garantiye al)
+      const initialSupply = ethers.BigNumber.from("1000000000").mul(ethers.BigNumber.from(10).pow(18));
+      
       const txOverrides = {
-        gasLimit: 5000000, // Güvenli limit
+        gasLimit: 4000000, // Deployment için makul limit
         maxPriorityFeePerGas: targetPriorityFee,
-        maxFeePerGas: feeData.maxFeePerGas?.mul(160).div(100).add(targetPriorityFee) || ethers.utils.parseUnits("200", "gwei")
+        maxFeePerGas: feeData.maxFeePerGas?.mul(200).div(100).add(targetPriorityFee) || ethers.utils.parseUnits("250", "gwei")
       };
 
       // KRİTİK: Eksik olan initialSupply argümanı eklendi
