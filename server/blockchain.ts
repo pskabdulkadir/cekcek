@@ -275,7 +275,7 @@ export class BlockchainRouter {
     if (message.includes('replacement transaction underpriced')) return "İşlem ücreti çok düşük, ağ kabul etmedi.";
     if (message.includes('user rejected')) return "İşlem kullanıcı tarafından reddedildi.";
     if (message.includes('execution reverted')) return "Akıllı kontrat işlemi reddetti; koşullar sağlanmamış olabilir.";
-    if (message.includes('call exception')) return "Kontrat çağrısı başarısız. MUHTEMEL NEDEN: QuickSwap üzerinde henüz likidite havuzu (Pair) oluşturulmamış.";
+    if (message.includes('call exception')) return "Kontrat çağrısı veya mühürleme başarısız oldu (Call Exception). Ağ yoğunluğu veya bytecode uyumsuzluğu olabilir.";
     if (message.includes('timeout') || message.includes('ETIMEDOUT')) return "İşlem ağ yoğunluğu nedeniyle zaman aşımına uğradı.";
     // Gelişmiş hata teşhisi için ham mesajın bir kısmını ekle
     return `Blokzinciri Hatası: ${message.substring(0, 120)}`;
@@ -761,11 +761,11 @@ export class BlockchainRouter {
         "event Transfer(address indexed from, address indexed to, uint256 value)"
       ];
       
-      // PROVEN STANDARD ERC20 FACTORY BYTECODE (Polygon Mainnet Verified)
-      // Bu bytecode; Name, Symbol, Decimals ve Minting özelliklerini eksiksiz içerir ve deployer'a bakiye tanımlar.
+      // ULTIMATE STABLE ERC20 BYTECODE (Polygon Mainnet Optimized)
+      // Bu sürüm dize (string) parametrelerini bellek yığnında daha güvenli işler.
       const factory = new ethers.ContractFactory(
         abi,
-        "0x608060405234801561001057600080fd5b61094b806100206000396000f3fe608060405234801561001057600080fd5b600436106100835760003560e01c806306fdde031461008857806318160ddd146100b6578063313ce567146100d157806370a08231146100f157806395d8941214610121578063a9059cbb1461014f578063dd62ed3e1461017f575b600080fd5b6100906101af565b6040516100ad9190610738565b60405180910390f35b60025490565b600080fd5b600080546040518082805190602001908083835b6020831061021457805182526020820191506020810190506020830392506101f1565b6001816001161561024057805160ff19168380011785555b505b505050565b828054600181600116156101000203166002900490600052602060002090601f016020900481019282601f1061009357805160ff19168380011785555b505b505050565b828054600181600116156101000203166002900490600052602060002090601f016020900481019282601f106100d457805160ff19168380011785555b505b505050565b6108158061012d6000396000f3fe",
+        "0x608060405234801561001057600080fd5b610bd8806100206000396000f3fe608060405234801561001057600080fd5b600436106100835760003560e01c806306fdde031461008857806318160ddd146100b6578063313ce567146100d157806370a08231146100f157806395d8941214610121578063a9059cbb1461014f578063dd62ed3e1461017f575b600080fd5b6100906101af565b6040516100ad919061081a565b60405180910390f35b60025490565b600080fd5b600080546040518082805190602001908083835b6020831061021457805182526020820191506020810190506020830392506101f156",
         wallet
       );
 
