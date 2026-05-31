@@ -868,7 +868,8 @@ export class BlockchainRouter {
         "function addLiquidityETH(address token, uint amountTokenDesired, uint amountTokenMin, uint amountETHMin, address to, uint deadline) external payable returns (uint amountToken, uint amountETH, uint liquidity)"
       ];
       const erc20Abi = [
-        "function approve(address spender, uint256 amount) public returns (bool)"
+        "function approve(address spender, uint256 amount) public returns (bool)",
+        "function balanceOf(address owner) view returns (uint256)"
       ];
 
       const router = new ethers.Contract(routerAddr, routerAbi, wallet);
