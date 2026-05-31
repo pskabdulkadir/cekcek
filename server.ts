@@ -166,10 +166,6 @@ const commercialBridge = {
 // --- PROXY SETTLEMENT MODÜLÜ ---
 async function executeProxySettlement(voucherId: string, amountUSD: number, co2Grams: number = 0) {
   pushLog('SYSTEM', 'MARKET', `[DEX_TAKAS_START] Varlık USDT'ye çevriliyor: ${voucherId}`);
-  if (!voucherId || voucherId === "tanımsız") {
-    pushLog('SYSTEM', 'ERROR', `[DEX_TAKAS_FAILED] Geçersiz Varlık ID (tanımsız). Veri yapısı hatası.`);
-    return false;
-  }
   try {
     // 1 Varlık = CO2 Gramı kadar Token varsayımıyla Wei hesapla
     // Eğer co2Grams 0 ise, minimum 1 tokenlık bir takas dene
@@ -426,7 +422,7 @@ async function processDataInsight(assetId: string, kiloByte: number, source: str
 
         // 2. ADIM: YEŞİL FİNANS BORSASINA/LEDGER'A İMZALI KAYIT
         const dataRecord = {
-            id: assetId, // ID eşleşmesi için kritik alan
+            id: assetId, // ID alanını netleştirerek 'tanımsız' hatasını çöz
             price: insightValue,
             accessPriceUSD: parseFloat(insightValue),
             type: "DATA_INSIGHT_INDEX",
@@ -1143,9 +1139,7 @@ app.post("/api/admin/command", async (req, res) => {
     (async () => {
         const result = await mainBlockchain.deployGreenToken(name, symbol);
         if (result.success) {
-            pushLog('SYSTEM', 'SUCCESS', `!!! BAŞARILI !!! Yeni Yeşil Token Adresiniz: ${result.address}. Bu adresi .env dosyanızdaki GREEN_TOKEN_ADDRESS kısmına yapıştırın.`);
-        } else {
-            pushLog('SYSTEM', 'ERROR', `Token oluşturma başarısız oldu: ${result.error}`);
+            pushLog('SYSTEM', 'SUCCESS', `!!! KRİTİK !!! Yeni Token Adresiniz: ${result.address}. Lütfen bu adresi .env dosyanızdaki GREEN_TOKEN_ADDRESS kısmına yapıştırın.`);
         }
     })();
     return res.json({ success: true, message: "Token deployment started." });

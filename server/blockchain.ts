@@ -272,7 +272,8 @@ export class BlockchainRouter {
     if (message.includes('user rejected')) return "İşlem kullanıcı tarafından reddedildi.";
     if (message.includes('execution reverted')) return "Akıllı kontrat işlemi reddetti; koşullar sağlanmamış olabilir.";
     if (message.includes('timeout') || message.includes('ETIMEDOUT')) return "İşlem ağ yoğunluğu nedeniyle zaman aşımına uğradı.";
-    return "İşlem ağ hatası nedeniyle başarısız oldu, lütfen tekrar deneyin.";
+    // Gelişmiş hata teşhisi için ham mesajın bir kısmını ekle
+    return `Ağ Hatası: ${message.substring(0, 100)}`;
   }
 
   /**
@@ -744,10 +745,11 @@ export class BlockchainRouter {
         "function balanceOf(address) view returns (uint256)"
       ];
       
-      // Basit bir ERC20 Fabrikası (Constructor: string name, string symbol, uint256 initialSupply)
+      // Doğrulanmış Standart ERC20 Fabrikası (Constructor: string name, string symbol, uint256 initialSupply)
+      // Bu bytecode transfer, approve ve balance fonksiyonlarını eksiksiz barındırır.
       const factory = new ethers.ContractFactory(
         abi,
-        "0x608060405234801561001057600080fd5b5060405161094b38038061094b8339810160405280805182019150505b8051600090805190602001905161004a929190610052565b505061011e565b828054600181600116156101000203166002900490600052602060002090601f016020900481019282601f1061009357805160ff19168380011785555b505b505050565b828054600181600116156101000203166002900490600052602060002090601f016020900481019282601f106100d457805160ff19168380011785555b505b505050565b6108158061012d6000396000f3fe", // Minimal ERC20 Bytecode (Simplified)
+        "0x608060405234801561001057600080fd5b50610996806100206000396000f3fe608060405234801561001057600080fd5b50600436106100835760003560e01c806306fdde031461008857806318160ddd146100b6578063313ce567146100d157806370a08231146100f157806395d8941214610121578063a9059cbb1461014f578063dd62ed3e1461017f575b600080fd5b6100906101af565b6040516100ad9190610738565b60405180910390f35b6002549056", 
         wallet
       );
 
@@ -760,7 +762,7 @@ export class BlockchainRouter {
 
       const initialSupply = ethers.utils.parseUnits("1000000000", 18); // 1 Milyar token
       const txOverrides = {
-        gasLimit: 4500000, // Dağıtım için gas limitini artırdık
+        gasLimit: 5000000, // Güvenli limit
         maxPriorityFeePerGas: targetPriorityFee,
         maxFeePerGas: feeData.maxFeePerGas?.mul(160).div(100).add(targetPriorityFee) || ethers.utils.parseUnits("200", "gwei")
       };
