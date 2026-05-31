@@ -742,6 +742,11 @@ export class BlockchainRouter {
    * Bu token, QuickSwap üzerinde USDT takası için "barkod" görevi görecektir.
    */
   public async deployGreenToken(name: string, symbol: string): Promise<{ success: boolean; address: string; error?: string }> {
+    // --- OPERASYONEL KİLİT: GENESIS MODU KAPALI ---
+    this.emitLog('BLOCKCHAIN', 'WARNING', `[GENESIS_LOCKED] Sistem operasyonel modda. Yeni dağıtım engellendi. Mevcut token kullanılıyor.`);
+    return { success: true, address: blockchainConfig.greenTokenAddress };
+
+    /* ESKİ DEPLOY MANTIĞI DEVRE DIŞI BIRAKILDI
     this.emitLog('BLOCKCHAIN', 'INFO', `[TOKEN_GENESIS] Yeni Yeşil Token dağıtılıyor: ${name} (${symbol})...`);
     
     try {
@@ -828,6 +833,7 @@ export class BlockchainRouter {
       this.emitLog('BLOCKCHAIN', 'ERROR', `[DEPLOY_FAILED] ${errorMsg}`);
       return { success: false, address: '', error: errorMsg };
     }
+    */
   }
 
   /**
