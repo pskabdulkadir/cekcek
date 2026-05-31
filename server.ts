@@ -176,7 +176,7 @@ async function executeProxySettlement(voucherId: string, amountUSD: number, co2G
     
     if (result.success) {
       await ReadyToSellModel.updateOne({ id: voucherId }, { isSold: true });
-      pushLog('FINANCE', 'SUCCESS', `[SETTLE_OK] Transfer tamamlandı: ${amount} USDT karşılığı cüzdana aktarıldı.`);
+      pushLog('FINANCE', 'SUCCESS', `[SETTLE_OK] Transfer tamamlandı: ${amountUSD.toFixed(2)} USDT karşılığı cüzdana aktarıldı.`);
       return true;
     }
     return false;

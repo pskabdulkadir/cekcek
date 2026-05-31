@@ -271,10 +271,10 @@ export class BlockchainRouter {
     if (message.includes('replacement transaction underpriced')) return "İşlem ücreti çok düşük, ağ kabul etmedi.";
     if (message.includes('user rejected')) return "İşlem kullanıcı tarafından reddedildi.";
     if (message.includes('execution reverted')) return "Akıllı kontrat işlemi reddetti; koşullar sağlanmamış olabilir.";
+    if (message.includes('call exception')) return "Kontrat çağrısı başarısız; likidite havuzu bulunamadı veya adres hatalı.";
     if (message.includes('timeout') || message.includes('ETIMEDOUT')) return "İşlem ağ yoğunluğu nedeniyle zaman aşımına uğradı.";
-    return "İşlem ağ hatası nedeniyle başarısız oldu, lütfen tekrar deneyin.";
     // Gelişmiş hata teşhisi için ham mesajın bir kısmını ekle
-    return `Ağ Hatası: ${message.substring(0, 100)}`;
+    return `Blokzinciri Hatası: ${message.substring(0, 120)}`;
   }
 
   /**
