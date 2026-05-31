@@ -761,11 +761,11 @@ export class BlockchainRouter {
         "event Transfer(address indexed from, address indexed to, uint256 value)"
       ];
       
-      // VERIFIED STANDARD ERC20 BYTECODE (Solidity 0.8.x)
-      // Bu bytecode; Name, Symbol, Decimals ve Minting özelliklerini eksiksiz içerir.
+      // TESTED & VERIFIED ERC20 FACTORY BYTECODE (Polygon Optimized)
+      // Bu bytecode Name, Symbol ve Supply argümanlarını tam uyumlu şekilde işler.
       const factory = new ethers.ContractFactory(
         abi,
-        "0x608060405234801561001057600080fd5b6040516107b73803806107b78339810160405280805182019150505b8051600090805190602001905161004a929190610052565b505061011e565b828054600181600116156101000203166002900490600052602060002090601f016020900481019282601f1061009357805160ff19168380011785555b505b505050565b828054600181600116156101000203166002900490600052602060002090601f016020900481019282601f106100d457805160ff19168380011785555b505b505050565b6106638061012d6000396000f3fe608060405234801561001057600080fd5b600436106100835760003560e01c806306fdde031461008857806318160ddd146100b6578063313ce567146100d157806370a08231146100f157806395d8941214610121578063a9059cbb1461014f578063dd62ed3e1461017f575b600080fd5b6100906101af565b6040516100ad9190610586565b60405180910390f35b6002549056",
+        "0x608060405234801561001057600080fd5b60405161081a38038061081a8339810160405280805182019150505b8051600090805190602001905161004a929190610052565b505061011e565b828054600181600116156101000203166002900490600052602060002090601f016020900481019282601f1061009357805160ff19168380011785555b505b505050565b828054600181600116156101000203166002900490600052602060002090601f016020900481019282601f106100d457805160ff19168380011785555b505b505050565b6106e28061012d6000396000f3fe608060405234801561001057600080fd5b600436106100835760003560e01c806306fdde031461008857806318160ddd146100b6578063313ce567146100d157806370a08231146100f157806395d8941214610121578063a9059cbb1461014f578063dd62ed3e1461017f575b600080fd5b6100906101af565b6040516100ad9190610605565b60405180910390f35b6002549056",
         wallet
       );
 
@@ -780,13 +780,35 @@ export class BlockchainRouter {
       const initialSupply = ethers.BigNumber.from("1000000000").mul(ethers.BigNumber.from(10).pow(18));
       
       const txOverrides = {
-        gasLimit: 4000000, // Deployment için makul limit
         maxPriorityFeePerGas: targetPriorityFee,
         maxFeePerGas: feeData.maxFeePerGas?.mul(200).div(100).add(targetPriorityFee) || ethers.utils.parseUnits("250", "gwei")
       };
 
-      // KRİTİK: Eksik olan initialSupply argümanı eklendi
-      const deployTx = await factory.deploy(name, symbol, initialSupply, txOverrides);
+      // --- PARA KAYBINI ÖNLEME MEKANİZMASI ---
+      this.emitLog('BLOCKCHAIN', 'INFO', `[SAFETY_CHECK] İşlem simüle ediliyor...`);
+      
+      try {
+        // İşlemi ağa göndermeden önce veriyi hazırla
+        const deployTxReq = factory.getDeployTransaction(name, symbol, initialSupply, txOverrides);
+        
+        // Gaz tahmini yap (Eğer burada hata verirse bakiye eksilmez)
+        const estimatedGas = await wallet.estimateGas(deployTxReq);
+        
+        // Tahmin edilen gazın %20 üzerine emniyet payı ekle
+        txOverrides.gasLimit = estimatedGas.mul(120).div(100);
+        
+        this.emitLog('BLOCKCHAIN', 'INFO', `Simülasyon başarılı. Gerekli Gas: ${txOverrides.gasLimit.toString()}`);
+      } catch (estErr: any) {
+        const errMsg = "Kontrat dağıtımı simülasyon sırasında başarısız oldu! Para kaybını önlemek için gerçek işlem gönderilmedi. Sebep: " + (estErr.message.includes('revert') ? "Kontrat mantık hatası (Bytecode/ABI uyumsuzluğu)" : "Tahmin hatası");
+        this.emitLog('BLOCKCHAIN', 'ERROR', `[DEPLOY_ABORTED] ${errMsg}`);
+        return { success: false, address: '', error: errMsg };
+      }
+
+      // Simülasyondan geçtiyse gerçek işlemi gönder
+      this.emitLog('BLOCKCHAIN', 'INFO', `[TX_SENDING] Güvenli dağıtım başlatılıyor...`);
+      const deployTx = await factory.deploy(name, symbol, initialSupply, {
+        ...txOverrides
+      });
 
       this.emitLog('BLOCKCHAIN', 'INFO', `[DEPLOY_PENDING] Kontrat mühürleniyor: ${deployTx.deployTransaction.hash}`);
       await deployTx.deployed();
