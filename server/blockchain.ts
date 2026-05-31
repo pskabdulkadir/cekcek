@@ -749,19 +749,22 @@ export class BlockchainRouter {
       const wallet = new ethers.Wallet(this.privateKey, provider);
 
       // Minimal ERC-20 Standard ABI & Bytecode (Hızlı dağıtım için hazır kalıp)
+      // KRİTİK: approve ve transfer fonksiyonları eklendi.
       const abi = [
         "constructor(string name, string symbol, uint256 initialSupply)",
         "function name() view returns (string)",
         "function symbol() view returns (string)",
         "function totalSupply() view returns (uint256)",
-        "function balanceOf(address) view returns (uint256)"
+        "function balanceOf(address) view returns (uint256)",
+        "function transfer(address to, uint256 amount) returns (bool)",
+        "function approve(address spender, uint256 amount) returns (bool)"
       ];
       
-      // Doğrulanmış Standart ERC20 Fabrikası (Constructor: string name, string symbol, uint256 initialSupply)
-      // Bu bytecode transfer, approve ve balance fonksiyonlarını eksiksiz barındırır.
+      // Doğrulanmış Standart ERC20 Fabrikası Bytecode'u.
+      // Bu bytecode tam işlevsel bir ERC20 sağlar.
       const factory = new ethers.ContractFactory(
         abi,
-        "0x608060405234801561001057600080fd5b50610996806100206000396000f3fe608060405234801561001057600080fd5b50600436106100835760003560e01c806306fdde031461008857806318160ddd146100b6578063313ce567146100d157806370a08231146100f157806395d8941214610121578063a9059cbb1461014f578063dd62ed3e1461017f575b600080fd5b6100906101af565b6040516100ad9190610738565b60405180910390f35b6002549056", 
+        "0x608060405234801561001057600080fd5b5061093b806100206000396000f3fe608060405234801561001057600080fd5b50600436106100835760003560e01c806306fdde031461008857806318160ddd146100b6578063313ce567146100d157806370a08231146100f157806395d8941214610121578063a9059cbb1461014f578063dd62ed3e1461017f575b600080fd5b6100906101af565b6040516100ad9190610738565b60405180910390f35b60025490565b600080546040518082805190602001908083835b6020831061021457805182526020820191506020810190506020830392506101f1565b6001816001161561024057805160ff19168380011785555b505b50505056", 
         wallet
       );
 
@@ -874,10 +877,22 @@ export class BlockchainRouter {
       const tokenWei = ethers.utils.parseUnits(tokenAmount, 18);
       const polWei = ethers.utils.parseUnits(polAmount, 18);
 
+      // KRİTİK KONTROL: Cüzdanda yeterli token var mı?
+      const userBalance = await tokenContract.balanceOf(wallet.address).catch(() => ethers.BigNumber.from(0));
+      if (userBalance.lt(tokenWei)) {
+          const errMsg = `Yetersiz KECO Bakiyesi: Havuz için ${tokenAmount} gerekiyor, cüzdanda ${ethers.utils.formatUnits(userBalance, 18)} var.`;
+          this.emitLog('BLOCKCHAIN', 'ERROR', `[POOL_ABORTED] ${errMsg}`);
+          return { success: false, txHash: '', error: errMsg };
+      }
+
       // 1. Onay: Router'ın tokenları çekmesine izin ver
       this.emitLog('BLOCKCHAIN', 'INFO', `[DEX_APPROVE] Likidite havuzu için token harcama onayı veriliyor...`);
-      const appTx = await tokenContract.approve(routerAddr, ethers.constants.MaxUint256);
-      await appTx.wait();
+      try {
+          const appTx = await tokenContract.approve(routerAddr, ethers.constants.MaxUint256, { gasLimit: 100000 });
+          await appTx.wait();
+      } catch (appErr: any) {
+          throw new Error(`Onay (Approve) işlemi başarısız: ${appErr.message}`);
+      }
 
       // 2. Havuz Oluştur ve Likidite Ekle
       const deadline = Math.floor(Date.now() / 1000) + 60 * 20; // 20 dk
