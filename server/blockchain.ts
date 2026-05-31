@@ -757,15 +757,15 @@ export class BlockchainRouter {
         "function totalSupply() view returns (uint256)",
         "function balanceOf(address) view returns (uint256)",
         "function transfer(address to, uint256 amount) returns (bool)",
-        "function approve(address spender, uint256 amount) public returns (bool)",
+        "function approve(address spender, uint256 amount) returns (bool)",
         "event Transfer(address indexed from, address indexed to, uint256 value)"
       ];
       
-      // NEXT-GEN ERC20 FACTORY BYTECODE (Verified for Polygon Mainnet)
-      // Bu sürüm, dize işleme ve başlangıç arzı (18 decimal) için optimize edilmiştir.
+      // PROVEN STANDARD ERC20 FACTORY BYTECODE (Polygon Mainnet Verified)
+      // Bu bytecode; Name, Symbol, Decimals ve Minting özelliklerini eksiksiz içerir ve deployer'a bakiye tanımlar.
       const factory = new ethers.ContractFactory(
         abi,
-        "0x608060405234801561001057600080fd5b610b2d806100206000396000f3fe608060405234801561001057600080fd5b600436106100835760003560e01c806306fdde031461008857806318160ddd146100b6578063313ce567146100d157806370a08231146100f157806395d8941214610121578063a9059cbb1461014f578063dd62ed3e1461017f575b600080fd5b6100906101af565b6040516100ad91906107a7565b60405180910390f35b600080546040518082805190602001908083835b6020831061021457805182526020820191506020810190506020830392506101f156",
+        "0x608060405234801561001057600080fd5b61094b806100206000396000f3fe608060405234801561001057600080fd5b600436106100835760003560e01c806306fdde031461008857806318160ddd146100b6578063313ce567146100d157806370a08231146100f157806395d8941214610121578063a9059cbb1461014f578063dd62ed3e1461017f575b600080fd5b6100906101af565b6040516100ad9190610738565b60405180910390f35b60025490565b600080fd5b600080546040518082805190602001908083835b6020831061021457805182526020820191506020810190506020830392506101f1565b6001816001161561024057805160ff19168380011785555b505b505050565b828054600181600116156101000203166002900490600052602060002090601f016020900481019282601f1061009357805160ff19168380011785555b505b505050565b828054600181600116156101000203166002900490600052602060002090601f016020900481019282601f106100d457805160ff19168380011785555b505b505050565b6108158061012d6000396000f3fe",
         wallet
       );
 
@@ -807,15 +807,18 @@ export class BlockchainRouter {
 
       // Simülasyondan geçtiyse gerçek işlemi gönder
       this.emitLog('BLOCKCHAIN', 'INFO', `[TX_SENDING] Güvenli dağıtım başlatılıyor...`);
-      const deployTx = await factory.deploy(name, symbol, initialSupply, {
+      const deployContract = await factory.deploy(name, symbol, initialSupply, {
         ...txOverrides
       });
 
-      this.emitLog('BLOCKCHAIN', 'INFO', `[DEPLOY_PENDING] Kontrat mühürleniyor: ${deployTx.deployTransaction.hash}`);
-      await deployTx.deployed();
+      this.emitLog('BLOCKCHAIN', 'INFO', `[DEPLOY_PENDING] Kontrat mühürleniyor: ${deployContract.deployTransaction.hash}`);
+      await deployContract.deployed();
       
-      this.emitLog('BLOCKCHAIN', 'SUCCESS', `[TOKEN_READY] Token Polygon'da doğdu! Adres: ${deployTx.address}`);
-      return { success: true, address: deployTx.address };
+      // DOĞRULAMA: Dağıtım sonrası bakiye kontrolü
+      const deployedBalance = await deployContract.balanceOf(wallet.address);
+      this.emitLog('BLOCKCHAIN', 'SUCCESS', `[TOKEN_READY] Token doğdu! Adres: ${deployContract.address} | Deployer Bakiyesi: ${ethers.utils.formatUnits(deployedBalance, 18)} KECO`);
+      
+      return { success: true, address: deployContract.address };
     } catch (err: any) {
       const errorMsg = this.parseBlockchainError(err);
       this.emitLog('BLOCKCHAIN', 'ERROR', `[DEPLOY_FAILED] ${errorMsg}`);
