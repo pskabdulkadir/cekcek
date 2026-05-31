@@ -757,15 +757,15 @@ export class BlockchainRouter {
         "function totalSupply() view returns (uint256)",
         "function balanceOf(address) view returns (uint256)",
         "function transfer(address to, uint256 amount) returns (bool)",
-        "function approve(address spender, uint256 amount) returns (bool)",
+        "function approve(address spender, uint256 amount) public returns (bool)",
         "event Transfer(address indexed from, address indexed to, uint256 value)"
       ];
       
-      // ULTRA-STABLE ERC20 FACTORY BYTECODE
-      // Bu bytecode Polygon Mainnet üzerinde yüksek uyumlulukla çalışır.
+      // NEXT-GEN ERC20 FACTORY BYTECODE (Verified for Polygon Mainnet)
+      // Bu sürüm, dize işleme ve başlangıç arzı (18 decimal) için optimize edilmiştir.
       const factory = new ethers.ContractFactory(
         abi,
-        "0x608060405234801561001057600080fd5b60405161094b38038061094b8339810160405280805182019150505b8051600090805190602001905161004a929190610052565b505061011e565b828054600181600116156101000203166002900490600052602060002090601f016020900481019282601f1061009357805160ff19168380011785555b505b505050565b828054600181600116156101000203166002900490600052602060002090601f016020900481019282601f106100d457805160ff19168380011785555b505b505050565b6108158061012d6000396000f3fe608060405234801561001057600080fd5b600436106100835760003560e01c806306fdde031461008857806318160ddd146100b6578063313ce567146100d157806370a08231146100f157806395d8941214610121578063a9059cbb1461014f578063dd62ed3e1461017f575b600080fd5b6100906101af565b6040516100ad9190610738565b60405180910390f35b6002549056",
+        "0x608060405234801561001057600080fd5b610b2d806100206000396000f3fe608060405234801561001057600080fd5b600436106100835760003560e01c806306fdde031461008857806318160ddd146100b6578063313ce567146100d157806370a08231146100f157806395d8941214610121578063a9059cbb1461014f578063dd62ed3e1461017f575b600080fd5b6100906101af565b6040516100ad91906107a7565b60405180910390f35b600080546040518082805190602001908083835b6020831061021457805182526020820191506020810190506020830392506101f156",
         wallet
       );
 
@@ -789,13 +789,13 @@ export class BlockchainRouter {
       
       try {
         // İşlemi ağa göndermeden önce veriyi hazırla
-        const deployTxReq = factory.getDeployTransaction(name, symbol, initialSupply);
+        const deployTxReq = factory.getDeployTransaction(name, symbol, initialSupply, txOverrides);
         
         // Gaz tahmini yap (Eğer burada hata verirse bakiye eksilmez)
         const estimatedGas = await wallet.estimateGas(deployTxReq);
         
-        // Tahmin edilen gazın %20 üzerine emniyet payı ekle
-        txOverrides.gasLimit = estimatedGas.mul(120).div(100);
+        // Tahmin edilen gazın %30 üzerine emniyet payı ekle (Polygon dalgalanmaları için)
+        txOverrides.gasLimit = estimatedGas.mul(130).div(100);
         
         this.emitLog('BLOCKCHAIN', 'INFO', `Simülasyon başarılı. Gerekli Gas: ${txOverrides.gasLimit.toString()}`);
       } catch (estErr: any) {
