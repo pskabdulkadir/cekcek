@@ -783,7 +783,7 @@ export class BlockchainRouter {
       const contract = await factory.deploy(name, symbol, initialSupply, txOverrides);
 
       this.emitLog('BLOCKCHAIN', 'INFO', `[DEPLOY_PENDING] Hash: ${contract.deployTransaction.hash}`);
-      await deployContract.deployed();
+      await contract.deployed();
       
       // AĞ GECİKMESİ KORUMASI: RPC düğümlerinin indekslemesi için 8 saniye bekle
       await new Promise(r => setTimeout(r, 8000));

@@ -57,9 +57,6 @@ const ALLOWED_CONTRACTS = [
     process.env.ROUTER_ADDRESS || "0xa5e0829caced8ffdd052420551415491d6993e2f"
 ].filter(addr => addr && addr.startsWith("0x") && addr.length === 42).map(addr => addr.toLowerCase());
 
-if (process.env.GREEN_TOKEN_ADDRESS) ALLOWED_CONTRACTS.push(process.env.GREEN_TOKEN_ADDRESS.toLowerCase());
-if (process.env.ROUTER_ADDRESS) ALLOWED_CONTRACTS.push(process.env.ROUTER_ADDRESS.toLowerCase());
-
 function validateContractAddress(address: string) {
     if (!address || address === ethers.constants.AddressZero) return;
     if (!ALLOWED_CONTRACTS.includes(address.toLowerCase())) {

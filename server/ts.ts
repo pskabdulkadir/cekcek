@@ -29,7 +29,7 @@ dotenv.config();
 // --- KRİTİK GÜVENLİK BARİYERİ ---
 // Eğer AUTO_GENESIS kapalıysa ve sistem yine de buraya girerse süreci durdur.
 if (process.env.AUTO_GENESIS === "false" && !process.env.FORCE_DEPLOY) {
-    console.error("KRİTİK: Genesis süreci sistem tarafından engellendi. Hayalet döngü durduruluyor.");
+    pushLog('SYSTEM', 'WARNING', "KRİTİK: Genesis süreci sistem tarafından engellendi. Otonom mühürleme devre dışı.");
 }
 
 // DNS Workaround: IPv6 önceliği nedeniyle oluşan ENOTFOUND hatalarını engelle
