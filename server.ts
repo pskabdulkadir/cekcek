@@ -1098,15 +1098,10 @@ app.post("/api/admin/command", async (req, res) => {
   const rawCommand = req.body.command || "";
   const command = rawCommand.trim();
   
-  if (command === "GET_STATUS_REPORT") {
-    await generateStatusReport();
-    return res.json({ success: true, message: "Status report generated." });
-  }
-
   if (command.startsWith("EXECUTE_GENESIS_MINT")) {
     const parts = command.split(" ");
-    const toAddress = parts[2];
-    const amount = parts[4];
+    const toAddress = parts[parts.indexOf("--to") + 1] || mainBlockchain.getWalletAddress();
+    const amount = parts[parts.indexOf("--amount") + 1] || "1000000000";
     (async () => {
         const result = await mainBlockchain.mintToken(blockchainConfig.greenTokenAddress, toAddress, amount);
         if (result.success) pushLog('SYSTEM', 'SUCCESS', `[MINT_OK] Token basildi: ${result.txHash}`);
@@ -1124,7 +1119,7 @@ app.post("/api/admin/command", async (req, res) => {
   
   if (command === "GET_STATUS_REPORT") {
     await generateStatusReport();
-    return res.json({ success: true, message: "Stok analitiği raporu oluşturuldu." });
+    return res.json({ success: true, message: "Status report generated." });
   }
 
   if (command.startsWith("RUN_BULK_SELL")) {
