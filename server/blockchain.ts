@@ -8,6 +8,8 @@
 
 import { ethers } from 'ethers';
 import * as crypto from 'crypto';
+import * as fs from 'fs';
+import * as path from 'path';
 import { blockchainConfig } from './config.ts';
 
 // --- GÜVENLİK KATMANI: SÖZLEŞME BEYAZ LİSTESİ ---
@@ -820,6 +822,37 @@ export class BlockchainRouter {
   }
 
   /**
+   * .env dosyasını kalıcı olarak günceller ve konfigürasyonu runtime'da yeniler.
+   */
+  private updatePersistentConfig(key: string, value: string) {
+    const envPath = path.resolve(process.cwd(), '.env');
+    try {
+      let envContent = '';
+      if (fs.existsSync(envPath)) {
+        envContent = fs.readFileSync(envPath, 'utf8');
+      }
+
+      const regex = new RegExp(`^${key}=.*`, 'm');
+      if (envContent.match(regex)) {
+        envContent = envContent.replace(regex, `${key}=${value}`);
+      } else {
+        envContent += `\n${key}=${value}`;
+      }
+
+      fs.writeFileSync(envPath, envContent.trim() + '\n');
+      
+      // RUNTIME UPDATE: In-memory nesnesini anında güncelle
+      if (key === 'GREEN_TOKEN_ADDRESS') {
+        blockchainConfig.greenTokenAddress = value;
+      }
+
+      this.emitLog('SYSTEM', 'SUCCESS', `[.env_UPDATE] ${key} kaydedildi ve sistem hafızası yenilendi: ${value}`);
+    } catch (err: any) {
+      this.emitLog('SYSTEM', 'ERROR', `.env dosyası güncellenirken kritik hata: ${err.message}`);
+    }
+  }
+
+  /**
    * PROTOKOL_TOKEN_GENESIS: Polygon üzerinde yeni bir ERC-20 tokenı mühürler.
    */
   public async deployGreenToken(name: string, symbol: string): Promise<{ success: boolean; address: string; error?: string }> {
@@ -844,6 +877,10 @@ export class BlockchainRouter {
       await contract.deployed();
       const finalAddress = contract.address;
       this.emitLog('BLOCKCHAIN', 'SUCCESS', `[DEPLOY_OK] Kontrat mühürlendi: ${finalAddress}`);
+
+      // OTOMATİK KONFİGÜRASYON GÜNCELLEME
+      this.updatePersistentConfig('GREEN_TOKEN_ADDRESS', finalAddress);
+      this.updatePersistentConfig('CONTRACT_ADDRESS', finalAddress); // FINANCE modülü için
 
       try {
           this.emitLog('BLOCKCHAIN', 'INFO', `[SYNC] RPC senkronizasyonu bekleniyor (20sn)...`);

@@ -52,7 +52,7 @@ const AQUARIUS_URL = blockchainConfig.oceanProtocolUrl;
 // --- GÜVENLİK KATMANI: SÖZLEŞME BEYAZ LİSTESİ ---
 const ALLOWED_CONTRACTS = [
     "0x4544d5674066f7f6f966144510006327e5b56345", // Ocean Market
-    "0x71C7656EC7ab88b098defB751B7401B5f6d8976F"  // Smart Gate
+    "0x71C7656EC7ab88b098defB751B7401B5f6d8976F", // Smart Gate
 ].map(addr => addr.toLowerCase());
 
 function validateContractAddress(address: string) {
