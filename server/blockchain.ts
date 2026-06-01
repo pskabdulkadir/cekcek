@@ -615,7 +615,16 @@ export class BlockchainRouter {
           
           let tx;
           try {
-            this.emitLog('BLOCKCHAIN', 'INFO', `Deneme 1: registerDataAsset fonksiyonu çağrılıyor...`);
+            // KRİTİK: Eski kontratlarda bu fonksiyon olmayabilir, kontrol et
+            const code = await provider.getCode(this.contractAddress);
+            if (!code.includes("3d11933c")) { // registerDataAsset selector check
+                this.emitLog('BLOCKCHAIN', 'WARNING', `[VERSION_MISMATCH] Kontrat 'registerDataAsset' desteklemiyor. Fallback moduna geçiliyor...`);
+                // Eğer fonksiyon yoksa, mühürlemeyi 'Memo' moduna (self-transaction) yönlendir
+                this.contractAddress = ethers.constants.AddressZero;
+                return this.submitDataInsightProof(co2AnalysisGrams, proofHash);
+            }
+
+            this.emitLog('BLOCKCHAIN', 'INFO', `Deneme 1: registerDataAsset çağrılıyor...`);
             tx = await contract.registerDataAsset(amountWei, proofHash, {
               gasLimit: 150000, // Kontrat çağrısı için daha yüksek gasLimit
               ...txOverrides // Dinamik gas fiyatlarını uygula
@@ -759,10 +768,10 @@ export class BlockchainRouter {
       const path = [tokenAddr.toLowerCase(), WMATIC.toLowerCase(), POLYGON_USDT.toLowerCase()];
       const deadline = Math.floor(Date.now() / 1000) + 60 * 20; // 20 dakika
 
-      // PRE-FLIGHT CHECK: Adres cüzdan mı yoksa kontrat mı?
+      // PRE-FLIGHT CHECK: Adres bir kontrat mı ve borsa fonksiyonu var mı?
       const tokenCode = await provider.getCode(tokenAddr);
       if (tokenCode === '0x' || tokenCode === '0x0') {
-        const errMsg = `[DEX_ABORTED] GREEN_TOKEN_ADDRESS (${tokenAddr.slice(0,10)}...) bir cüzdan adresi! Takas için gerçek bir kontrat gereklidir.`;
+        const errMsg = `[DEX_ABORTED] GREEN_TOKEN_ADDRESS bir cüzdan! Takas için kontrat gereklidir.`;
         this.emitLog('BLOCKCHAIN', 'ERROR', errMsg);
         return { success: false, txHash: '', error: errMsg };
       }
@@ -771,11 +780,13 @@ export class BlockchainRouter {
       const feeData = await provider.getFeeData();
       
       // 1. ADIM: Fiyat Sorgulama (0.1sn Gecikmeli Gerçek Fiyat)
-      const amountsOut = await router.getAmountsOut(tokenAmountWei, path).catch(() => null);
+      const amountsOut = await router.getAmountsOut(tokenAmountWei, path).catch((err: any) => {
+        this.emitLog('BLOCKCHAIN', 'WARNING', `[LIQUIDITY_OFFLINE] QuickSwap'ta fiyat bulunamadı. Havuz kurulmamış olabilir.`);
+        return null;
+      });
+
       if (!amountsOut || !amountsOut[2] || ethers.BigNumber.from(amountsOut[2]).isZero()) {
-        const errMsg = "[DEX_ABORTED] Havuzda fiyat oluşmamış. Likidite (POL/KECO) eksik olabilir.";
-        this.emitLog('BLOCKCHAIN', 'ERROR', errMsg);
-        return { success: false, txHash: '', error: errMsg };
+        return { success: false, txHash: '', error: "Yetersiz Likidite" };
       }
 
       const expectedUsdt = amountsOut[2];

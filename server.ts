@@ -230,45 +230,41 @@ async function monitorAndLiquidate() {
   if (!serverState.autonomousMode || !blockchainConfig.greenTokenAddress || blockchainConfig.greenTokenAddress.includes('0x000')) return;
 
   try {
-    // Otonom döngü hızı kontrolü (Mainnet stabilitesi için)
-    const walletAddr = mainBlockchain.getWalletAddress();
-    if (!walletAddr) return;
-
     // 1. ADIM: YAKIT KONTROLÜ (Gas Refiller)
     const gasCheck = await mainBlockchain.checkGasBalance('polygon');
     const currentPol = parseFloat(gasCheck.balance);
     
     if (blockchainConfig.gasRefillEnabled && currentPol < blockchainConfig.gasRefillThreshold) {
-      pushLog('FINANCE', 'WARNING', `[AUTO_FUEL] Yakıt düşük: ${currentPol.toFixed(3)} POL. Rezerv USDT kullanılıyor...`);
+      pushLog('FINANCE', 'WARNING', `[AUTO_FUEL] Yakıt düşük: ${currentPol.toFixed(3)} POL. Rezerv USDT kontrol ediliyor...`);
       const usdtBalance = await mainBlockchain.getUSDTBalance();
       if (parseFloat(usdtBalance) >= blockchainConfig.gasRefillUsdtAmount) {
         const refill = await mainBlockchain.refillGasFromUSDT(blockchainConfig.gasRefillUsdtAmount.toString());
-        if (refill.success) pushLog('FINANCE', 'SUCCESS', `[GAS_OK] Yakıt takviyesi başarılı. Otonom döngü kesintisiz devam ediyor.`);
+        if (refill.success) pushLog('FINANCE', 'SUCCESS', `[GAS_OK] Yakıt takviyesi mühürlendi.`);
       } else {
-        pushLog('FINANCE', 'ERROR', `[REFILL_FAIL] Yetersiz USDT rezervi ($${usdtBalance}). Sistem durabilir, manuel POL takviyesi gerekebilir!`);
+        pushLog('FINANCE', 'ERROR', `[FUEL_FAIL] Yetersiz USDT ($${usdtBalance}). Manuel POL desteği gerekebilir!`);
       }
     }
 
     // 2. ADIM: SATIŞ KONTROLÜ (Market Maker)
+    const walletAddr = mainBlockchain.getWalletAddress();
     const balance = await mainBlockchain.getTokenBalance(blockchainConfig.greenTokenAddress, walletAddr);
     const balanceNum = parseFloat(balance);
 
-    if (balanceNum > 1.0) { // Toz miktarları atla (Minimum 1 Token)
-      pushLog('FINANCE', 'SUCCESS', `[PROFIT_TRIGGER] ${balanceNum.toFixed(2)} KECO nakde çevriliyor.`);
+    if (balanceNum > 0.0001) { // Toz miktarları (dust) atla
+      pushLog('FINANCE', 'SUCCESS', `[AUTONOMOUS_CYCLE] ${balanceNum.toFixed(4)} KECO tespit edildi. Otonom satış döngüsü başladı...`);
       const amountWei = ethers.utils.parseUnits(balance, 18).toString();
       const result = await mainBlockchain.performDEXSwap(amountWei);
-      
       if (result.success) {
-        pushLog('FINANCE', 'SUCCESS', `[MONETIZED] Satış başarılı. USDT bakiyesi güncellendi.`);
+        pushLog('FINANCE', 'SUCCESS', `[MARKET_MAKER_OK] Varlık başarıyla USDT'ye dönüştürüldü.`);
       }
     }
   } catch (err: any) {
-    if (!err.message.includes('call exception')) {
-        pushLog('SYSTEM', 'ERROR', `[AUTO_LOOP_ERR] ${err.message}`);
-    }
+    // CALL_EXCEPTION veya Underflow hatalarının telemetriyi kirletmesini önle
+    if (err.message.includes('call exception') || err.message.includes('underflow')) return;
+    pushLog('SYSTEM', 'ERROR', `[OTONOM_HATA] ${err.message.slice(0, 50)}...`);
   }
 }
-setInterval(monitorAndLiquidate, 15000); // 15 saniye: Mainnet için en güvenli hız
+setInterval(monitorAndLiquidate, 5000); 
 
 /**
  * --- GERÇEK FİNANSAL MUTABAKAT MOTORU ---
@@ -1210,14 +1206,13 @@ app.post("/api/admin/command", async (req, res) => {
     const name = parts[1] || "KADIR_ECO";
     const symbol = parts[2] || "KECO";
     
-    // KORUMA: Eğer halihazırda bir adres varsa yeniden üretimi engelle
-    if (blockchainConfig.greenTokenAddress && !blockchainConfig.greenTokenAddress.includes('0x000')) {
-        pushLog('SYSTEM', 'WARNING', `[GENESIS_ABORTED] Zaten aktif bir token mevcut: ${blockchainConfig.greenTokenAddress}. Yeni üretim iptal edildi.`);
-        return res.json({ success: true, message: "Token already exists. Use SET_AUTONOMOUS_DEPLOYMENT_TRUE to start." });
-    }
-
-    mainBlockchain.deployGreenToken(name, symbol);
-    return res.json({ success: true, message: "Genesis process initiated." });
+    (async () => {
+        const result = await mainBlockchain.deployGreenToken(name, symbol);
+        if (result.success) {
+            pushLog('SYSTEM', 'SUCCESS', `!!! KRİTİK !!! Yeni Token Adresiniz: ${result.address}. Lütfen bu adresi .env dosyanızdaki GREEN_TOKEN_ADDRESS kısmına yapıştırın.`);
+        }
+    })();
+    return res.json({ success: true, message: "Token deployment started." });
   }
 
   if (command === "PAUSE_SCRAPER") {
@@ -1648,13 +1643,8 @@ async function startServer() {
       offset: `${serverState.totalCo2SavedGrams.toFixed(4)} g`
     };
 
-    // Kendi kendini uyandırma (Self-Ping)
-    if (blockchainConfig.appUrl) {
-      axios.get(`${blockchainConfig.appUrl}/healthz`).catch(() => {});
-    }
-
-    pushLog('SYSTEM', 'INFO', `[KEEP_ALIVE] ${timeString} - Otonom Sistem Canlı.`);
-    pushLog('MARKET', 'INFO', `[CRAWLER_REPORT] Düğüm: ${report.nodes} | CO2: ${report.offset}`);
+    pushLog('SYSTEM', 'INFO', `[KEEP_ALIVE] ${timeString} - Heartbeat OK.`);
+    pushLog('MARKET', 'INFO', `[CRAWLER_REPORT] Aktif Düğüm: ${report.nodes} | Geri Kazanım: ${report.reclaimed} | Karbon Offset: ${report.offset}`);
   }, 5 * 60 * 1000); // 5 minutes (300,000 ms)
 }
 
