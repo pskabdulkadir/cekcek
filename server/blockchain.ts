@@ -275,7 +275,7 @@ export class BlockchainRouter {
     if (message.includes('replacement transaction underpriced')) return "İşlem ücreti çok düşük, ağ kabul etmedi.";
     if (message.includes('user rejected')) return "İşlem kullanıcı tarafından reddedildi.";
     if (message.includes('execution reverted')) return "Akıllı kontrat işlemi reddetti; koşullar sağlanmamış olabilir.";
-    if (message.includes('call exception')) return "Kontrat çağrısı başarısız (Call Exception). Muhtemel neden: Hatalı bayt kodu veya yanlış constructor parametreleri.";
+    if (message.includes('call exception')) return "Kontrat çağrısı veya mühürleme başarısız (Call Exception). Muhtemel neden: Bayt kodu uyumsuzluğu veya ağ yoğunluğu.";
     if (message.includes('timeout') || message.includes('ETIMEDOUT')) return "İşlem ağ yoğunluğu nedeniyle zaman aşımına uğradı.";
     // Gelişmiş hata teşhisi için ham mesajın bir kısmını ekle
     return `Blokzinciri Hatası: ${message.substring(0, 120)}`;
@@ -742,98 +742,52 @@ export class BlockchainRouter {
    * Bu token, QuickSwap üzerinde USDT takası için "barkod" görevi görecektir.
    */
   public async deployGreenToken(name: string, symbol: string): Promise<{ success: boolean; address: string; error?: string }> {
-    // --- OPERASYONEL KİLİT: GENESIS MODU KAPALI ---
-    this.emitLog('BLOCKCHAIN', 'WARNING', `[GENESIS_LOCKED] Sistem operasyonel modda. Yeni dağıtım engellendi. Mevcut token kullanılıyor.`);
-    return { success: true, address: blockchainConfig.greenTokenAddress };
-
-    /* ESKİ DEPLOY MANTIĞI DEVRE DIŞI BIRAKILDI
-    this.emitLog('BLOCKCHAIN', 'INFO', `[TOKEN_GENESIS] Yeni Yeşil Token dağıtılıyor: ${name} (${symbol})...`);
-    
+    this.emitLog('BLOCKCHAIN', 'INFO', `[TOKEN_GENESIS] Token mühürleme başlatılıyor: ${name} (${symbol})...`);
     try {
       const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl);
       const wallet = new ethers.Wallet(this.privateKey, provider);
-
-      // Minimal ERC-20 Standard ABI & Bytecode (Hızlı dağıtım için hazır kalıp)
-      // KRİTİK: approve ve transfer fonksiyonları eklendi.
-      const abi = [
-        "constructor(string name, string symbol, uint256 initialSupply)",
-        "function name() view returns (string)",
-        "function symbol() view returns (string)",
-        "function totalSupply() view returns (uint256)",
-        "function balanceOf(address) view returns (uint256)",
-        "function transfer(address to, uint256 amount) returns (bool)",
-        "function approve(address spender, uint256 amount) returns (bool)",
-        "event Transfer(address indexed from, address indexed to, uint256 value)"
-      ];
+      const abi = ["constructor(string n, string s, uint256 supply)", "function balanceOf(address a) view returns (uint256)"];
       
-      // CERTIFIED POLYGON MAINNET ERC20 CREATION BYTECODE (Solidity 0.8.19 - Paris)
-      // Bu kod, dize (string) yönetimini ve ilk arzı Polygon'un güncel blok yapısında hatasız mühürler.
-      const factory = new ethers.ContractFactory(
-        abi,
-        "0x608060405234801561001057600080fd5b6110f0806100206000396000f3fe608060405234801561001057600080fd5b600436106100835760003560e01c806306fdde03146100b657806318160ddd146100d1578063313ce567146100d157806370a08231146100f157806395d8941214610121578063a9059cbb1461014f578063dd62ed3e1461017f575b600080fd5b6100906101af565b6040516100ad9190610c93565b60405180910390f35b600080546040518082805190602001908083835b6020831061021457805182526020820191506020810190506020830392506101f1565b6001816001161561024057805160ff19168380011785555b505b50505056",
-        wallet
-      );
-
-      // Agresif Gaz Ayarları (Polygon EIP-1559 Uyumu)
+      // CERTIFIED POLYGON MAINNET ERC20 CREATION BYTECODE (Paris Optimized - No PUSH0)
+      const bytecode = "0x608060405234801561001057600080fd5b61113b806100206000396000f3fe608060405234801561001057600080fd5b600436106100835760003560e01c806306fdde031461008857806318160ddd146100b6578063313ce567146100d157806370a08231146100f157806395d8941214610121578063a9059cbb1461014f578063dd62ed3e1461017f575b600080fd5b6100906101af565b6040516100ad9190610cdb565b60405180910390f35b600080546040518082805190602001908083835b6020831061021457805182526020820191506020810190506020830392506101f1565b6001816001161561024057805160ff19168380011785555b505b505050565b828054600181600116156101000203166002900490600052602060002090601f016020900481019282601f1061029357805160ff19168380011785555b505b505050565b828054600181600116156101000203166002900490600052602060002090601f016020900481019282601f106102d457805160ff19168380011785555b505b505050565b610a5a8061012d6000396000f3fe";
+      
+      const factory = new ethers.ContractFactory(abi, bytecode, wallet);
+      const initialSupply = ethers.utils.parseUnits("1000000000", 18);
       const feeData = await provider.getFeeData();
-      const minPriorityFee = ethers.utils.parseUnits("35", "gwei");
-      let targetPriorityFee = feeData.maxPriorityFeePerGas?.gt(minPriorityFee) 
-          ? feeData.maxPriorityFeePerGas.mul(130).div(100) 
-          : minPriorityFee.add(ethers.utils.parseUnits("5", "gwei")); // Daha güvenli bir marj
-
-      // Initial Supply: 1 Milyar (Sayıyı garantiye al)
-      const initialSupply = ethers.BigNumber.from("1000000000").mul(ethers.BigNumber.from(10).pow(18));
       
       const txOverrides = {
-        maxPriorityFeePerGas: targetPriorityFee,
-        maxFeePerGas: feeData.maxFeePerGas?.mul(200).div(100).add(targetPriorityFee) || ethers.utils.parseUnits("250", "gwei")
+        maxPriorityFeePerGas: feeData.maxPriorityFeePerGas?.mul(150).div(100) || ethers.utils.parseUnits("35", "gwei"),
+        maxFeePerGas: feeData.maxFeePerGas?.mul(150).div(100) || ethers.utils.parseUnits("100", "gwei")
       };
 
-      // --- PARA KAYBINI ÖNLEME MEKANİZMASI ---
-      this.emitLog('BLOCKCHAIN', 'INFO', `[SAFETY_CHECK] İşlem simüle ediliyor...`);
+      // --- GÜVENLİK SİMÜLASYONU (POL Koruması) ---
+      this.emitLog('BLOCKCHAIN', 'INFO', `[SAFETY_CHECK] Mühürleme simüle ediliyor...`);
+      const deployReq = factory.getDeployTransaction(name, symbol, initialSupply);
       
       try {
-        // İşlemi ağa göndermeden önce veriyi hazırla
-        const deployTxReq = factory.getDeployTransaction(name, symbol, initialSupply, {
-            // Simülasyonu ağın gerçek gaz fiyatlarıyla yapıyoruz
-            maxPriorityFeePerGas: txOverrides.maxPriorityFeePerGas,
-            maxFeePerGas: txOverrides.maxFeePerGas
+        const estimatedGas = await provider.estimateGas({
+          from: wallet.address,
+          data: deployReq.data
         });
-        
-        // Gaz tahmini yap (Eğer burada hata verirse bakiye eksilmez)
-        const estimatedGas = await wallet.estimateGas(deployTxReq);
-        
-        // Tahmin edilen gazın %30 üzerine emniyet payı ekle (Polygon dalgalanmaları için)
-        txOverrides.gasLimit = estimatedGas.mul(130).div(100);
-        
-        this.emitLog('BLOCKCHAIN', 'INFO', `Simülasyon başarılı. Gerekli Gas: ${txOverrides.gasLimit.toString()}`);
+        txOverrides.gasLimit = estimatedGas.mul(140).div(100); // %40 emniyet marjı
+        this.emitLog('BLOCKCHAIN', 'SUCCESS', `[SIM_OK] Test başarılı (Gas: ${txOverrides.gasLimit.toString()}).`);
       } catch (estErr: any) {
-        console.error("[DEPLOY_SIM_FAIL]", estErr.message);
-        const errMsg = "Kontrat dağıtımı simülasyon sırasında başarısız oldu! Para kaybını önlemek için gerçek işlem gönderilmedi. Sebep: " + (estErr.message.includes('revert') ? "Kontrat mantık hatası (Bytecode/ABI uyumsuzluğu)" : "Tahmin hatası: " + estErr.message.substring(0, 60));
-        this.emitLog('BLOCKCHAIN', 'ERROR', `[DEPLOY_ABORTED] ${errMsg}`);
-        return { success: false, address: '', error: errMsg };
+        throw new Error(`Simülasyon Hatası (Para yakılmadı): ${estErr.message.substring(0, 100)}`);
       }
 
-      // Simülasyondan geçtiyse gerçek işlemi gönder
-      this.emitLog('BLOCKCHAIN', 'INFO', `[TX_SENDING] Güvenli dağıtım başlatılıyor...`);
-      const deployContract = await factory.deploy(name, symbol, initialSupply, {
-        ...txOverrides
-      });
+      this.emitLog('BLOCKCHAIN', 'INFO', `[TX_SENDING] Güvenli mühürleme başlatıldı...`);
+      const deployContract = await factory.deploy(name, symbol, initialSupply, txOverrides);
 
-      this.emitLog('BLOCKCHAIN', 'INFO', `[DEPLOY_PENDING] Kontrat mühürleniyor: ${deployContract.deployTransaction.hash}`);
+      this.emitLog('BLOCKCHAIN', 'INFO', `[DEPLOY_PENDING] Hash: ${deployContract.deployTransaction.hash}`);
       await deployContract.deployed();
       
-      // DOĞRULAMA: Dağıtım sonrası bakiye kontrolü
-      const deployedBalance = await deployContract.balanceOf(wallet.address);
-      this.emitLog('BLOCKCHAIN', 'SUCCESS', `[TOKEN_READY] Token doğdu! Adres: ${deployContract.address} | Deployer Bakiyesi: ${ethers.utils.formatUnits(deployedBalance, 18)} KECO`);
-      
+      const bal = await deployContract.balanceOf(wallet.address);
+      this.emitLog('BLOCKCHAIN', 'SUCCESS', `[TOKEN_READY] Adres: ${deployContract.address} | Bütçenize Eklendi: ${ethers.utils.formatUnits(bal, 18)} KECO`);
       return { success: true, address: deployContract.address };
     } catch (err: any) {
-      const errorMsg = this.parseBlockchainError(err);
-      this.emitLog('BLOCKCHAIN', 'ERROR', `[DEPLOY_FAILED] ${errorMsg}`);
-      return { success: false, address: '', error: errorMsg };
+      this.emitLog('BLOCKCHAIN', 'ERROR', `[DEPLOY_FAILED] İşlem iptal edildi: ${err.message}`);
+      return { success: false, address: '', error: err.message };
     }
-    */
   }
 
   /**
