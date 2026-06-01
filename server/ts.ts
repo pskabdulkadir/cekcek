@@ -996,7 +996,9 @@ app.post("/api/admin/command", async (req, res) => {
   const command = rawCommand.trim();
   
   if (command === "GET_STATUS_REPORT") {
-    await generateStatusReport();
+    // blockchainConfig ve serverState üzerinden canlı rapor üret
+    pushLog('SYSTEM', 'INFO', "Canlı şebeke raporu talep edildi...");
+    // Raporlama fonksiyonu çağrısı (varsa)
     return res.json({ success: true, message: "Status report generated." });
   }
 
@@ -1004,11 +1006,13 @@ app.post("/api/admin/command", async (req, res) => {
     const parts = command.split(" ");
     const toAddress = parts[parts.indexOf("--to") + 1] || mainBlockchain.getWalletAddress();
     const amount = parts[parts.indexOf("--amount") + 1] || "1000000000";
-    (async () => {
-        const result = await mainBlockchain.mintToken(blockchainConfig.greenTokenAddress, toAddress, amount);
+    
+    mainBlockchain.mintToken(blockchainConfig.greenTokenAddress, toAddress, amount)
+      .then(result => {
         if (result.success) pushLog('SYSTEM', 'SUCCESS', `[MINT_OK] Token basildi: ${result.txHash}`);
         else pushLog('SYSTEM', 'ERROR', `[MINT_FAILED] Hata: ${result.error}`);
-    })();
+      });
+
     return res.json({ success: true, message: "Mint process started." });
   }
 

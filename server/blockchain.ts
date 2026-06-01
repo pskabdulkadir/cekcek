@@ -823,7 +823,7 @@ export class BlockchainRouter {
    * PROTOKOL_TOKEN_GENESIS: Polygon üzerinde yeni bir ERC-20 tokenı mühürler.
    */
   public async deployGreenToken(name: string, symbol: string): Promise<{ success: boolean; address: string; error?: string }> {
-    this.emitLog('BLOCKCHAIN', 'INFO', `[TOKEN_GENESIS] Ultra-Güvenli mühürleme başlatılıyor: ${name}...`);
+    this.emitLog('BLOCKCHAIN', 'INFO', `[TOKEN_GENESIS] Ultra-Stabil mühürleme başlatılıyor: ${name}...`);
     try {
       const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl);
       const wallet = new ethers.Wallet(this.privateKey, provider);
@@ -836,8 +836,8 @@ export class BlockchainRouter {
       const initialSupply = ethers.utils.parseUnits("1000000000", 18);
 
       const contract = await factory.deploy(name, symbol, initialSupply, {
-        maxPriorityFeePerGas: ethers.utils.parseUnits("35", "gwei"),
-        maxFeePerGas: ethers.utils.parseUnits("350", "gwei"),
+        maxPriorityFeePerGas: ethers.utils.parseUnits("40", "gwei"),
+        maxFeePerGas: ethers.utils.parseUnits("400", "gwei"),
         gasLimit: 1500000
       });
       
@@ -846,8 +846,8 @@ export class BlockchainRouter {
       this.emitLog('BLOCKCHAIN', 'SUCCESS', `[DEPLOY_OK] Kontrat mühürlendi: ${finalAddress}`);
 
       try {
-          this.emitLog('BLOCKCHAIN', 'INFO', `[SYNC] RPC senkronizasyonu bekleniyor (15sn)...`);
-          await new Promise(r => setTimeout(r, 15000));
+          this.emitLog('BLOCKCHAIN', 'INFO', `[SYNC] RPC senkronizasyonu bekleniyor (20sn)...`);
+          await new Promise(r => setTimeout(r, 20000));
           const bal = await contract.balanceOf(wallet.address);
           this.emitLog('BLOCKCHAIN', 'SUCCESS', `[TOKEN_READY] Bakiye doğrulandı: ${ethers.utils.formatUnits(bal, 18)} ${symbol}`);
       } catch (e) {
@@ -856,24 +856,25 @@ export class BlockchainRouter {
       
       return { success: true, address: finalAddress };
     } catch (err: any) {
-      this.emitLog('BLOCKCHAIN', 'ERROR', `[DEPLOY_FAILED] Kritik Hata: ${err.message}`);
+      this.emitLog('BLOCKCHAIN', 'ERROR', `[DEPLOY_FAILED] Kritik Hata (Mühürleme): ${err.message}`);
       return { success: false, address: '', error: err.message };
     }
   }
 
   public async mintToken(tokenAddress: string, toAddress: string, amount: string): Promise<{ success: boolean; txHash?: string; error?: string }> {
-    this.emitLog('BLOCKCHAIN', 'INFO', `[TOKEN_MINT] Basım emri iletiliyor: ${amount} KECO -> ${toAddress}`);
+    this.emitLog('BLOCKCHAIN', 'INFO', `[TOKEN_MINT] Basım emri iletiliyor: ${amount} -> ${toAddress}`);
     try {
       const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl);
       const wallet = new ethers.Wallet(this.privateKey, provider);
       const contract = new ethers.Contract(tokenAddress, ["function mint(address to, uint256 amount) public"], wallet);
       const tx = await contract.mint(toAddress, ethers.utils.parseUnits(amount, 18), {
-        maxPriorityFeePerGas: ethers.utils.parseUnits("35", "gwei"),
-        maxFeePerGas: ethers.utils.parseUnits("300", "gwei")
+        maxPriorityFeePerGas: ethers.utils.parseUnits("40", "gwei"),
+        maxFeePerGas: ethers.utils.parseUnits("400", "gwei")
       });
       await tx.wait();
       return { success: true, txHash: tx.hash };
     } catch (err: any) {
+      this.emitLog('BLOCKCHAIN', 'ERROR', `[MINT_FAILED] Hata: ${err.message}`);
       return { success: false, error: err.message };
     }
   }
