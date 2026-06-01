@@ -158,10 +158,7 @@ export class BlockchainRouter {
         if (currentRpc.startsWith('ws')) {
           provider = new ethers.providers.WebSocketProvider(currentRpc);
         } else {
-          provider = new ethers.providers.JsonRpcProvider({
-            url: currentRpc,
-            timeout: blockchainConfig.rpcTimeout
-          });
+          provider = new ethers.providers.JsonRpcProvider(currentRpc);
         }
 
         // Render ağ kısıtlamalarını aşmak için dinamik bekleme süresi
@@ -234,13 +231,79 @@ export class BlockchainRouter {
   }
 
   /**
+   * PRE-FLIGHT CHECK: Adresin geçerli bir EVM adresi olduğunu doğrular
+   */
+  private isValidAddress(address: string): boolean {
+    try {
+      return ethers.utils.isAddress(address) && address !== ethers.constants.AddressZero;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * PRE-FLIGHT CHECK: Adresin bir kontrat olup olmadığını doğrular
+   */
+  private async isContract(address: string): Promise<boolean> {
+    try {
+      const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl, "any");
+      const code = await provider.getCode(address);
+      return code !== '0x' && code !== '0x0';
+    } catch (err: any) {
+      this.emitLog('BLOCKCHAIN', 'WARNING', `[PRE-FLIGHT FAIL] Kontrat kodu alınamadı: ${err.message}`);
+      return false;
+    }
+  }
+
+  /**
+   * PRE-FLIGHT CHECK: Sözleşmenin ERC-20 standardına uygun olup olmadığını test eder
+   */
+  private async isERC20Compatible(tokenAddress: string): Promise<boolean> {
+    try {
+      const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl, "any");
+      const testContract = new ethers.Contract(
+        tokenAddress,
+        ["function decimals() view returns (uint8)"],
+        provider
+      );
+      await testContract.decimals();
+      return true;
+    } catch (err: any) {
+      this.emitLog('BLOCKCHAIN', 'WARNING', `[PRE-FLIGHT FAIL] ERC-20 uyumluluk testi başarısız: ${tokenAddress}`);
+      return false;
+    }
+  }
+
+  /**
    * Herhangi bir ERC-20 tokenının bakiyesini sorgular (GREEN, MATIC vb.)
+   * GÜVENLİK GÜNCELLEMESİ: Pre-flight checks ve stack underflow koruması eklendi
    */
   public async getTokenBalance(tokenAddress: string, accountAddress: string): Promise<string> {
-    if (!accountAddress || accountAddress.length < 40) {
-      this.emitLog('BLOCKCHAIN', 'ERROR', `[BALANCE_ERR] Sorgulanan cüzdan adresi geçersiz veya boş!`);
+    // PRE-FLIGHT CHECK 1: Adres validasyonu
+    if (!this.isValidAddress(tokenAddress)) {
+      this.emitLog('BLOCKCHAIN', 'ERROR', `[BALANCE_ERR] Token adresi geçersiz: ${tokenAddress}`);
       return "0.00";
     }
+    if (!this.isValidAddress(accountAddress)) {
+      this.emitLog('BLOCKCHAIN', 'ERROR', `[BALANCE_ERR] Cüzdan adresi geçersiz: ${accountAddress}`);
+      return "0.00";
+    }
+
+    // PRE-FLIGHT CHECK 2: Kontrat doğrulaması
+    const isContract = await this.isContract(tokenAddress);
+    if (!isContract) {
+      this.emitLog('BLOCKCHAIN', 'ERROR', `[BALANCE_ERR] ${tokenAddress} bir kontrat değil, cüzdan adresi`);
+      return "0.00";
+    }
+
+    // PRE-FLIGHT CHECK 3: ERC-20 uyumluluk testi
+    const isERC20 = await this.isERC20Compatible(tokenAddress);
+    if (!isERC20) {
+      this.emitLog('BLOCKCHAIN', 'ERROR', `[BALANCE_ERR] ${tokenAddress} ERC-20 uyumlu değil`);
+      return "0.00";
+    }
+
+    // GÜVENLİ ÇAĞRI: staticCall kullanarak gas tüketimini önle
     try {
       const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl, "any");
       const contract = new ethers.Contract(tokenAddress, [
@@ -248,20 +311,36 @@ export class BlockchainRouter {
         "function decimals() view returns (uint8)"
       ], provider);
       
+      // staticCall kullanarak state değiştirmeyen güvenli çağrı
       const [balance, decimals] = await Promise.all([
-        contract.balanceOf(accountAddress),
-        contract.decimals().catch(() => 18)
+        contract.callStatic.balanceOf(accountAddress),
+        contract.callStatic.decimals().catch(() => 18)
       ]);
       
       this.emitLog('BLOCKCHAIN', 'ANALYZE', `[BALANCE_TRACE] Adres: ${accountAddress.slice(0,10)}... | Token: ${tokenAddress.slice(0,10)}... | Ham Bakiye: ${balance.toString()}`);
       return ethers.utils.formatUnits(balance, decimals);
     } catch (err: any) {
-      this.emitLog('BLOCKCHAIN', 'WARNING', `[BALANCE_QUERY_FAIL] Bakiye sorgulanamadı: ${err.message}`);
+      // HATA ANALİZİ: Revert nedenini tespit et
+      let errorMsg = err.message;
+      
+      if (err.message.includes('call exception')) {
+        if (err.data) {
+          errorMsg = `Revert data: ${err.data}`;
+        } else {
+          errorMsg = 'Revert without reason string - Muhtemelen ABI uyumsuzluğu';
+        }
+      }
+      
+      if (err.message.includes('stack underflow')) {
+        errorMsg = 'Stack underflow - Parametre sayısı veya sırası yanlış';
+      }
+
+      this.emitLog('BLOCKCHAIN', 'ERROR', `[BALANCE_QUERY_FAIL] Bakiye sorgulanamadı: ${errorMsg}`);
       return "0.00";
     }
   }
 
-  private emitLog(module: 'SYSTEM' | 'CRAWLER' | 'OPTIMIZER' | 'BLOCKCHAIN' | 'AI' | 'FINANCE', level: 'INFO' | 'SUCCESS' | 'WARNING' | 'ERROR' | 'ANALYZE', msg: string) {
+  private emitLog(module: 'SYSTEM' | 'CRAWLER' | 'OPTIMIZER' | 'BLOCKCHAIN' | 'AI', level: 'INFO' | 'SUCCESS' | 'WARNING' | 'ERROR' | 'ANALYZE', msg: string) {
     // GÜVENLİK FİLTRESİ: Loglarda asla private key geçmemeli
     if (this.privateKey && msg.includes(this.privateKey)) {
       msg = msg.replace(this.privateKey, "***GIZLI_ANAHTAR***");
@@ -312,16 +391,11 @@ export class BlockchainRouter {
       try {
         let provider;
         if (rpc.includes('wss://') || rpc.startsWith('ws')) {
-          provider = new ethers.providers.WebSocketProvider(rpc, {
-            timeout: blockchainConfig.rpcTimeout,
-            cacheTimeout: -1, // Önbelleği devre dışı bırak
-            polling: true
-          });
+          provider = new ethers.providers.WebSocketProvider(rpc);
         } else {
           provider = new ethers.providers.JsonRpcProvider({
             url: rpc,
-            skipFetchSetup: true, // Render/Axios çakışmasını önle
-            timeout: blockchainConfig.rpcTimeout // 60 saniye timeout
+            skipFetchSetup: true // Render/Axios çakışmasını önle
           }, "any"); // Network değişimlerine tolerans göster
         }
 
@@ -454,10 +528,7 @@ export class BlockchainRouter {
         if (currentRpc.startsWith('ws')) {
           provider = new ethers.providers.WebSocketProvider(currentRpc);
         } else {
-          provider = new ethers.providers.JsonRpcProvider({
-            url: currentRpc,
-            timeout: blockchainConfig.rpcTimeout // 60 saniye timeout
-          });
+          provider = new ethers.providers.JsonRpcProvider(currentRpc);
         }
         
         // Load and verify security keys
@@ -690,10 +761,7 @@ export class BlockchainRouter {
     this.emitLog('BLOCKCHAIN', 'INFO', `${assets.length} varlık için toplu mühürleme başlatılıyor...`);
     
     try {
-      const provider = new ethers.providers.JsonRpcProvider({
-        url: this.rpcUrl,
-        timeout: blockchainConfig.rpcTimeout
-      });
+      const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl);
       const wallet = new ethers.Wallet(this.privateKey, provider);
 
       if (this.contractAddress === ethers.constants.AddressZero) {
