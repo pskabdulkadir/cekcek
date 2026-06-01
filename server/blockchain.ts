@@ -47,7 +47,7 @@ export class BlockchainRouter {
     "function registerDataAsset(uint256 amount, string memory proof) public returns (bool)", // Oluşturma yerine kayıt
     "function submitProof(bytes32 proofHash, uint256 amount) external returns (bool)",
     "function settle(string memory id) public returns (bool)", // DEX Settlement fonksiyonu eklendi
-    "function balanceOf(address owner) view returns (uint256)" // Token bakiye sorgusu
+    "function balanceOf(address owner) view returns (uint256)", // Token bakiye sorgusu
   ];
 
   /**
@@ -231,6 +231,10 @@ export class BlockchainRouter {
    * Herhangi bir ERC-20 tokenının bakiyesini sorgular (GREEN, MATIC vb.)
    */
   public async getTokenBalance(tokenAddress: string, accountAddress: string): Promise<string> {
+    if (!accountAddress || accountAddress.length < 40) {
+      this.emitLog('BLOCKCHAIN', 'ERROR', `[BALANCE_ERR] Sorgulanan cüzdan adresi geçersiz veya boş!`);
+      return "0.00";
+    }
     try {
       const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl, "any");
       const contract = new ethers.Contract(tokenAddress, [
@@ -239,11 +243,14 @@ export class BlockchainRouter {
       ], provider);
       
       const [balance, decimals] = await Promise.all([
-        contract.balanceOf(accountAddress).catch(() => ethers.BigNumber.from(0)),
+        contract.balanceOf(accountAddress),
         contract.decimals().catch(() => 18)
       ]);
+      
+      this.emitLog('BLOCKCHAIN', 'ANALYZE', `[BALANCE_TRACE] Adres: ${accountAddress.slice(0,10)}... | Token: ${tokenAddress.slice(0,10)}... | Ham Bakiye: ${balance.toString()}`);
       return ethers.utils.formatUnits(balance, decimals);
-    } catch {
+    } catch (err: any) {
+      this.emitLog('BLOCKCHAIN', 'WARNING', `[BALANCE_QUERY_FAIL] Bakiye sorgulanamadı: ${err.message}`);
       return "0.00";
     }
   }

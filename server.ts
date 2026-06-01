@@ -996,9 +996,10 @@ async function generateStatusReport() {
     // ON-CHAIN VERİSİ: Cüzdandaki gerçek USDT bakiyesi
     const actualUsdtBalance = await mainBlockchain.getUSDTBalance(blockchainConfig.payoutWallet);
     
-    // Yeşil Token Bakiyesi Sorgusu
+    // KECO Token Bakiyesi Sorgusu
+    const walletAddr = mainBlockchain.getWalletAddress();
     const greenTokenBalance = blockchainConfig.greenTokenAddress && !blockchainConfig.greenTokenAddress.includes('0x000')
-        ? await mainBlockchain.getTokenBalance(blockchainConfig.greenTokenAddress, mainBlockchain.getWalletAddress())
+        ? await mainBlockchain.getTokenBalance(blockchainConfig.greenTokenAddress, walletAddr)
         : "0.00";
     
     // KONFİGÜRASYON DENETİMİ (Audit)
@@ -1167,6 +1168,29 @@ app.post("/api/admin/command", async (req, res) => {
     pushLog('SYSTEM', 'INFO', "Manuel Proxy Settlement tetiklendi.");
     // Bu komut genellikle tekil hatalarda veya debug için kullanılır
     return res.json({ success: true });
+  }
+
+  if (command.startsWith("EXECUTE_GENESIS_MINT")) {
+    const parts = command.split(" ");
+    const toAddress = parts[1] === "--to" ? parts[2] : mainBlockchain.getWalletAddress(); // Default to deployer's wallet
+    const amount = parts[3] === "--amount" ? parts[4] : "1000000000"; // Default to 1 billion tokens
+    
+    if (!blockchainConfig.greenTokenAddress || blockchainConfig.greenTokenAddress === ethers.constants.AddressZero || blockchainConfig.greenTokenAddress.includes('0x000')) {
+      pushLog('SYSTEM', 'ERROR', "MINT_FAILED: GREEN_TOKEN_ADDRESS .env dosyasında tanımlı değil veya geçersiz. Lütfen önce token mühürleyin.");
+      return res.json({ success: false, message: "Token address not configured." });
+    }
+
+    (async () => {
+        const result = await mainBlockchain.mintToken(blockchainConfig.greenTokenAddress, toAddress, amount);
+        if (result.success) {
+            pushLog('SYSTEM', 'SUCCESS', `[MINT_OK] ${amount} KECO başarıyla ${toAddress} adresine basıldı. Tx: ${result.txHash}`);
+            // Mint sonrası bakiye kontrolünü tetikle
+            await generateStatusReport();
+        } else {
+            pushLog('SYSTEM', 'ERROR', `[MINT_FAILED] Token basma hatası: ${result.error}`);
+        }
+    })();
+    return res.json({ success: true, message: "Token minting process started." });
   }
 
   if (command.startsWith("INIT_DEX_LIQUIDITY")) {

@@ -469,9 +469,10 @@ async function generateStatusReport() {
     // ON-CHAIN VERİSİ: Cüzdandaki gerçek USDT bakiyesi
     const actualUsdtBalance = await mainBlockchain.getUSDTBalance(blockchainConfig.payoutWallet);
     
-    // Yeşil Token Bakiyesi Sorgusu
+    // KECO Token Bakiyesi Sorgusu
+    const walletAddr = mainBlockchain.getWalletAddress();
     const greenTokenBalance = blockchainConfig.greenTokenAddress && !blockchainConfig.greenTokenAddress.includes('0x000')
-        ? await mainBlockchain.getTokenBalance(blockchainConfig.greenTokenAddress, mainBlockchain.getWalletAddress())
+        ? await mainBlockchain.getTokenBalance(blockchainConfig.greenTokenAddress, walletAddr)
         : "0.00";
     
     // KONFİGÜRASYON DENETİMİ (Audit)
@@ -483,8 +484,9 @@ async function generateStatusReport() {
         ? "⚠️ TOKEN ADRESİ EKSİK!"
         : "✓ TOKEN TANIMLI";
 
-    pushLog('FINANCE', 'ANALYZE', `--- ŞEBEKE STOK RAPORU ---`);
-    pushLog('FINANCE', 'ANALYZE', `Sorgulanan Token: ${blockchainConfig.greenTokenAddress || 'Tanımsız'}`);
+    pushLog('FINANCE', 'ANALYZE', `--- KRİTİK ŞEBEKE DENETİMİ ---`);
+    pushLog('FINANCE', 'ANALYZE', `Sorgulanan Cüzdan: ${walletAddr || 'HATA: PRIVATE_KEY OKUNAMADI'}`);
+    pushLog('FINANCE', 'ANALYZE', `Aktif Token: ${blockchainConfig.greenTokenAddress}`);
     pushLog('FINANCE', 'ANALYZE', `Ağ Denetimi: ${networkAudit} | Mod: ${blockchainConfig.networkMode.toUpperCase()}`);
     pushLog('FINANCE', 'ANALYZE', `Varlık Denetimi: ${tokenAudit}`);
     
@@ -1055,11 +1057,6 @@ app.post("/api/admin/command", async (req, res) => {
   const rawCommand = req.body.command || "";
   const command = rawCommand.trim();
   
-  if (command === "GET_STATUS_REPORT") {
-    await generateStatusReport();
-    return res.json({ success: true, message: "Status report generated." });
-  }
-
   if (command === "SET_AUTONOMOUS_DEPLOYMENT_TRUE --gas-payer=buyer --mode=batch") {
     serverState.autonomousMode = true;
     serverState.commitThreshold = 10; // Talimat uyarınca 10'a çekildi
