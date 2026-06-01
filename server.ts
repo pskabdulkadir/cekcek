@@ -55,7 +55,7 @@ const ALLOWED_CONTRACTS = [
     "0x71C7656EC7ab88b098defB751B7401B5f6d8976F", // Smart Gate
     process.env.GREEN_TOKEN_ADDRESS || "0x0000000000000000000000000000000000000000",
     process.env.ROUTER_ADDRESS || "0xa5e0829caced8ffdd052420551415491d6993e2f"
-].filter(addr => addr && addr.length > 10).map(addr => addr.toLowerCase());
+].filter(addr => addr && addr.startsWith("0x") && addr.length === 42).map(addr => addr.toLowerCase());
 
 if (process.env.GREEN_TOKEN_ADDRESS) ALLOWED_CONTRACTS.push(process.env.GREEN_TOKEN_ADDRESS.toLowerCase());
 if (process.env.ROUTER_ADDRESS) ALLOWED_CONTRACTS.push(process.env.ROUTER_ADDRESS.toLowerCase());

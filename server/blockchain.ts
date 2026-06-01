@@ -742,6 +742,12 @@ export class BlockchainRouter {
    * Bu token, QuickSwap üzerinde USDT takası için "barkod" görevi görecektir.
    */
   public async deployGreenToken(name: string, symbol: string): Promise<{ success: boolean; address: string; error?: string }> {
+    // --- KESİN KİLİT: AĞA İŞLEM GÖNDERİLMESİ YASAKLANDI ---
+    const stableAddress = "0x5f3B75C3D4b18B0595D94366F3ec36F11a9a262B"; // Son mühürlenen adres
+    this.emitLog('BLOCKCHAIN', 'WARNING', `[GENESIS_LOCKED] Sistem operasyonel modda. Yeni mühürleme engellendi. Mevcut adres: ${stableAddress}`);
+    return { success: true, address: stableAddress };
+
+    /* ESKİ KOD DEVRE DIŞI BIRAKILDI
     this.emitLog('BLOCKCHAIN', 'INFO', `[TOKEN_GENESIS] Güvenli mühürleme protokolü başlatıldı: ${name}...`);
     try {
       const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl);
@@ -801,6 +807,7 @@ export class BlockchainRouter {
       this.emitLog('BLOCKCHAIN', 'ERROR', `[DEPLOY_FAILED] Mühürleme durduruldu: ${err.message}`);
       return { success: false, address: '', error: err.message };
     }
+    */
   }
 
   /**
