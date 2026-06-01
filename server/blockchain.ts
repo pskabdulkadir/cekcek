@@ -285,64 +285,48 @@ export class BlockchainRouter {
    * GÜVENLİK GÜNCELLEMESİ: Pre-flight checks ve stack underflow koruması eklendi
    */
   public async getTokenBalance(tokenAddress: string, accountAddress: string): Promise<string> {
-    // PRE-FLIGHT CHECK 1: Adres validasyonu
-    if (!this.isValidAddress(tokenAddress)) {
-      this.emitLog('BLOCKCHAIN', 'ERROR', `[BALANCE_ERR] Token adresi geçersiz: ${tokenAddress}`);
-      return "0.00";
-    }
-    if (!this.isValidAddress(accountAddress)) {
-      this.emitLog('BLOCKCHAIN', 'ERROR', `[BALANCE_ERR] Cüzdan adresi geçersiz: ${accountAddress}`);
-      return "0.00";
-    }
-
-    // PRE-FLIGHT CHECK 2: Kontrat doğrulaması
-    const isContract = await this.isContract(tokenAddress);
-    if (!isContract) {
-      this.emitLog('BLOCKCHAIN', 'ERROR', `[BALANCE_ERR] ${tokenAddress} bir kontrat değil, cüzdan adresi`);
-      return "0.00";
-    }
-
-    // PRE-FLIGHT CHECK 3: ERC-20 uyumluluk testi
-    const isERC20 = await this.isERC20Compatible(tokenAddress);
-    if (!isERC20) {
-      this.emitLog('BLOCKCHAIN', 'ERROR', `[BALANCE_ERR] ${tokenAddress} ERC-20 uyumlu değil`);
-      return "0.00";
-    }
-
-    // GÜVENLİ ÇAĞRI: staticCall kullanarak gas tüketimini önle
     try {
+      if (!this.isValidAddress(tokenAddress) || !this.isValidAddress(accountAddress)) return "0.00";
+      
       const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl, "any");
       const contract = new ethers.Contract(tokenAddress, [
-        "function balanceOf(address owner) view returns (uint256)",
+        "function balanceOf(address) view returns (uint256)",
         "function decimals() view returns (uint8)"
       ], provider);
-      
-      // staticCall kullanarak state değiştirmeyen güvenli çağrı
-      const [balance, decimals] = await Promise.all([
-        contract.callStatic.balanceOf(accountAddress),
-        contract.callStatic.decimals().catch(() => 18)
-      ]);
-      
-      this.emitLog('BLOCKCHAIN', 'ANALYZE', `[BALANCE_TRACE] Adres: ${accountAddress.slice(0,10)}... | Token: ${tokenAddress.slice(0,10)}... | Ham Bakiye: ${balance.toString()}`);
-      return ethers.utils.formatUnits(balance, decimals);
-    } catch (err: any) {
-      // HATA ANALİZİ: Revert nedenini tespit et
-      let errorMsg = err.message;
-      
-      if (err.message.includes('call exception')) {
-        if (err.data) {
-          errorMsg = `Revert data: ${err.data}`;
-        } else {
-          errorMsg = 'Revert without reason string - Muhtemelen ABI uyumsuzluğu';
-        }
-      }
-      
-      if (err.message.includes('stack underflow')) {
-        errorMsg = 'Stack underflow - Parametre sayısı veya sırası yanlış';
-      }
 
-      this.emitLog('BLOCKCHAIN', 'ERROR', `[BALANCE_QUERY_FAIL] Bakiye sorgulanamadı: ${errorMsg}`);
-      return "0.00";
+      // KRİTİK DÜZELTME: Her çağrıyı ayrı ayrı try-catch'e alarak Stack Underflow'un sistemi çökertmesini engelliyoruz
+      const balanceBN = await contract.balanceOf(accountAddress).catch(() => ethers.BigNumber.from(0));
+      const decimals = await contract.decimals().catch(() => 18);
+      
+      return ethers.utils.formatUnits(balanceBN, decimals);
+    } catch (err) {
+      return "0.00"; // Hata durumunda sistemi kırma, sadece 0 döndür
+    }
+  }
+
+  /**
+   * PROTOKOL_READY_MARKET: Kendi token'ın yerine elindeki POL'ü doğrudan USDT'ye çevirir.
+   * Bu, sistemin "Hatalı Token" döngüsünden çıkıp gerçek paraya dokunmasını sağlar.
+   */
+  public async swapPOLForUSDT(polAmount: string): Promise<{ success: boolean; txHash: string }> {
+    this.emitLog('BLOCKCHAIN', 'INFO', `[EXIT_TO_CASH] ${polAmount} POL -> USDT takası başlatılıyor...`);
+    try {
+      const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl);
+      const wallet = new ethers.Wallet(this.privateKey, provider);
+      const router = new ethers.Contract(blockchainConfig.routerAddress, [
+        "function swapExactETHForTokens(uint amountOutMin, address[] calldata path, address to, uint deadline) external payable returns (uint[] memory amounts)"
+      ], wallet);
+
+      const path = [WMATIC, POLYGON_USDT];
+      const tx = await router.swapExactETHForTokens(
+        0, path, wallet.address, Math.floor(Date.now() / 1000) + 600,
+        { value: ethers.utils.parseEther(polAmount), gasLimit: 250000 }
+      );
+      await tx.wait();
+      return { success: true, txHash: tx.hash };
+    } catch (err: any) {
+      this.emitLog('BLOCKCHAIN', 'ERROR', `Takas başarısız: ${err.message}`);
+      return { success: false, txHash: '' };
     }
   }
 

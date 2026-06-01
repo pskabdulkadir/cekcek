@@ -1076,6 +1076,18 @@ app.post("/api/admin/command", async (req, res) => {
     return res.json({ success: true, message: "Status report generated." });
   }
 
+  if (command.startsWith("CONVERT_POL_TO_USDT")) {
+    const amount = command.split(" ")[1] || "1.0";
+    (async () => {
+      pushLog('SYSTEM', 'WARNING', `[FINANCIAL_PIVOT] Hazır havuz kullanılarak ${amount} POL takas ediliyor...`);
+      const result = await mainBlockchain.swapPOLForUSDT(amount);
+      if (result.success) {
+        pushLog('FINANCE', 'SUCCESS', `[CASH_OUT_OK] Takas başarılı! USDT cüzdanınıza eklendi. Tx: ${result.txHash}`);
+      }
+    })();
+    return res.json({ success: true, message: "Swap process started using QuickSwap." });
+  }
+
   if (command.startsWith("GENERATE_GREEN_TOKEN")) {
     const parts = command.split(" ");
     const name = parts[1] || "KADIR_ECO";
