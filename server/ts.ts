@@ -65,8 +65,9 @@ function validateContractAddress(address: string) {
     if (!address || address === ethers.constants.AddressZero) return;
     const lowerAddr = address.toLowerCase();
     // Canlı konfigürasyon kontrolü
-    const isDynamicAllowed = lowerAddr === blockchainConfig.greenTokenAddress.toLowerCase() || 
-                             lowerAddr === blockchainConfig.routerAddress.toLowerCase();
+    const isDynamicAllowed = lowerAddr === (blockchainConfig.greenTokenAddress || "").toLowerCase() || 
+                             lowerAddr === (blockchainConfig.routerAddress || "").toLowerCase() ||
+                             lowerAddr === (blockchainConfig.contractAddress || "").toLowerCase();
 
     if (!ALLOWED_CONTRACTS.includes(lowerAddr) && !isDynamicAllowed) {
         pushLog('FINANCE', 'ERROR', `Kritik Güvenlik İhlali: Yetkisiz sözleşmeye erişim engellendi: ${address}`);

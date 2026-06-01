@@ -99,14 +99,21 @@ export class BlockchainRouter {
    * Hedef sözleşme adresinin beyaz listede olup olmadığını kontrol eder.
    */
   private validateContract(address: string) {
-    if (!address || address === ethers.constants.AddressZero) return; 
-    const lowerAddr = address.toLowerCase();
-    // Dinamik kontrol: Hem sabit listeyi hem de .env'den gelen güncel adresleri kontrol et
-    const isWhitelisted = ALLOWED_CONTRACTS.includes(lowerAddr) || 
-                          lowerAddr === (blockchainConfig.greenTokenAddress || "").toLowerCase() ||
-                          lowerAddr === (blockchainConfig.routerAddress || "").toLowerCase();
+    if (!address || address === ethers.constants.AddressZero) return;
+    
+    try {
+      const checksumAddr = ethers.utils.getAddress(address);
+      const lowerAddr = checksumAddr.toLowerCase();
 
-    if (!isWhitelisted) {
+      const isWhitelisted = ALLOWED_CONTRACTS.includes(lowerAddr) || 
+                            lowerAddr === (blockchainConfig.greenTokenAddress || "").toLowerCase() ||
+                            lowerAddr === (blockchainConfig.routerAddress || "").toLowerCase() ||
+                            lowerAddr === (this.contractAddress || "").toLowerCase();
+
+      if (!isWhitelisted) {
+        throw new Error(`Yetkisiz adres: ${checksumAddr}`);
+      }
+    } catch (err: any) {
       this.emitLog('BLOCKCHAIN', 'ERROR', `GÜVENLİK İHLALİ: Yetkisiz sözleşme adresi tespit edildi: ${address}`);
       throw new Error("GÜVENLİK İHLALİ: Yetkisiz sözleşme adresi.");
     }
@@ -285,12 +292,6 @@ export class BlockchainRouter {
    * GÜVENLİK GÜNCELLEMESİ: Pre-flight checks ve stack underflow koruması eklendi
    */
   public async getTokenBalance(tokenAddress: string, accountAddress: string): Promise<string> {
-    // Önce ERC-20 uyumluluğunu kontrol et
-    const isERC20 = await this.isERC20Compatible(tokenAddress);
-    if (!isERC20) {
-      this.emitLog('BLOCKCHAIN', 'ERROR', `[BALANCE_ERR] ${tokenAddress} ERC-20 uyumlu değil. Bakiye sorgulanamadı.`);
-      return "0.00";
-    }
     try {
       if (!this.isValidAddress(tokenAddress) || !this.isValidAddress(accountAddress)) return "0.00";
       
@@ -319,11 +320,13 @@ export class BlockchainRouter {
     try {
       const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl);
       const wallet = new ethers.Wallet(this.privateKey, provider);
-      const router = new ethers.Contract(blockchainConfig.routerAddress, [
+      // KRİTİK: Adresi checksum formatına zorla
+      const routerAddr = ethers.utils.getAddress(blockchainConfig.routerAddress);
+      const router = new ethers.Contract(routerAddr, [
         "function swapExactETHForTokens(uint amountOutMin, address[] calldata path, address to, uint deadline) external payable returns (uint[] memory amounts)"
       ], wallet);
 
-      const path = [WMATIC, POLYGON_USDT];
+      const path = [ethers.utils.getAddress(WMATIC), ethers.utils.getAddress(POLYGON_USDT)];
       const tx = await router.swapExactETHForTokens(
         0, path, wallet.address, Math.floor(Date.now() / 1000) + 600,
         { value: ethers.utils.parseEther(polAmount), gasLimit: 250000 }
@@ -837,10 +840,14 @@ export class BlockchainRouter {
       
       // RUNTIME UPDATE: In-memory nesnesini anında güncelle
       if (key === 'GREEN_TOKEN_ADDRESS') {
-        blockchainConfig.greenTokenAddress = value;
+        blockchainConfig.greenTokenAddress = value.toLowerCase();
       }
-      // KRİTİK DÜZELTME: CONTRACT_ADDRESS, GREEN_TOKEN_ADDRESS ile aynı olmamalıdır.
-      // Bu satır kaldırıldı veya yorum satırı yapıldı.
+      
+      // GÜVENLİK: CONTRACT_ADDRESS güncellemesi sadece mühürleme başarılıysa hafızada güncellenmeli
+      if (key === 'CONTRACT_ADDRESS' || key === 'SMART_GATE_CONTRACT_ADDRESS') {
+        this.contractAddress = value;
+        blockchainConfig.contractAddress = value;
+      }
 
       this.emitLog('SYSTEM', 'SUCCESS', `[.env_UPDATE] ${key} kaydedildi ve sistem hafızası yenilendi: ${value}`);
     } catch (err: any) {
@@ -857,7 +864,7 @@ export class BlockchainRouter {
       const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl);
       const wallet = new ethers.Wallet(this.privateKey, provider);
       
-      // TAM ERC20 BYTECODE (Kesilmemiş - Polygon Paris Uyumlu - Mint fonksiyonu dahil)
+      // TAM ERC20 BYTECODE (Kesilmemiş - Polygon Paris Uyumlu)
       const fixedBytecode = "0x608060405234801561001057600080fd5b610d1f806100206000396000f3fe608060405234801561001057600080fd5b600436106100835760003560e01c806306fdde031461008857806318160ddd146100b6578063313ce567146100d157806370a08231146100f157806395d8941214610121578063a9059cbb1461014f578063dd62ed3e1461017f575b600080fd5b6100906101af565b6040516100ad91906108e4565b60405180910390f35b600080546040518082805190602001908083835b6020831061021457805182526020820191506020810190506020830392506101f1565b6001816001161561024057805160ff19168380011785555b505b505050565b828054600181600116156101000203166002900490600052602060002090601f016020900481019282601f1061009357805160ff19168380011785555b505b505050565b828054600181600116156101000203166002900490600052602060002090601f016020900481019282601f106100d457805160ff19168380011785555b505b505050565b610d1e8061012d6000396000f3fe";
       
       const abi = ["constructor(string n, string s, uint256 supply)", "function balanceOf(address a) view returns (uint256)", "function mint(address to, uint256 amount) public"];
