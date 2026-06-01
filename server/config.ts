@@ -39,7 +39,7 @@ export const blockchainConfig = {
     publishBatchSize: parseInt(process.env.PUBLISH_BATCH_SIZE || '1'), // Trafik kısıtlamaları için tekli mühürleme (seri işleme)
     privateKey: process.env.PRIVATE_KEY || '',
     zeroGasActive: false,
-    networkMode: process.env.NETWORK_MODE || 'mainnet',
+    networkMode: 'mainnet', // %100 Canlı Mod Sabitlendi
     useAiAnalysis: process.env.USE_AI_ANALYSIS === 'true',
     sharedPoolEnabled: process.env.SHARED_DISTRIBUTION_POOL_ENABLED === 'true',
     batchMining: process.env.BATCH_MINING !== 'false', // Varsayılan olarak true, .env'den false gelirse false olur
@@ -59,7 +59,10 @@ export const blockchainConfig = {
     bridgeApiUrl: process.env.BRIDGE_API_URL || '', // Opsiyonel: Dış borsalara veri çıkışı için Gateway URL
     bridgeAuthToken: process.env.BRIDGE_AUTH_TOKEN || '', // Ticari Köprü Yetkilendirme Tokenı
     proxySettlementUrl: '', // Geçersiz DNS adresi temizlendi
-    greenTokenAddress: process.env.GREEN_TOKEN_ADDRESS || '0x0000000000000000000000000000000000000000'
+    greenTokenAddress: process.env.GREEN_TOKEN_ADDRESS || '0x0000000000000000000000000000000000000000',
+    gasRefillEnabled: process.env.GAS_REFILL_ENABLED !== 'false', // Otomatik yakıt doldurma aktif mi?
+    gasRefillThreshold: parseFloat(process.env.GAS_REFILL_THRESHOLD || '0.5'), // 0.5 POL altına düşerse işlem yapma/doldur
+    gasRefillUsdtAmount: parseFloat(process.env.GAS_REFILL_USDT_AMOUNT || '5.0') // 5 USDT'lik yakıt al
 };
 
 export const dbConfig = {

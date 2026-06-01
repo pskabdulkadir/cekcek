@@ -224,6 +224,50 @@ const serverState = {
 };
 
 /**
+ * PROTOKOL_MARKET_MAKER: Cüzdan bakiyesini 5 saniyede bir izler ve otonom satış tetikler.
+ */
+async function monitorAndLiquidate() {
+  if (!serverState.autonomousMode || !blockchainConfig.greenTokenAddress || blockchainConfig.greenTokenAddress.includes('0x000')) return;
+
+  try {
+    // 1. ADIM: YAKIT KONTROLÜ (Gas Refiller)
+    const gasCheck = await mainBlockchain.checkGasBalance('polygon');
+    const currentPol = parseFloat(gasCheck.balance);
+    
+    if (blockchainConfig.gasRefillEnabled && currentPol < blockchainConfig.gasRefillThreshold) {
+      pushLog('FINANCE', 'WARNING', `[SAFETY_CHECK] Yakıt kritik seviyede: ${currentPol.toFixed(4)} POL. Rezerv USDT'den ikmal başlatılıyor...`);
+      const usdtBalance = await mainBlockchain.getUSDTBalance();
+      if (parseFloat(usdtBalance) >= blockchainConfig.gasRefillUsdtAmount) {
+        const refill = await mainBlockchain.refillGasFromUSDT(blockchainConfig.gasRefillUsdtAmount.toString());
+        if (refill.success) pushLog('FINANCE', 'SUCCESS', `[GAS_OK] Yakıt takviyesi başarılı. Otonom döngü kesintisiz devam ediyor.`);
+      } else {
+        pushLog('FINANCE', 'ERROR', `[REFILL_FAIL] Yetersiz USDT rezervi ($${usdtBalance}). Sistem durabilir, manuel POL takviyesi gerekebilir!`);
+      }
+    }
+
+    // 2. ADIM: SATIŞ KONTROLÜ (Market Maker)
+    const walletAddr = mainBlockchain.getWalletAddress();
+    const balance = await mainBlockchain.getTokenBalance(blockchainConfig.greenTokenAddress, walletAddr);
+    const balanceNum = parseFloat(balance);
+
+    if (balanceNum > 0.0001) { // Toz miktarları (dust) atla
+      pushLog('FINANCE', 'INFO', `[REAL_MONEY_TRIGGER] ${balanceNum.toFixed(4)} KECO tespit edildi. Canlı piyasada nakde çevriliyor...`);
+      const amountWei = ethers.utils.parseUnits(balance, 18).toString();
+      const result = await mainBlockchain.performDEXSwap(amountWei);
+      
+      if (result.success) {
+        const usdtAmount = await mainBlockchain.getUSDTBalance();
+        pushLog('FINANCE', 'SUCCESS', `[TRANSACTION_SUCCESS] İşlem blokta onaylandı! Tx: ${result.txHash.slice(0, 10)}...`);
+        pushLog('FINANCE', 'ANALYZE', `[PROFIT_GENERATED] Mutabakat Tamamlandı. Güncel Rezerv: $${usdtAmount} USDT`);
+      }
+    }
+  } catch (err: any) {
+    // Periyodik log kirliliğini önlemek için sessiz hata yönetimi
+  }
+}
+setInterval(monitorAndLiquidate, 5000); 
+
+/**
  * --- GERÇEK FİNANSAL MUTABAKAT MOTORU ---
  * Sistemin ürettiği veri analitiği kanıtını pazar yeri protokollerine mühürler.
  */
@@ -1600,8 +1644,13 @@ async function startServer() {
       offset: `${serverState.totalCo2SavedGrams.toFixed(4)} g`
     };
 
-    pushLog('SYSTEM', 'INFO', `[KEEP_ALIVE] ${timeString} - Heartbeat OK.`);
-    pushLog('MARKET', 'INFO', `[CRAWLER_REPORT] Aktif Düğüm: ${report.nodes} | Geri Kazanım: ${report.reclaimed} | Karbon Offset: ${report.offset}`);
+    // Kendi kendini uyandırma (Self-Ping)
+    if (blockchainConfig.appUrl) {
+      axios.get(`${blockchainConfig.appUrl}/healthz`).catch(() => {});
+    }
+
+    pushLog('SYSTEM', 'INFO', `[KEEP_ALIVE] ${timeString} - Otonom Sistem Canlı.`);
+    pushLog('MARKET', 'INFO', `[CRAWLER_REPORT] Düğüm: ${report.nodes} | CO2: ${report.offset}`);
   }, 5 * 60 * 1000); // 5 minutes (300,000 ms)
 }
 

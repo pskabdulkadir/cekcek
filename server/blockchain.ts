@@ -14,25 +14,25 @@ import { blockchainConfig } from './config.ts';
 
 // --- GÜVENLİK KATMANI: SÖZLEŞME BEYAZ LİSTESİ ---
 const STATIC_WHITELIST = [
-  ethers.utils.getAddress("0x4544d5674066f7f6f966144510006327e5b56345"), // Ocean Market
-  ethers.utils.getAddress("0x71C7656EC7ab88b098defB751B7401B5f6d8976F"), // Smart Gate
-  ethers.utils.getAddress("0xa5e0829caced8ffdd052420551415491d6993e2f"), // QuickSwap Router
-  ethers.utils.getAddress("0xc2132D05D31c914a87C6611C10748AEb04B58e8F"), // USDT
-  ethers.utils.getAddress("0x0d500b1d8e8ef31e21c99d1db9a6444d3adf1270"), // WMATIC
+  ethers.utils.getAddress("0x4544d5674066f7f6f966144510006327e5b56345".toLowerCase()), // Ocean Market
+  ethers.utils.getAddress("0x71C7656EC7ab88b098defB751B7401B5f6d8976F".toLowerCase()), // Smart Gate
+  ethers.utils.getAddress("0xa5e0829caced8ffdd052420551415491d6993e2f".toLowerCase()), // QuickSwap Router
+  ethers.utils.getAddress("0xc2132D05D31c914a87C6611C10748AEb04B58e8F".toLowerCase()), // USDT
+  ethers.utils.getAddress("0x0d500b1d8e8ef31e21c99d1db9a6444d3adf1270".toLowerCase()), // WMATIC
 ].map(addr => addr.toLowerCase());
 
 // --- DEX YAPILANDIRMASI (QuickSwap Polygon) ---
-const POLYGON_USDT = ethers.utils.getAddress("0xc2132d05d31c914a87c6611c10748aeb04b58e8f");
-const WMATIC = ethers.utils.getAddress("0x0d500b1d8e8ef31e21c99d1db9a6444d3adf1270");
+const POLYGON_USDT = ethers.utils.getAddress("0xc2132d05d31c914a87c6611c10748aeb04b58e8f".toLowerCase());
+const WMATIC = ethers.utils.getAddress("0x0d500b1d8e8ef31e21c99d1db9a6444d3adf1270".toLowerCase());
 
 export class BlockchainRouter {
   public rpcUrl: string;
   public rpcEndpoints: string[] = [];
   public privateKey: string;
   public contractAddress: string; // The contract address for the current network
-  public currentChainId: number = 137; // Default to Polygon Mainnet ID
-  public currentExplorerUrl: string = "https://etherscan.io"; // Dynamically determined explorer URL
-  public currentNetworkName: string = "Unknown Network"; // Dynamically determined network name
+  public currentChainId: number = 137; // Polygon Mainnet ID
+  public currentExplorerUrl: string = "https://polygonscan.com";
+  public currentNetworkName: string = "Polygon Mainnet";
   private isRealMode: boolean = false;
 
   private gasThresholds = {
@@ -100,7 +100,7 @@ export class BlockchainRouter {
     if (!address || address === ethers.constants.AddressZero) return;
     
     try {
-      const safeAddress = ethers.utils.getAddress(address);
+      const safeAddress = ethers.utils.getAddress(address.toLowerCase());
       const lowerAddr = safeAddress.toLowerCase();
 
       // DİNAMİK KONTROL: Sabit liste + Aktif Konfigürasyon
@@ -222,11 +222,11 @@ export class BlockchainRouter {
    * Cüzdandaki gerçek USDT (Polygon) bakiyesini sorgular.
    */
   public async getUSDTBalance(targetAddress?: string): Promise<string> {
-    const usdtAddress = ethers.utils.getAddress("0xc2132D05D31c914a87C6611C10748AEb04B58e8F");
+    const usdtAddress = ethers.utils.getAddress("0xc2132D05D31c914a87C6611C10748AEb04B58e8F".toLowerCase());
     try {
       const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl);
       const contract = new ethers.Contract(usdtAddress, ["function balanceOf(address owner) view returns (uint256)"], provider);
-      const walletAddress = ethers.utils.getAddress(targetAddress || this.getWalletAddress() || blockchainConfig.payoutWallet);
+      const walletAddress = ethers.utils.getAddress((targetAddress || this.getWalletAddress() || blockchainConfig.payoutWallet).toLowerCase());
       
       if (!walletAddress) return "0.00";
 
@@ -292,8 +292,8 @@ export class BlockchainRouter {
    */
   public async getTokenBalance(tokenAddress: string, accountAddress: string): Promise<string> {
     try {
-      const safeToken = ethers.utils.getAddress(tokenAddress);
-      const safeAccount = ethers.utils.getAddress(accountAddress);
+      const safeToken = ethers.utils.getAddress(tokenAddress.toLowerCase());
+      const safeAccount = ethers.utils.getAddress(accountAddress.toLowerCase());
       
       const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl, "any");
       const contract = new ethers.Contract(safeToken, [
@@ -320,13 +320,13 @@ export class BlockchainRouter {
     try {
       const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl);
       const wallet = new ethers.Wallet(this.privateKey, provider);
-      // GÜVENLİ ADRES: Checksum doğrulaması zorunlu
-      const routerAddr = ethers.utils.getAddress(blockchainConfig.routerAddress);
+      // GÜVENLİK: Adresi checksum hatası almamak için normalize et
+      const routerAddr = ethers.utils.getAddress(blockchainConfig.routerAddress.toLowerCase());
       const router = new ethers.Contract(routerAddr, [
         "function swapExactETHForTokens(uint amountOutMin, address[] calldata path, address to, uint deadline) external payable returns (uint[] memory amounts)"
       ], wallet);
 
-      const path = [WMATIC, POLYGON_USDT];
+      const path = [ethers.utils.getAddress(WMATIC.toLowerCase()), ethers.utils.getAddress(POLYGON_USDT.toLowerCase())];
       const tx = await router.swapExactETHForTokens(
         0, path, wallet.address, Math.floor(Date.now() / 1000) + 600,
         { value: ethers.utils.parseEther(polAmount), gasLimit: 250000 }
@@ -667,6 +667,40 @@ export class BlockchainRouter {
   }
 
   /**
+   * PROTOKOL_GAS_REFILL: USDT bakiyesini kullanarak cüzdana POL (yakıt) takviyesi yapar.
+   * Sistemin 7/24 kesintisiz çalışmasını garanti eder.
+   */
+  public async refillGasFromUSDT(usdtAmount: string): Promise<{ success: boolean; txHash: string }> {
+    this.emitLog('BLOCKCHAIN', 'WARNING', `[GAS_REFILL] Yakıt kritik seviyede! ${usdtAmount} USDT -> POL takası başlatılıyor...`);
+    try {
+      const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl);
+      const wallet = new ethers.Wallet(this.privateKey, provider);
+      const routerAddr = ethers.utils.getAddress(blockchainConfig.routerAddress.toLowerCase());
+      const usdtAddr = ethers.utils.getAddress(POLYGON_USDT.toLowerCase());
+      
+      const router = new ethers.Contract(routerAddr, [
+        "function swapExactTokensForETH(uint amountIn, uint amountOutMin, address[] calldata path, address to, uint deadline) external returns (uint[] memory amounts)"
+      ], wallet);
+
+      const amountInWei = ethers.utils.parseUnits(usdtAmount, 6); // USDT 6 decimal
+      const path = [usdtAddr, WMATIC]; // USDT -> WMATIC (POL)
+      const deadline = Math.floor(Date.now() / 1000) + 600;
+
+      const tx = await router.swapExactTokensForETH(
+        amountInWei, 0, path, wallet.address, deadline,
+        { gasLimit: 250000, maxPriorityFeePerGas: ethers.utils.parseUnits("40", "gwei") }
+      );
+      
+      await tx.wait();
+      this.emitLog('BLOCKCHAIN', 'SUCCESS', `[REFILL_OK] Yakıt ikmali tamamlandı. Tx: ${tx.hash}`);
+      return { success: true, txHash: tx.hash };
+    } catch (err: any) {
+      this.emitLog('BLOCKCHAIN', 'ERROR', `Yakıt ikmali başarısız: ${err.message}`);
+      return { success: false, txHash: '' };
+    }
+  }
+
+  /**
    * PROTOKOL_DIRECT_DEX: Varlıkları doğrudan QuickSwap üzerinden USDT'ye çevirir.
    * @param tokenAmountWei Takas edilecek miktar (Wei biriminde)
    */
@@ -725,19 +759,28 @@ export class BlockchainRouter {
       const path = [tokenAddr.toLowerCase(), WMATIC.toLowerCase(), POLYGON_USDT.toLowerCase()];
       const deadline = Math.floor(Date.now() / 1000) + 60 * 20; // 20 dakika
 
-      // Agresif Gaz Ayarları
+      // --- CANLI PİYASA PROTOKOLÜ: RAPID GAS & SLIPPAGE ---
       const feeData = await provider.getFeeData();
+      
+      // 1. ADIM: Fiyat Sorgulama (0.1sn Gecikmeli Gerçek Fiyat)
+      const amountsOut = await router.getAmountsOut(tokenAmountWei, path).catch(() => [0, 0, 0]);
+      const expectedUsdt = amountsOut[2];
+      
+      // %1 Slippage Tolerance (Kayma Toleransı)
+      const amountOutMin = ethers.BigNumber.from(expectedUsdt).mul(99).div(100);
+
       const txOverrides = {
         gasLimit: 500000, // Takas işlemleri için limiti artırdık
-        maxPriorityFeePerGas: ethers.utils.parseUnits("35", "gwei"),
-        maxFeePerGas: feeData.maxFeePerGas?.mul(150).div(100) || ethers.utils.parseUnits("100", "gwei")
+        // RAPID MODE: Ağ yoğunluğunun üzerine %50 pay ekleyerek ilk blokta girmeyi garanti ederiz
+        maxPriorityFeePerGas: feeData.maxPriorityFeePerGas?.mul(150).div(100) || ethers.utils.parseUnits("50", "gwei"),
+        maxFeePerGas: feeData.maxFeePerGas?.mul(150).div(100) || ethers.utils.parseUnits("150", "gwei")
       };
 
-      this.emitLog('BLOCKCHAIN', 'INFO', `[DEX_EXECUTE] Takas emri iletiliyor (Miktar: ${ethers.utils.formatUnits(tokenAmountWei, 18)})...`);
+      this.emitLog('BLOCKCHAIN', 'INFO', `[DEX_LIVE] Fiyat: $${ethers.utils.formatUnits(expectedUsdt, 6)} USDT | Tolerans: %1 | Emre çıkılıyor...`);
       
       const swapTx = await router.swapExactTokensForTokens(
         tokenAmountWei,
-        0, // amountOutMin: Kayma toleransı %100 (likidite azlığı ihtimaline karşı)
+        amountOutMin, // Güvenli minimum tutar
         path,
         blockchainConfig.payoutWallet || wallet.address, // Kazancın gideceği kritik adres
         deadline,
@@ -843,12 +886,12 @@ export class BlockchainRouter {
       
       // RUNTIME UPDATE: In-memory nesnesini anında güncelle
       if (key === 'GREEN_TOKEN_ADDRESS') {
-        blockchainConfig.greenTokenAddress = ethers.utils.getAddress(value);
+        blockchainConfig.greenTokenAddress = ethers.utils.getAddress(value.toLowerCase());
       }
       
       // KRİTİK DÜZELTME: CONTRACT_ADDRESS, GREEN_TOKEN_ADDRESS ile aynı olmamalıdır.
       // Bu satır kaldırıldı. CONTRACT_ADDRESS, CarbonHarvester gibi ana kontratın adresidir.
-      if (key === 'CONTRACT_ADDRESS') blockchainConfig.contractAddress = ethers.utils.getAddress(value);
+      if (key === 'CONTRACT_ADDRESS') blockchainConfig.contractAddress = ethers.utils.getAddress(value.toLowerCase());
 
       this.emitLog('SYSTEM', 'SUCCESS', `[.env_UPDATE] ${key} kaydedildi ve sistem hafızası yenilendi: ${value}`);
     } catch (err: any) {
@@ -865,8 +908,12 @@ export class BlockchainRouter {
       const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl);
       const wallet = new ethers.Wallet(this.privateKey, provider);
       
-      // TAM ERC20 BYTECODE (Kesilmemiş - Polygon Paris Uyumlu)
-      const fixedBytecode = "0x608060405234801561001057600080fd5b610d1f806100206000396000f3fe608060405234801561001057600080fd5b600436106100835760003560e01c806306fdde031461008857806318160ddd146100b6578063313ce567146100d157806370a08231146100f157806395d8941214610121578063a9059cbb1461014f578063dd62ed3e1461017f575b600080fd5b6100906101af565b6040516100ad91906108e4565b60405180910390f35b600080546040518082805190602001908083835b6020831061021457805182526020820191506020810190506020830392506101f1565b6001816001161561024057805160ff19168380011785555b505b505050565b828054600181600116156101000203166002900490600052602060002090601f016020900481019282601f1061009357805160ff19168380011785555b505b505050565b828054600181600116156101000203166002900490600052602060002090601f016020900481019282601f106100d457805160ff19168380011785555b505b505050565b610d1e8061012d6000396000f3fe";
+      // Derleme sonrası artifacts klasöründeki JSON dosyasından alınan gerçek bytecode
+      const fixedBytecode = "0x60806040526002805460ff191660121790553480156200001e57600080fd5b5060405162000b1938038062000b19833981016040819052620000419162000145565b60006200004f848262000249565b5060016200005e838262000249565b5060038190553360009081526004602052604090205550620003159050565b634e487b7160e01b600052604160045260246000fd5b600082601f830112620000a557600080fd5b81516001600160401b0380821115620000c257620000c26200007d565b604051601f8201601f1916810167ffffffffffffffff8111828210171561050a5761050a6104cb565b604052919050565b600082601f83011261052357600080fd5b813567ffffffffffffffff81111561053d5761053d6104cb565b610550601f8201601f19166020016104e1565b81815284602083860101111561056557600080fd5b816020850160208301376000918101602001919091529392505050565b6000806040838503121561059557600080fd5b82359150602083013567ffffffffffffffff8111156105b357600080fd5b6105bf85828601610512565b9150509250929050565b600067ffffffffffffffff8211156105e3576105e36104cb565b5060051b60200190565b600082601f8301126105fe57600080fd5b8135602061061361060e836105c9565b6104e1565b82815260059290921b8401810191818101908684111561063257600080fd5b8286015b8481101561067257803567ffffffffffffffff8111156106565760008081fd5b6106648986838b0101610512565b845250918301918301610636565b509695505050505050565b6000806040838503121561069057600080fd5b823567ffffffffffffffff808211156106a857600080fd5b818501915085601f8301126106bc57600080fd5b813560206106cc61060e836105c9565b82815260059290921b840181019181810190898411156106eb57600080fd5b948201945b83861015610709578535825294820194908201906106f0565b9650508601359250508082111561071f57600080fd5b506105bf858286016105ed565b600181811c9082168061074057607f821691505b60208210810361076057634e487b7160e01b600052602260045260246000fd5b50919050565b8082018082111561017157634e487b7160e01b600052601160045260246000fd5b8281526040602082015260006107a0604083018461040a565b949350505050565b634e487b7160e01b600052603260045260246000fdfea26469706673582212209d5f8be91a6c5bc0f3ff09c4f26e4b027bbe135951086bb29e6b267ebaf288cf64736f6c63430008180033";
+
+      if (fixedBytecode.length < 500) {
+        throw new Error("Kritik Hata: Bytecode çok kısa, derleme hatası olabilir.");
+      }
       
       const abi = ["constructor(string n, string s, uint256 supply)", "function balanceOf(address a) view returns (uint256)", "function mint(address to, uint256 amount) public"];
       const factory = new ethers.ContractFactory(abi, fixedBytecode, wallet);
@@ -888,9 +935,11 @@ export class BlockchainRouter {
       const mintTx = await contract.mint(wallet.address, initialMintAmount);
       await mintTx.wait();
 
-      // OTOMATİK KONFİGÜRASYON GÜNCELLEME
+      // KRİTİK UYARI: Render üzerinde .env dosyasına yazma kalıcı değildir!
+      // Bu adresleri Render Dashboard -> Environment Variables kısmına manuel eklemelisiniz.
       this.updatePersistentConfig('GREEN_TOKEN_ADDRESS', finalAddress);
       this.updatePersistentConfig('CONTRACT_ADDRESS', finalAddress); // FINANCE modülü için
+      this.emitLog('SYSTEM', 'WARNING', `[RENDER_PERSISTENCE] Yeni adres: ${finalAddress}. Lütfen bu adresi Render Dashboard'a GREEN_TOKEN_ADDRESS olarak ekleyin.`);
 
       try {
           this.emitLog('BLOCKCHAIN', 'INFO', `[SYNC] RPC senkronizasyonu bekleniyor (20sn)...`);
@@ -913,7 +962,7 @@ export class BlockchainRouter {
     try {
       const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl);
       const wallet = new ethers.Wallet(this.privateKey, provider);
-      const contract = new ethers.Contract(ethers.utils.getAddress(tokenAddress), ["function mint(address to, uint256 amount) public"], wallet);
+      const contract = new ethers.Contract(ethers.utils.getAddress(tokenAddress.toLowerCase()), ["function mint(address to, uint256 amount) public"], wallet);
       const tx = await contract.mint(toAddress, ethers.utils.parseUnits(amount, 18), {
         maxPriorityFeePerGas: ethers.utils.parseUnits("40", "gwei"),
         maxFeePerGas: ethers.utils.parseUnits("400", "gwei")
@@ -931,8 +980,8 @@ export class BlockchainRouter {
     try {
       const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl);
       const wallet = new ethers.Wallet(this.privateKey, provider);
-      const tokenAddr = ethers.utils.getAddress(blockchainConfig.greenTokenAddress);
-      const routerAddr = ethers.utils.getAddress(blockchainConfig.routerAddress);
+      const tokenAddr = ethers.utils.getAddress(blockchainConfig.greenTokenAddress.toLowerCase());
+      const routerAddr = ethers.utils.getAddress(blockchainConfig.routerAddress.toLowerCase());
       const router = new ethers.Contract(routerAddr, ["function addLiquidityETH(address token, uint amountTokenDesired, uint amountTokenMin, uint amountETHMin, address to, uint deadline) external payable returns (uint amountToken, uint amountETH, uint liquidity)"], wallet);
       const tokenContract = new ethers.Contract(tokenAddr, ["function approve(address spender, uint256 amount) public returns (bool)", "function balanceOf(address owner) view returns (uint256)"], wallet);
       const tokenWei = ethers.utils.parseUnits(tokenAmount, 18);

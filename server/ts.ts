@@ -57,8 +57,8 @@ const AQUARIUS_URL = blockchainConfig.oceanProtocolUrl;
 
 // --- GÜVENLİK KATMANI: SÖZLEŞME BEYAZ LİSTESİ ---
 const ALLOWED_CONTRACTS = [
-    ethers.utils.getAddress("0x4544d5674066f7f6f966144510006327e5b56345"), // Ocean Market
-    ethers.utils.getAddress("0x71C7656EC7ab88b098defB751B7401B5f6d8976F"), // Smart Gate
+    ethers.utils.getAddress("0x4544d5674066f7f6f966144510006327e5b56345".toLowerCase()), // Ocean Market
+    ethers.utils.getAddress("0x71C7656EC7ab88b098defB751B7401B5f6d8976F".toLowerCase()), // Smart Gate
 ].map(addr => addr.toLowerCase());
 
 function validateContractAddress(address: string) {
@@ -1083,41 +1083,6 @@ app.post("/api/admin/command", async (req, res) => {
     return res.json({ success: true, message: "Status report generated." });
   }
 
-  if (command.startsWith("CONVERT_POL_TO_USDT")) {
-    const amount = command.split(" ")[1] || "1.0";
-    (async () => {
-      pushLog('SYSTEM', 'WARNING', `[FINANCIAL_PIVOT] Hazır havuz kullanılarak ${amount} POL takas ediliyor...`);
-      const result = await mainBlockchain.swapPOLForUSDT(amount);
-      if (result.success) {
-        pushLog('FINANCE', 'SUCCESS', `[CASH_OUT_OK] Takas başarılı! USDT cüzdanınıza eklendi. Tx: ${result.txHash}`);
-      }
-    })();
-    return res.json({ success: true, message: "Swap process started using QuickSwap." });
-  }
-
-  if (command.startsWith("CONVERT_POL_TO_USDT")) {
-    const amount = command.split(" ")[1] || "1.0";
-    (async () => {
-      pushLog('SYSTEM', 'WARNING', `[FINANCIAL_PIVOT] Hazır havuz kullanılarak ${amount} POL takas ediliyor...`);
-      const result = await mainBlockchain.swapPOLForUSDT(amount);
-      if (result.success) {
-        pushLog('FINANCE', 'SUCCESS', `[CASH_OUT_OK] Takas başarılı! USDT cüzdanınıza eklendi. Tx: ${result.txHash}`);
-      }
-    })();
-    return res.json({ success: true, message: "Swap process started using QuickSwap." });
-  }
-
-  if (command.startsWith("CONVERT_POL_TO_USDT")) {
-    const amount = command.split(" ")[1] || "1.0";
-    (async () => {
-      pushLog('SYSTEM', 'WARNING', `[FINANCIAL_PIVOT] Hazır havuz kullanılarak ${amount} POL takas ediliyor...`);
-      const result = await mainBlockchain.swapPOLForUSDT(amount);
-      if (result.success) {
-        pushLog('FINANCE', 'SUCCESS', `[CASH_OUT_OK] Takas başarılı! USDT cüzdanınıza eklendi. Tx: ${result.txHash}`);
-      }
-    })();
-    return res.json({ success: true, message: "Swap process started using QuickSwap." });
-  }
 
   if (command.startsWith("GENERATE_GREEN_TOKEN")) {
     const parts = command.split(" ");
