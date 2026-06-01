@@ -469,10 +469,9 @@ async function generateStatusReport() {
     // ON-CHAIN VERİSİ: Cüzdandaki gerçek USDT bakiyesi
     const actualUsdtBalance = await mainBlockchain.getUSDTBalance(blockchainConfig.payoutWallet);
     
-    // KECO Token Bakiyesi Sorgusu
-    const walletAddr = mainBlockchain.getWalletAddress();
+    // Yeşil Token Bakiyesi Sorgusu
     const greenTokenBalance = blockchainConfig.greenTokenAddress && !blockchainConfig.greenTokenAddress.includes('0x000')
-        ? await mainBlockchain.getTokenBalance(blockchainConfig.greenTokenAddress, walletAddr)
+        ? await mainBlockchain.getTokenBalance(blockchainConfig.greenTokenAddress, mainBlockchain.getWalletAddress())
         : "0.00";
     
     // KONFİGÜRASYON DENETİMİ (Audit)
@@ -484,9 +483,8 @@ async function generateStatusReport() {
         ? "⚠️ TOKEN ADRESİ EKSİK!"
         : "✓ TOKEN TANIMLI";
 
-    pushLog('FINANCE', 'ANALYZE', `--- KRİTİK ŞEBEKE DENETİMİ ---`);
-    pushLog('FINANCE', 'ANALYZE', `Sorgulanan Cüzdan: ${walletAddr || 'HATA: PRIVATE_KEY OKUNAMADI'}`);
-    pushLog('FINANCE', 'ANALYZE', `Aktif Token: ${blockchainConfig.greenTokenAddress}`);
+    pushLog('FINANCE', 'ANALYZE', `--- ŞEBEKE STOK RAPORU ---`);
+    pushLog('FINANCE', 'ANALYZE', `Sorgulanan Token: ${blockchainConfig.greenTokenAddress || 'Tanımsız'}`);
     pushLog('FINANCE', 'ANALYZE', `Ağ Denetimi: ${networkAudit} | Mod: ${blockchainConfig.networkMode.toUpperCase()}`);
     pushLog('FINANCE', 'ANALYZE', `Varlık Denetimi: ${tokenAudit}`);
     
