@@ -232,13 +232,14 @@ export class BlockchainRouter {
    */
   public async getTokenBalance(tokenAddress: string, accountAddress: string): Promise<string> {
     try {
-      const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl);
+      const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl, "any");
       const contract = new ethers.Contract(tokenAddress, [
         "function balanceOf(address owner) view returns (uint256)",
         "function decimals() view returns (uint8)"
       ], provider);
+      
       const [balance, decimals] = await Promise.all([
-        contract.balanceOf(accountAddress),
+        contract.balanceOf(accountAddress).catch(() => ethers.BigNumber.from(0)),
         contract.decimals().catch(() => 18)
       ]);
       return ethers.utils.formatUnits(balance, decimals);

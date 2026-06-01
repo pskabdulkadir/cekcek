@@ -484,6 +484,7 @@ async function generateStatusReport() {
         : "✓ TOKEN TANIMLI";
 
     pushLog('FINANCE', 'ANALYZE', `--- ŞEBEKE STOK RAPORU ---`);
+    pushLog('FINANCE', 'ANALYZE', `Sorgulanan Token: ${blockchainConfig.greenTokenAddress || 'Tanımsız'}`);
     pushLog('FINANCE', 'ANALYZE', `Ağ Denetimi: ${networkAudit} | Mod: ${blockchainConfig.networkMode.toUpperCase()}`);
     pushLog('FINANCE', 'ANALYZE', `Varlık Denetimi: ${tokenAudit}`);
     
