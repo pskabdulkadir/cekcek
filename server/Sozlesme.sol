@@ -1,32 +1,24 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
+import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+
 /**
  * @title Sozlesme
  * @dev İnternet Geri Kazanım Çekirdeği için otonom token ve veri kayıt kontratı.
  */
-contract Sozlesme {
-    string public name;
-    string public symbol;
-    uint8 public decimals = 18;
-    uint256 public totalSupply;
-    mapping(address => uint256) public balanceOf;
-
-    event Transfer(address indexed from, address indexed to, uint256 value);
+contract Sozlesme is ERC20 {
     event DataAssetRegistered(uint256 amount, string proof);
     event BulkRegistered(uint256 count);
 
-    constructor(string memory _name, string memory _symbol, uint256 _initialSupply) {
-        name = _name;
-        symbol = _symbol;
-        totalSupply = _initialSupply;
-        balanceOf[msg.sender] = _initialSupply;
+    constructor(string memory _name, string memory _symbol, uint256 _initialSupply) 
+        ERC20(_name, _symbol) 
+    {
+        _mint(msg.sender, _initialSupply);
     }
 
     function mint(address to, uint256 amount) public {
-        totalSupply += amount;
-        balanceOf[to] += amount;
-        emit Transfer(address(0), to, amount);
+        _mint(to, amount);
     }
 
     function registerDataAsset(uint256 amount, string memory proof) public returns (bool) {
