@@ -98,7 +98,13 @@ export class BlockchainRouter {
    */
   private validateContract(address: string) {
     if (!address || address === ethers.constants.AddressZero) return; 
-    if (!ALLOWED_CONTRACTS.includes(address.toLowerCase())) {
+    const lowerAddr = address.toLowerCase();
+    // Dinamik kontrol: Hem sabit listeyi hem de .env'den gelen güncel adresleri kontrol et
+    const isWhitelisted = ALLOWED_CONTRACTS.includes(lowerAddr) || 
+                          lowerAddr === (blockchainConfig.greenTokenAddress || "").toLowerCase() ||
+                          lowerAddr === (blockchainConfig.routerAddress || "").toLowerCase();
+
+    if (!isWhitelisted) {
       this.emitLog('BLOCKCHAIN', 'ERROR', `GÜVENLİK İHLALİ: Yetkisiz sözleşme adresi tespit edildi: ${address}`);
       throw new Error("GÜVENLİK İHLALİ: Yetkisiz sözleşme adresi.");
     }

@@ -59,13 +59,16 @@ const AQUARIUS_URL = blockchainConfig.oceanProtocolUrl;
 const ALLOWED_CONTRACTS = [
     "0x4544d5674066f7f6f966144510006327e5b56345", // Ocean Market
     "0x71C7656EC7ab88b098defB751B7401B5f6d8976F", // Smart Gate
-    process.env.GREEN_TOKEN_ADDRESS || "0x0000000000000000000000000000000000000000",
-    process.env.ROUTER_ADDRESS || "0xa5e0829caced8ffdd052420551415491d6993e2f"
 ].filter(addr => addr && addr.startsWith("0x") && addr.length === 42).map(addr => addr.toLowerCase());
 
 function validateContractAddress(address: string) {
     if (!address || address === ethers.constants.AddressZero) return;
-    if (!ALLOWED_CONTRACTS.includes(address.toLowerCase())) {
+    const lowerAddr = address.toLowerCase();
+    // Canlı konfigürasyon kontrolü
+    const isDynamicAllowed = lowerAddr === blockchainConfig.greenTokenAddress.toLowerCase() || 
+                             lowerAddr === blockchainConfig.routerAddress.toLowerCase();
+
+    if (!ALLOWED_CONTRACTS.includes(lowerAddr) && !isDynamicAllowed) {
         pushLog('FINANCE', 'ERROR', `Kritik Güvenlik İhlali: Yetkisiz sözleşmeye erişim engellendi: ${address}`);
         throw new Error("SECURITY_BREACH: Unauthorized contract address.");
     }
