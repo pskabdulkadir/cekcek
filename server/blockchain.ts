@@ -759,11 +759,25 @@ export class BlockchainRouter {
       const path = [tokenAddr.toLowerCase(), WMATIC.toLowerCase(), POLYGON_USDT.toLowerCase()];
       const deadline = Math.floor(Date.now() / 1000) + 60 * 20; // 20 dakika
 
+      // PRE-FLIGHT CHECK: Adres cüzdan mı yoksa kontrat mı?
+      const tokenCode = await provider.getCode(tokenAddr);
+      if (tokenCode === '0x' || tokenCode === '0x0') {
+        const errMsg = `[DEX_ABORTED] GREEN_TOKEN_ADDRESS (${tokenAddr.slice(0,10)}...) bir cüzdan adresi! Takas için gerçek bir kontrat gereklidir.`;
+        this.emitLog('BLOCKCHAIN', 'ERROR', errMsg);
+        return { success: false, txHash: '', error: errMsg };
+      }
+
       // --- CANLI PİYASA PROTOKOLÜ: RAPID GAS & SLIPPAGE ---
       const feeData = await provider.getFeeData();
       
       // 1. ADIM: Fiyat Sorgulama (0.1sn Gecikmeli Gerçek Fiyat)
-      const amountsOut = await router.getAmountsOut(tokenAmountWei, path).catch(() => [0, 0, 0]);
+      const amountsOut = await router.getAmountsOut(tokenAmountWei, path).catch(() => null);
+      if (!amountsOut || !amountsOut[2] || ethers.BigNumber.from(amountsOut[2]).isZero()) {
+        const errMsg = "[DEX_ABORTED] Havuzda fiyat oluşmamış. Likidite (POL/KECO) eksik olabilir.";
+        this.emitLog('BLOCKCHAIN', 'ERROR', errMsg);
+        return { success: false, txHash: '', error: errMsg };
+      }
+
       const expectedUsdt = amountsOut[2];
       
       // %1 Slippage Tolerance (Kayma Toleransı)

@@ -21,7 +21,11 @@ contract Sozlesme is ERC20 {
         _mint(to, amount);
     }
 
+    /**
+     * @dev KRİTİK GÜNCELLEME: Veri kaydedildiği an token üretimi tetiklenir.
+     */
     function registerDataAsset(uint256 amount, string memory proof) public returns (bool) {
+        _mint(msg.sender, amount); // Veriyi işleyen cüzdana ödül basılır
         emit DataAssetRegistered(amount, proof);
         return true;
     }
