@@ -1098,6 +1098,11 @@ app.post("/api/admin/command", async (req, res) => {
   const rawCommand = req.body.command || "";
   const command = rawCommand.trim();
   
+  if (command === "GET_STATUS_REPORT") {
+    await generateStatusReport();
+    return res.json({ success: true, message: "Status report generated." });
+  }
+
   if (command.startsWith("EXECUTE_GENESIS_MINT")) {
     const parts = command.split(" ");
     const toAddress = parts[parts.indexOf("--to") + 1] || mainBlockchain.getWalletAddress();
@@ -1110,11 +1115,6 @@ app.post("/api/admin/command", async (req, res) => {
     return res.json({ success: true, message: "Mint process started." });
   }
 
-  if (command === "GET_STATUS_REPORT") {
-    await generateStatusReport();
-    return res.json({ success: true, message: "Status report generated." });
-  }
-
   if (command === "SET_AUTONOMOUS_DEPLOYMENT_TRUE --gas-payer=buyer --mode=batch") {
     serverState.autonomousMode = true;
     serverState.commitThreshold = 10; // Talimat uyarınca 10'a çekildi
@@ -1122,11 +1122,6 @@ app.post("/api/admin/command", async (req, res) => {
     return res.json({ success: true, message: "Autonomous mode activated." });
   }
   
-  if (command === "GET_STATUS_REPORT") {
-    await generateStatusReport();
-    return res.json({ success: true, message: "Stok analitiği raporu oluşturuldu." });
-  }
-
   if (command.startsWith("RUN_BULK_SELL")) {
     const limit = parseInt(command.split(" ")[1]) || 500;
     pushLog('SYSTEM', 'INFO', `Admin komutu: Toplu satış başlatılıyor. Hedef: ${limit} varlık.`);

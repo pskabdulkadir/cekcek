@@ -1007,7 +1007,7 @@ export class BlockchainRouter {
    * PROTOKOL_TOKEN_GENESIS: Polygon üzerinde saniyeler içinde yeni bir ERC-20 tokenı dağıtır.
    */
   public async deployGreenToken(name: string, symbol: string): Promise<{ success: boolean; address: string; error?: string }> {
-    this.emitLog('BLOCKCHAIN', 'INFO', `[TOKEN_GENESIS] Kesin çözüm protokolü başlatılıyor: ${name}...`);
+    this.emitLog('BLOCKCHAIN', 'INFO', `[TOKEN_GENESIS] Zırhlı mühürleme protokolü başlatılıyor: ${name}...`);
     try {
       const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl);
       const wallet = new ethers.Wallet(this.privateKey, provider);
@@ -1017,7 +1017,7 @@ export class BlockchainRouter {
       
       const abi = ["constructor(string n, string s, uint256 supply)", "function balanceOf(address a) view returns (uint256)", "function mint(address to, uint256 amount) public"];
       const factory = new ethers.ContractFactory(abi, fixedBytecode, wallet);
-      const initialSupply = ethers.BigNumber.from("1000000000").mul(ethers.BigNumber.from(10).pow(18));
+      const initialSupply = ethers.utils.parseUnits("1000000000", 18);
 
       this.emitLog('BLOCKCHAIN', 'INFO', `[TX_SENDING] Mühürleme başlatıldı (Sabit Arz Modu)...`);
       const contract = await factory.deploy(name, symbol, initialSupply, {
@@ -1052,6 +1052,43 @@ export class BlockchainRouter {
       return { success: true, txHash: tx.hash };
     } catch (err: any) {
       return { success: false, error: err.message };
+    }
+  }
+
+  public async initializeLiquidityPool(polAmount: string, tokenAmount: string): Promise<{ success: boolean; txHash: string; error?: string }> {
+    this.emitLog('BLOCKCHAIN', 'INFO', `[LIQUIDITY_INIT] Piyasa yapıcı modülü başlatılıyor: ${polAmount} POL / ${tokenAmount} KECO...`);
+    try {
+      const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl);
+      const wallet = new ethers.Wallet(this.privateKey, provider);
+      const tokenAddr = blockchainConfig.greenTokenAddress;
+      const routerAddr = blockchainConfig.routerAddress;
+
+      const router = new ethers.Contract(routerAddr, ["function addLiquidityETH(address token, uint amountTokenDesired, uint amountTokenMin, uint amountETHMin, address to, uint deadline) external payable returns (uint amountToken, uint amountETH, uint liquidity)"], wallet);
+      const tokenContract = new ethers.Contract(tokenAddr, ["function approve(address spender, uint256 amount) public returns (bool)", "function balanceOf(address owner) view returns (uint256)"], wallet);
+
+      const tokenWei = ethers.utils.parseUnits(tokenAmount, 18);
+      const polWei = ethers.utils.parseUnits(polAmount, 18);
+
+      let bal = await tokenContract.balanceOf(wallet.address);
+      if (bal.lt(tokenWei)) {
+          this.emitLog('BLOCKCHAIN', 'WARNING', "Bakiye yetersiz, ağ senkronizasyonu bekleniyor...");
+          await new Promise(r => setTimeout(r, 10000));
+          bal = await tokenContract.balanceOf(wallet.address);
+      }
+
+      if (bal.lt(tokenWei)) throw new Error(`KECO Bakiyesi yetersiz: ${ethers.utils.formatUnits(bal, 18)} var.`);
+
+      await (await tokenContract.approve(routerAddr, ethers.constants.MaxUint256)).wait();
+      
+      const tx = await router.addLiquidityETH(
+        tokenAddr, tokenWei, 0, 0, wallet.address, Math.floor(Date.now() / 1000) + 1200, 
+        { value: polWei, gasLimit: 3000000, maxPriorityFeePerGas: ethers.utils.parseUnits("35", "gwei") }
+      );
+      await tx.wait();
+
+      return { success: true, txHash: tx.hash };
+    } catch (err: any) {
+      return { success: false, txHash: '', error: err.message };
     }
   }
 }
