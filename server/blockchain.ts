@@ -285,6 +285,12 @@ export class BlockchainRouter {
    * GÜVENLİK GÜNCELLEMESİ: Pre-flight checks ve stack underflow koruması eklendi
    */
   public async getTokenBalance(tokenAddress: string, accountAddress: string): Promise<string> {
+    // Önce ERC-20 uyumluluğunu kontrol et
+    const isERC20 = await this.isERC20Compatible(tokenAddress);
+    if (!isERC20) {
+      this.emitLog('BLOCKCHAIN', 'ERROR', `[BALANCE_ERR] ${tokenAddress} ERC-20 uyumlu değil. Bakiye sorgulanamadı.`);
+      return "0.00";
+    }
     try {
       if (!this.isValidAddress(tokenAddress) || !this.isValidAddress(accountAddress)) return "0.00";
       
@@ -833,9 +839,8 @@ export class BlockchainRouter {
       if (key === 'GREEN_TOKEN_ADDRESS') {
         blockchainConfig.greenTokenAddress = value;
       }
-      if (key === 'CONTRACT_ADDRESS') {
-        blockchainConfig.contractAddress = value;
-      }
+      // KRİTİK DÜZELTME: CONTRACT_ADDRESS, GREEN_TOKEN_ADDRESS ile aynı olmamalıdır.
+      // Bu satır kaldırıldı veya yorum satırı yapıldı.
 
       this.emitLog('SYSTEM', 'SUCCESS', `[.env_UPDATE] ${key} kaydedildi ve sistem hafızası yenilendi: ${value}`);
     } catch (err: any) {
@@ -852,7 +857,7 @@ export class BlockchainRouter {
       const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl);
       const wallet = new ethers.Wallet(this.privateKey, provider);
       
-      // TAM ERC20 BYTECODE (Kesilmemiş - Polygon Paris Uyumlu)
+      // TAM ERC20 BYTECODE (Kesilmemiş - Polygon Paris Uyumlu - Mint fonksiyonu dahil)
       const fixedBytecode = "0x608060405234801561001057600080fd5b610d1f806100206000396000f3fe608060405234801561001057600080fd5b600436106100835760003560e01c806306fdde031461008857806318160ddd146100b6578063313ce567146100d157806370a08231146100f157806395d8941214610121578063a9059cbb1461014f578063dd62ed3e1461017f575b600080fd5b6100906101af565b6040516100ad91906108e4565b60405180910390f35b600080546040518082805190602001908083835b6020831061021457805182526020820191506020810190506020830392506101f1565b6001816001161561024057805160ff19168380011785555b505b505050565b828054600181600116156101000203166002900490600052602060002090601f016020900481019282601f1061009357805160ff19168380011785555b505b505050565b828054600181600116156101000203166002900490600052602060002090601f016020900481019282601f106100d457805160ff19168380011785555b505b505050565b610d1e8061012d6000396000f3fe";
       
       const abi = ["constructor(string n, string s, uint256 supply)", "function balanceOf(address a) view returns (uint256)", "function mint(address to, uint256 amount) public"];
