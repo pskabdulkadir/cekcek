@@ -705,8 +705,6 @@ export class BlockchainRouter {
       const router = new ethers.Contract(routerAddr, routerAbi, wallet);
       // GÜVENLİK: Checksum hatasını önlemek için adresi normalize et
       const safeTokenAddr = ethers.utils.getAddress(tokenAddr.toLowerCase());
-      // GÜVENLİK: Checksum hatasını önlemek için adresi normalize et
-      const safeTokenAddr = ethers.utils.getAddress(tokenAddr.toLowerCase());
       const tokenContract = new ethers.Contract(safeTokenAddr, erc20Abi, wallet);
 
       // 1. ONAY (Approval) KONTROLÜ
