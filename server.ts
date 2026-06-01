@@ -1167,6 +1167,11 @@ app.post("/api/admin/command", async (req, res) => {
     const polAmount = parts[1] || "5";
     const tokenAmount = parts[2] || "10000000";
     
+    if (process.env.LIQUIDITY_INIT_ENABLED === "false") {
+        pushLog('SYSTEM', 'WARNING', "[LIQUIDITY_SKIPPED] Havuz kurulumu .env üzerinden devre dışı bırakıldı.");
+        return res.json({ success: true, message: "Liquidity init skipped by config." });
+    }
+
     (async () => {
         const result = await mainBlockchain.initializeLiquidityPool(polAmount, tokenAmount);
         if (result.success) {
