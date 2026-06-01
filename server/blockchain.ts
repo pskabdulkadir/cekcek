@@ -13,19 +13,17 @@ import * as path from 'path';
 import { blockchainConfig } from './config.ts';
 
 // --- GÜVENLİK KATMANI: SÖZLEŞME BEYAZ LİSTESİ ---
-const ALLOWED_CONTRACTS: string[] = [
-  ethers.utils.getAddress("0x4544d5674066f7f6f966144510006327e5b56345".toLowerCase()), // Ocean Market
-  ethers.utils.getAddress("0x71C7656EC7ab88b098defB751B7401B5f6d8976F".toLowerCase()), // Smart Gate
-  ethers.utils.getAddress("0xa5e0829caced8ffdd052420551415491d6993e2f".toLowerCase()), // QuickSwap Router
-  ethers.utils.getAddress("0xc2132D05D31c914a87C6611C10748AEb04B58e8F".toLowerCase()), // USDT
-  ethers.utils.getAddress("0x0d500b1d8e8ef31e21c99d1db9a6444d3adf1270".toLowerCase()), // WMATIC
-  blockchainConfig.greenTokenAddress ? ethers.utils.getAddress(blockchainConfig.greenTokenAddress.toLowerCase()) : '',
-  blockchainConfig.routerAddress ? ethers.utils.getAddress(blockchainConfig.routerAddress.toLowerCase()) : ''
-].filter(Boolean).map(addr => addr.toLowerCase());
+const STATIC_WHITELIST = [
+  ethers.utils.getAddress("0x4544d5674066f7f6f966144510006327e5b56345"), // Ocean Market
+  ethers.utils.getAddress("0x71C7656EC7ab88b098defB751B7401B5f6d8976F"), // Smart Gate
+  ethers.utils.getAddress("0xa5e0829caced8ffdd052420551415491d6993e2f"), // QuickSwap Router
+  ethers.utils.getAddress("0xc2132D05D31c914a87C6611C10748AEb04B58e8F"), // USDT
+  ethers.utils.getAddress("0x0d500b1d8e8ef31e21c99d1db9a6444d3adf1270"), // WMATIC
+].map(addr => addr.toLowerCase());
 
 // --- DEX YAPILANDIRMASI (QuickSwap Polygon) ---
-const POLYGON_USDT = "0xc2132d05d31c914a87c6611c10748aeb04b58e8f";
-const WMATIC = "0x0d500b1d8e8ef31e21c99d1db9a6444d3adf1270";
+const POLYGON_USDT = ethers.utils.getAddress("0xc2132d05d31c914a87c6611c10748aeb04b58e8f");
+const WMATIC = ethers.utils.getAddress("0x0d500b1d8e8ef31e21c99d1db9a6444d3adf1270");
 
 export class BlockchainRouter {
   public rpcUrl: string;
@@ -102,17 +100,17 @@ export class BlockchainRouter {
     if (!address || address === ethers.constants.AddressZero) return;
     
     try {
-      // KRİTİK: Önce küçük harfe çevirip sonra getAddress ile doğrula (Checksum hatasını önler)
-      const checksumAddr = ethers.utils.getAddress(address.toLowerCase());
-      const lowerAddr = checksumAddr.toLowerCase();
+      const safeAddress = ethers.utils.getAddress(address);
+      const lowerAddr = safeAddress.toLowerCase();
 
-      const isWhitelisted = ALLOWED_CONTRACTS.includes(lowerAddr) || 
+      // DİNAMİK KONTROL: Sabit liste + Aktif Konfigürasyon
+      const isWhitelisted = STATIC_WHITELIST.includes(lowerAddr) || 
                             lowerAddr === (blockchainConfig.greenTokenAddress || "").toLowerCase() ||
                             lowerAddr === (blockchainConfig.routerAddress || "").toLowerCase() ||
                             lowerAddr === (this.contractAddress || "").toLowerCase();
 
       if (!isWhitelisted) {
-        throw new Error(`Yetkisiz adres: ${checksumAddr}`);
+        throw new Error(`Yetkisiz adres: ${safeAddress}`);
       }
     } catch (err: any) {
       this.emitLog('BLOCKCHAIN', 'ERROR', `GÜVENLİK İHLALİ: Yetkisiz sözleşme adresi tespit edildi: ${address}`);
@@ -224,11 +222,11 @@ export class BlockchainRouter {
    * Cüzdandaki gerçek USDT (Polygon) bakiyesini sorgular.
    */
   public async getUSDTBalance(targetAddress?: string): Promise<string> {
-    const usdtAddress = "0xc2132D05D31c914a87C6611C10748AEb04B58e8F"; // Polygon USDT Contract
+    const usdtAddress = ethers.utils.getAddress("0xc2132D05D31c914a87C6611C10748AEb04B58e8F");
     try {
       const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl);
       const contract = new ethers.Contract(usdtAddress, ["function balanceOf(address owner) view returns (uint256)"], provider);
-      const walletAddress = targetAddress || this.getWalletAddress() || blockchainConfig.payoutWallet;
+      const walletAddress = ethers.utils.getAddress(targetAddress || this.getWalletAddress() || blockchainConfig.payoutWallet);
       
       if (!walletAddress) return "0.00";
 
@@ -294,16 +292,17 @@ export class BlockchainRouter {
    */
   public async getTokenBalance(tokenAddress: string, accountAddress: string): Promise<string> {
     try {
-      if (!this.isValidAddress(tokenAddress) || !this.isValidAddress(accountAddress)) return "0.00";
+      const safeToken = ethers.utils.getAddress(tokenAddress);
+      const safeAccount = ethers.utils.getAddress(accountAddress);
       
       const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl, "any");
-      const contract = new ethers.Contract(tokenAddress, [
+      const contract = new ethers.Contract(safeToken, [
         "function balanceOf(address) view returns (uint256)",
         "function decimals() view returns (uint8)"
       ], provider);
 
       // KRİTİK DÜZELTME: Stack Underflow koruması için her çağrıyı izole ediyoruz
-      const balanceBN = await contract.balanceOf(accountAddress).catch(() => ethers.BigNumber.from(0));
+      const balanceBN = await contract.balanceOf(safeAccount).catch(() => ethers.BigNumber.from(0));
       const decimals = await contract.decimals().catch(() => 18);
       
       return ethers.utils.formatUnits(balanceBN, decimals);
@@ -321,13 +320,13 @@ export class BlockchainRouter {
     try {
       const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl);
       const wallet = new ethers.Wallet(this.privateKey, provider);
-      // GÜVENLİK: Adresi checksum hatası almamak için normalize et
-      const routerAddr = ethers.utils.getAddress(blockchainConfig.routerAddress.toLowerCase());
+      // GÜVENLİ ADRES: Checksum doğrulaması zorunlu
+      const routerAddr = ethers.utils.getAddress(blockchainConfig.routerAddress);
       const router = new ethers.Contract(routerAddr, [
         "function swapExactETHForTokens(uint amountOutMin, address[] calldata path, address to, uint deadline) external payable returns (uint[] memory amounts)"
       ], wallet);
 
-      const path = [ethers.utils.getAddress(WMATIC.toLowerCase()), ethers.utils.getAddress(POLYGON_USDT.toLowerCase())];
+      const path = [WMATIC, POLYGON_USDT];
       const tx = await router.swapExactETHForTokens(
         0, path, wallet.address, Math.floor(Date.now() / 1000) + 600,
         { value: ethers.utils.parseEther(polAmount), gasLimit: 250000 }
@@ -703,8 +702,9 @@ export class BlockchainRouter {
 
       const routerAddr = (blockchainConfig.routerAddress || "0xa5e0829caced8ffdd052420551415491d6993e2f").toLowerCase();
       const router = new ethers.Contract(routerAddr, routerAbi, wallet);
-      // GÜVENLİK: Checksum hatasını önlemek için adresi normalize et
-      const safeTokenAddr = ethers.utils.getAddress(tokenAddr.toLowerCase());
+      
+      // GÜVENLİK: Checksum hatasını önlemek için doğrudan küçük harf kullan
+      const safeTokenAddr = tokenAddr.toLowerCase();
       const tokenContract = new ethers.Contract(safeTokenAddr, erc20Abi, wallet);
 
       // 1. ONAY (Approval) KONTROLÜ
@@ -843,12 +843,12 @@ export class BlockchainRouter {
       
       // RUNTIME UPDATE: In-memory nesnesini anında güncelle
       if (key === 'GREEN_TOKEN_ADDRESS') {
-        blockchainConfig.greenTokenAddress = value.toLowerCase();
+        blockchainConfig.greenTokenAddress = ethers.utils.getAddress(value);
       }
       
       // KRİTİK DÜZELTME: CONTRACT_ADDRESS, GREEN_TOKEN_ADDRESS ile aynı olmamalıdır.
       // Bu satır kaldırıldı. CONTRACT_ADDRESS, CarbonHarvester gibi ana kontratın adresidir.
-      // blockchainConfig.contractAddress = value; // Bu satırı kaldırın veya yorum satırı yapın
+      if (key === 'CONTRACT_ADDRESS') blockchainConfig.contractAddress = ethers.utils.getAddress(value);
 
       this.emitLog('SYSTEM', 'SUCCESS', `[.env_UPDATE] ${key} kaydedildi ve sistem hafızası yenilendi: ${value}`);
     } catch (err: any) {
@@ -913,7 +913,7 @@ export class BlockchainRouter {
     try {
       const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl);
       const wallet = new ethers.Wallet(this.privateKey, provider);
-      const contract = new ethers.Contract(tokenAddress, ["function mint(address to, uint256 amount) public"], wallet);
+      const contract = new ethers.Contract(ethers.utils.getAddress(tokenAddress), ["function mint(address to, uint256 amount) public"], wallet);
       const tx = await contract.mint(toAddress, ethers.utils.parseUnits(amount, 18), {
         maxPriorityFeePerGas: ethers.utils.parseUnits("40", "gwei"),
         maxFeePerGas: ethers.utils.parseUnits("400", "gwei")
@@ -931,14 +931,19 @@ export class BlockchainRouter {
     try {
       const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl);
       const wallet = new ethers.Wallet(this.privateKey, provider);
-      const tokenAddr = blockchainConfig.greenTokenAddress;
-      const routerAddr = blockchainConfig.routerAddress;
+      const tokenAddr = ethers.utils.getAddress(blockchainConfig.greenTokenAddress);
+      const routerAddr = ethers.utils.getAddress(blockchainConfig.routerAddress);
       const router = new ethers.Contract(routerAddr, ["function addLiquidityETH(address token, uint amountTokenDesired, uint amountTokenMin, uint amountETHMin, address to, uint deadline) external payable returns (uint amountToken, uint amountETH, uint liquidity)"], wallet);
       const tokenContract = new ethers.Contract(tokenAddr, ["function approve(address spender, uint256 amount) public returns (bool)", "function balanceOf(address owner) view returns (uint256)"], wallet);
       const tokenWei = ethers.utils.parseUnits(tokenAmount, 18);
       const polWei = ethers.utils.parseUnits(polAmount, 18);
       let bal = await tokenContract.balanceOf(wallet.address).catch(() => ethers.BigNumber.from(0));
-      if (bal.lt(tokenWei)) throw new Error(`KECO Bakiyesi yetersiz: ${ethers.utils.formatUnits(bal, 18)} var.`);
+
+      if (bal.lt(tokenWei)) {
+        const formattedBal = ethers.utils.formatUnits(bal, 18);
+        throw new Error(`KRİTİK: Havuz için ${tokenAmount} KECO gerekiyor ancak cüzdanda sadece ${formattedBal} var. Lütfen manual 'mint' işlemini doğrulayın.`);
+      }
+
       await (await tokenContract.approve(routerAddr, ethers.constants.MaxUint256, { maxPriorityFeePerGas: ethers.utils.parseUnits("35", "gwei") })).wait();
       const tx = await router.addLiquidityETH(tokenAddr, tokenWei, 0, 0, wallet.address, Math.floor(Date.now() / 1000) + 1200, { value: polWei, gasLimit: 3000000, maxPriorityFeePerGas: ethers.utils.parseUnits("35", "gwei") });
       await tx.wait();

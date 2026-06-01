@@ -57,9 +57,9 @@ const AQUARIUS_URL = blockchainConfig.oceanProtocolUrl;
 
 // --- GÜVENLİK KATMANI: SÖZLEŞME BEYAZ LİSTESİ ---
 const ALLOWED_CONTRACTS = [
-    "0x4544d5674066f7f6f966144510006327e5b56345", // Ocean Market
-    "0x71C7656EC7ab88b098defB751B7401B5f6d8976F", // Smart Gate
-].filter(addr => addr && addr.startsWith("0x") && addr.length === 42).map(addr => addr.toLowerCase());
+    ethers.utils.getAddress("0x4544d5674066f7f6f966144510006327e5b56345"), // Ocean Market
+    ethers.utils.getAddress("0x71C7656EC7ab88b098defB751B7401B5f6d8976F"), // Smart Gate
+].map(addr => addr.toLowerCase());
 
 function validateContractAddress(address: string) {
     if (!address || address === ethers.constants.AddressZero) return;
@@ -1107,15 +1107,34 @@ app.post("/api/admin/command", async (req, res) => {
     return res.json({ success: true, message: "Swap process started using QuickSwap." });
   }
 
+  if (command.startsWith("CONVERT_POL_TO_USDT")) {
+    const amount = command.split(" ")[1] || "1.0";
+    (async () => {
+      pushLog('SYSTEM', 'WARNING', `[FINANCIAL_PIVOT] Hazır havuz kullanılarak ${amount} POL takas ediliyor...`);
+      const result = await mainBlockchain.swapPOLForUSDT(amount);
+      if (result.success) {
+        pushLog('FINANCE', 'SUCCESS', `[CASH_OUT_OK] Takas başarılı! USDT cüzdanınıza eklendi. Tx: ${result.txHash}`);
+      }
+    })();
+    return res.json({ success: true, message: "Swap process started using QuickSwap." });
+  }
+
   if (command.startsWith("GENERATE_GREEN_TOKEN")) {
     const parts = command.split(" ");
     const name = parts[1] || "KADIR_ECO";
     const symbol = parts[2] || "KECO";
 
-    // KRİTİK KONTROL: Eğer GREEN_TOKEN_ADDRESS zaten tanımlıysa, yeniden mühürleme
-    if (blockchainConfig.greenTokenAddress && blockchainConfig.greenTokenAddress !== '0x0000000000000000000000000000000000000000') {
-        pushLog('SYSTEM', 'WARNING', `[TOKEN_GENESIS_SKIPPED] Kontrat zaten mevcut: ${blockchainConfig.greenTokenAddress}. Yeniden mühürleme engellendi.`);
-        return res.json({ success: true, message: "Token deployment skipped, contract already exists." });
+    const currentAddr = blockchainConfig.greenTokenAddress;
+    const isGhost = currentAddr && currentAddr.startsWith('0x9d8D');
+    const isDefault = !currentAddr || currentAddr.includes('0x000');
+
+    if (!isDefault && !isGhost) {
+        pushLog('SYSTEM', 'WARNING', `[TOKEN_GENESIS_SKIPPED] Geçerli bir kontrat zaten aktif: ${currentAddr}. Adresi değiştirmek için Render panelinden silin.`);
+        return res.json({ success: true, message: "Active contract found." });
+    }
+
+    if (isGhost) {
+        pushLog('SYSTEM', 'INFO', `[GHOST_CLEANUP] Eski hayalet adres (${currentAddr}) temizleniyor, üzerine yazılacak...`);
     }
     
     (async () => {
