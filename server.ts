@@ -232,16 +232,17 @@ async function monitorAndLiquidate() {
   try {
     // 1. ADIM: YAKIT KONTROLÜ (Gas Refiller)
     const gasCheck = await mainBlockchain.checkGasBalance('polygon');
-    const currentPol = parseFloat(gasCheck.balance);
+    const currentPol = parseFloat(gasCheck?.balance || "0");
     
-    if (blockchainConfig.gasRefillEnabled && currentPol < blockchainConfig.gasRefillThreshold) {
-      pushLog('FINANCE', 'WARNING', `[AUTO_FUEL] Yakıt düşük: ${currentPol.toFixed(3)} POL. Rezerv USDT kontrol ediliyor...`);
-      const usdtBalance = await mainBlockchain.getUSDTBalance();
-      if (parseFloat(usdtBalance) >= blockchainConfig.gasRefillUsdtAmount) {
-        const refill = await mainBlockchain.refillGasFromUSDT(blockchainConfig.gasRefillUsdtAmount.toString());
-        if (refill.success) pushLog('FINANCE', 'SUCCESS', `[GAS_OK] Yakıt takviyesi mühürlendi.`);
+    if (blockchainConfig.gasRefillEnabled && currentPol < (blockchainConfig.gasRefillThreshold || 0.8)) {
+      pushLog('FINANCE', 'WARNING', `[AUTO_FUEL] Yakıt kritik: ${currentPol.toFixed(3)} POL. USDT rezervi taranıyor...`);
+      const usdtBalance = await mainBlockchain.getUSDTBalance(blockchainConfig.payoutWallet);
+      const refillUsdtAmount = blockchainConfig.gasRefillUsdtAmount || 5.0;
+      if (parseFloat(usdtBalance) >= refillUsdtAmount) {
+        const refillResult = await mainBlockchain.refillGasFromUSDT(refillUsdtAmount.toString());
+        if (refillResult.success) pushLog('FINANCE', 'SUCCESS', `[GAS_OK] Yakıt takviyesi mühürlendi. Tx: ${refillResult.txHash.slice(0,10)}...`);
       } else {
-        pushLog('FINANCE', 'ERROR', `[FUEL_FAIL] Yetersiz USDT ($${usdtBalance}). Manuel POL desteği gerekebilir!`);
+        pushLog('FINANCE', 'ERROR', `[FUEL_FAIL] Yetersiz USDT ($${usdtBalance}). Manuel POL takviyesi gerekebilir!`);
       }
     }
 
@@ -250,12 +251,13 @@ async function monitorAndLiquidate() {
     const balance = await mainBlockchain.getTokenBalance(blockchainConfig.greenTokenAddress, walletAddr);
     const balanceNum = parseFloat(balance);
 
-    if (balanceNum > 0.0001) { // Toz miktarları (dust) atla
-      pushLog('FINANCE', 'SUCCESS', `[AUTONOMOUS_CYCLE] ${balanceNum.toFixed(4)} KECO tespit edildi. Otonom satış döngüsü başladı...`);
+    // Minimum 100 token eşiği (Polygon gas maliyet verimliliği için optimize edildi)
+    if (balanceNum >= 100.0) { // Gas verimliliği için 100 token eşiği
+      pushLog('FINANCE', 'SUCCESS', `[PROFIT_TRIGGER] ${balanceNum.toFixed(2)} KECO tespit edildi. Otonom likidite takası başlıyor.`);
       const amountWei = ethers.utils.parseUnits(balance, 18).toString();
       const result = await mainBlockchain.performDEXSwap(amountWei);
       if (result.success) {
-        pushLog('FINANCE', 'SUCCESS', `[MARKET_MAKER_OK] Varlık başarıyla USDT'ye dönüştürüldü.`);
+        pushLog('FINANCE', 'SUCCESS', `[MONETIZED] Satış onaylandı. USDT rezervi güncellendi.`);
       }
     }
   } catch (err: any) {
@@ -264,7 +266,7 @@ async function monitorAndLiquidate() {
     pushLog('SYSTEM', 'ERROR', `[OTONOM_HATA] ${err.message.slice(0, 50)}...`);
   }
 }
-setInterval(monitorAndLiquidate, 5000); 
+setInterval(monitorAndLiquidate, 15000); // Mainnet için en güvenli hız (15sn)
 
 /**
  * --- GERÇEK FİNANSAL MUTABAKAT MOTORU ---
