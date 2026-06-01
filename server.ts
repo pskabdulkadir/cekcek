@@ -1207,13 +1207,14 @@ app.post("/api/admin/command", async (req, res) => {
     const name = parts[1] || "KADIR_ECO";
     const symbol = parts[2] || "KECO";
     
-    (async () => {
-        const result = await mainBlockchain.deployGreenToken(name, symbol);
-        if (result.success) {
-            pushLog('SYSTEM', 'SUCCESS', `!!! KRİTİK !!! Yeni Token Adresiniz: ${result.address}. Lütfen bu adresi .env dosyanızdaki GREEN_TOKEN_ADDRESS kısmına yapıştırın.`);
-        }
-    })();
-    return res.json({ success: true, message: "Token deployment started." });
+    // KORUMA: Eğer halihazırda bir adres varsa yeniden üretimi engelle
+    if (blockchainConfig.greenTokenAddress && !blockchainConfig.greenTokenAddress.includes('0x000')) {
+        pushLog('SYSTEM', 'WARNING', `[GENESIS_ABORTED] Zaten aktif bir token mevcut: ${blockchainConfig.greenTokenAddress}. Yeni üretim iptal edildi.`);
+        return res.json({ success: true, message: "Token already exists. Use SET_AUTONOMOUS_DEPLOYMENT_TRUE to start." });
+    }
+
+    mainBlockchain.deployGreenToken(name, symbol);
+    return res.json({ success: true, message: "Genesis process initiated." });
   }
 
   if (command === "PAUSE_SCRAPER") {
