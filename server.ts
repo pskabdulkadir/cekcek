@@ -1038,7 +1038,7 @@ async function generateStatusReport() {
     
     pushLog('FINANCE', 'ANALYZE', `Envanter Değeri (Bekleyen): $${totalValueUSD.toFixed(4)} USDT`);
     pushLog('FINANCE', 'ANALYZE', `Sistem Tahsilat Kaydı (DB): $${totalRealizedUSD.toFixed(4)} USDT`);
-    pushLog('FINANCE', 'ANALYZE', `CÜZDAN DURUMU: ${actualUsdtBalance} USDT | ${greenTokenBalance} GREEN`);
+    pushLog('FINANCE', 'ANALYZE', `CÜZDAN DURUMU: ${actualUsdtBalance} USDT | ${greenTokenBalance} KECO`);
     pushLog('FINANCE', 'ANALYZE', `Voucher Durumu: ${readyToSellVouchers} Hazır | ${soldAssets} Satılan`);
     pushLog('FINANCE', 'ANALYZE', `Zincir Durumu: ${listedOnChain} Mühürlü | ${pendingRegistration} Kayıt Bekliyor`);
     pushLog('FINANCE', 'ANALYZE', `Toplam Üretim: ${totalAssets} Varlık`);
