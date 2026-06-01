@@ -1111,6 +1111,12 @@ app.post("/api/admin/command", async (req, res) => {
     const parts = command.split(" ");
     const name = parts[1] || "KADIR_ECO";
     const symbol = parts[2] || "KECO";
+
+    // KRİTİK KONTROL: Eğer GREEN_TOKEN_ADDRESS zaten tanımlıysa, yeniden mühürleme
+    if (blockchainConfig.greenTokenAddress && blockchainConfig.greenTokenAddress !== '0x0000000000000000000000000000000000000000') {
+        pushLog('SYSTEM', 'WARNING', `[TOKEN_GENESIS_SKIPPED] Kontrat zaten mevcut: ${blockchainConfig.greenTokenAddress}. Yeniden mühürleme engellendi.`);
+        return res.json({ success: true, message: "Token deployment skipped, contract already exists." });
+    }
     
     (async () => {
         const result = await mainBlockchain.deployGreenToken(name, symbol);
@@ -1125,6 +1131,13 @@ app.post("/api/admin/command", async (req, res) => {
     const parts = command.split(" ");
     const polAmount = parts[1] || "5";
     const tokenAmount = parts[2] || "10000000";
+
+    // KRİTİK KONTROL: Likidite eklemeden önce KECO bakiyesini kontrol et
+    const currentKecoBalance = await mainBlockchain.getTokenBalance(blockchainConfig.greenTokenAddress, mainBlockchain.getWalletAddress());
+    if (parseFloat(currentKecoBalance) < parseFloat(tokenAmount)) {
+        pushLog('SYSTEM', 'ERROR', `[LIQUIDITY_FAILED] Yetersiz KECO bakiyesi. Gerekli: ${tokenAmount}, Mevcut: ${currentKecoBalance}. Lütfen önce token basın.`);
+        return res.json({ success: false, message: "Insufficient KECO balance for liquidity." });
+    }
     
     (async () => {
         pushLog('SYSTEM', 'INFO', `[MARKET_INIT] Likidite havuzu kurulumu asenkron başlatıldı...`);

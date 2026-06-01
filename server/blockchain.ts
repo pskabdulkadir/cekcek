@@ -13,15 +13,15 @@ import * as path from 'path';
 import { blockchainConfig } from './config.ts';
 
 // --- GÜVENLİK KATMANI: SÖZLEŞME BEYAZ LİSTESİ ---
-const ALLOWED_CONTRACTS = [
-  "0x4544d5674066f7f6f966144510006327e5b56345", // Ocean Market
-  "0x71C7656EC7ab88b098defB751B7401B5f6d8976F", // Smart Gate
-  "0xa5E0829CaCEd8fFDD052420551415491D6993E2F", // QuickSwap Router
-  "0xc2132D05D31c914a87C6611C10748AEb04B58e8F", // USDT
-  "0x0d500b1d8e8ef31e21c99d1db9a6444d3adf1270", // WMATIC
-  blockchainConfig.greenTokenAddress,
-  blockchainConfig.routerAddress
-].map(addr => addr.toLowerCase());
+const ALLOWED_CONTRACTS: string[] = [
+  ethers.utils.getAddress("0x4544d5674066f7f6f966144510006327e5b56345"), // Ocean Market
+  ethers.utils.getAddress("0x71C7656EC7ab88b098defB751B7401B5f6d8976F"), // Smart Gate
+  ethers.utils.getAddress("0xa5E0829CaCEd8fFDD052420551415491D6993E2F"), // QuickSwap Router
+  ethers.utils.getAddress("0xc2132D05D31c914a87C6611C10748AEb04B58e8F"), // USDT
+  ethers.utils.getAddress("0x0d500b1d8e8ef31e21c99d1db9a6444d3adf1270"), // WMATIC
+  blockchainConfig.greenTokenAddress ? ethers.utils.getAddress(blockchainConfig.greenTokenAddress) : '',
+  blockchainConfig.routerAddress ? ethers.utils.getAddress(blockchainConfig.routerAddress) : ''
+].filter(Boolean).map(addr => addr.toLowerCase());
 
 // --- DEX YAPILANDIRMASI (QuickSwap Polygon) ---
 const POLYGON_USDT = "0xc2132d05d31c914a87c6611c10748aeb04b58e8f";
@@ -102,7 +102,8 @@ export class BlockchainRouter {
     if (!address || address === ethers.constants.AddressZero) return;
     
     try {
-      const checksumAddr = ethers.utils.getAddress(address);
+      // KRİTİK: Önce küçük harfe çevirip sonra getAddress ile doğrula (Checksum hatasını önler)
+      const checksumAddr = ethers.utils.getAddress(address.toLowerCase());
       const lowerAddr = checksumAddr.toLowerCase();
 
       const isWhitelisted = ALLOWED_CONTRACTS.includes(lowerAddr) || 
@@ -320,7 +321,7 @@ export class BlockchainRouter {
     try {
       const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl);
       const wallet = new ethers.Wallet(this.privateKey, provider);
-      // KRİTİK: Adresi checksum formatına zorla
+      // KRİTİK: Router adresini ethers.utils.getAddress ile doğrulayın
       const routerAddr = ethers.utils.getAddress(blockchainConfig.routerAddress);
       const router = new ethers.Contract(routerAddr, [
         "function swapExactETHForTokens(uint amountOutMin, address[] calldata path, address to, uint deadline) external payable returns (uint[] memory amounts)"
@@ -702,7 +703,9 @@ export class BlockchainRouter {
 
       const routerAddr = (blockchainConfig.routerAddress || "0xa5e0829caced8ffdd052420551415491d6993e2f").toLowerCase();
       const router = new ethers.Contract(routerAddr, routerAbi, wallet);
-      const tokenContract = new ethers.Contract(tokenAddr.toLowerCase(), erc20Abi, wallet);
+      // KRİTİK: Token adresini ethers.utils.getAddress ile doğrulayın
+      const safeTokenAddr = ethers.utils.getAddress(tokenAddr);
+      const tokenContract = new ethers.Contract(safeTokenAddr, erc20Abi, wallet);
 
       // 1. ONAY (Approval) KONTROLÜ
       // B Planı: Eğer SMART_GATE_CONTRACT_ADDRESS tanımlıysa, KECO token'ı üzerinde ona onay ver.
@@ -843,11 +846,9 @@ export class BlockchainRouter {
         blockchainConfig.greenTokenAddress = value.toLowerCase();
       }
       
-      // GÜVENLİK: CONTRACT_ADDRESS güncellemesi sadece mühürleme başarılıysa hafızada güncellenmeli
-      if (key === 'CONTRACT_ADDRESS' || key === 'SMART_GATE_CONTRACT_ADDRESS') {
-        this.contractAddress = value;
-        blockchainConfig.contractAddress = value;
-      }
+      // KRİTİK DÜZELTME: CONTRACT_ADDRESS, GREEN_TOKEN_ADDRESS ile aynı olmamalıdır.
+      // Bu satır kaldırıldı. CONTRACT_ADDRESS, CarbonHarvester gibi ana kontratın adresidir.
+      // blockchainConfig.contractAddress = value; // Bu satırı kaldırın veya yorum satırı yapın
 
       this.emitLog('SYSTEM', 'SUCCESS', `[.env_UPDATE] ${key} kaydedildi ve sistem hafızası yenilendi: ${value}`);
     } catch (err: any) {
@@ -880,6 +881,12 @@ export class BlockchainRouter {
       await contract.deployed();
       const finalAddress = contract.address;
       this.emitLog('BLOCKCHAIN', 'SUCCESS', `[DEPLOY_OK] Kontrat mühürlendi: ${finalAddress}`);
+      
+      // KRİTİK: Kontrat oluşturulduktan sonra deploy eden cüzdana initialSupply'ı mint et
+      const initialMintAmount = ethers.utils.parseUnits("1000000000", 18); // 1 Milyar token
+      this.emitLog('BLOCKCHAIN', 'INFO', `[TOKEN_MINT] Başlangıç bakiyesi (${ethers.utils.formatUnits(initialMintAmount, 18)} ${symbol}) cüzdana basılıyor...`);
+      const mintTx = await contract.mint(wallet.address, initialMintAmount);
+      await mintTx.wait();
 
       // OTOMATİK KONFİGÜRASYON GÜNCELLEME
       this.updatePersistentConfig('GREEN_TOKEN_ADDRESS', finalAddress);

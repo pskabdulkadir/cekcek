@@ -963,10 +963,10 @@ async function runRecyclingMining() {
 
         await signDataAssetAccessVoucher(generatedId);
 
-        // OTOMATİK ANINDA SATIŞ: Üretilen varlığı saniyeler içinde USDT'ye çevirir
-        if (serverState.autonomousMode) {
-          pushLog('FINANCE', 'INFO', `[AUTO_SALE] Varlık otonom olarak borsada nakde çevriliyor: ${generatedId}`);
-          await executeProxySettlement(generatedId, valuation, metric.co2SavingsGrams);
+        // OTOMATİK SATIŞ: Üretilen varlığı saniyeler içinde USDT'ye çevirmeyi dene
+        if (serverState.autonomousMode && !blockchainConfig.greenTokenAddress.includes('0000')) {
+          pushLog('FINANCE', 'INFO', `[AUTO_LIQUIDATION] Varlık otonom nakde çevriliyor: ${generatedId}`);
+          executeProxySettlement(generatedId, valuation, metric.co2SavingsGrams).catch(() => {});
         }
 
         await executeBatchTrade();
@@ -1110,18 +1110,6 @@ app.post("/api/admin/command", async (req, res) => {
   if (command === "GET_STATUS_REPORT") {
     await generateStatusReport();
     return res.json({ success: true, message: "Status report generated." });
-  }
-
-  if (command.startsWith("CONVERT_POL_TO_USDT")) {
-    const amount = command.split(" ")[1] || "1.0";
-    (async () => {
-      pushLog('SYSTEM', 'WARNING', `[FINANCIAL_PIVOT] Hazır havuz kullanılarak ${amount} POL takas ediliyor...`);
-      const result = await mainBlockchain.swapPOLForUSDT(amount);
-      if (result.success) {
-        pushLog('FINANCE', 'SUCCESS', `[CASH_OUT_OK] Takas başarılı! USDT cüzdanınıza eklendi. Tx: ${result.txHash}`);
-      }
-    })();
-    return res.json({ success: true, message: "Swap process started using QuickSwap." });
   }
 
   if (command.startsWith("EXECUTE_GENESIS_MINT")) {
