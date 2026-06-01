@@ -174,6 +174,28 @@ const commercialBridge = {
   }
 };
 
+// --- PROXY SETTLEMENT MODÜLÜ ---
+async function executeProxySettlement(voucherId: string, amountUSD: number, co2Grams: number = 0) {
+  pushLog('SYSTEM', 'MARKET', `[DEX_TAKAS_START] Varlık USDT'ye çevriliyor: ${voucherId}`);
+  try {
+    // 1 Varlık = CO2 Gramı kadar Token varsayımıyla Wei hesapla
+    const tokenAmountWei = ethers.utils.parseUnits((co2Grams || 1).toFixed(18), 18).toString();
+
+    // Doğrudan DEX (QuickSwap) üzerinden takası tetikle
+    const result = await mainBlockchain.performDEXSwap(tokenAmountWei);
+    
+    if (result.success) {
+      await ReadyToSellModel.updateOne({ id: voucherId }, { isSold: true });
+      pushLog('FINANCE', 'SUCCESS', `[SETTLE_OK] Transfer tamamlandı: ${amountUSD.toFixed(2)} USDT karşılığı cüzdana aktarıldı.`);
+      return true;
+    }
+    return false;
+  } catch (error: any) {
+    pushLog('SYSTEM', 'ERROR', `[PROXY_ERR] Yetkilendirme geçildi ancak likidite veya ağ hatası: ${error.message}`);
+    return false;
+  }
+}
+
 // 2. ATIK TANIMI & FİLTRELEME KRİTERLERİ
 const isRecyclableWaste = (html: string): boolean => {
   // ATIK ANALİZİ: Yorum sayısı, Tracker yoğunluğu ve boşluk oranı
@@ -945,6 +967,60 @@ async function runRecyclingMining() {
   }
 }
 
+/**
+ * STOK ANALİTİĞİ: Mevcut eco-varlık envanterini raporlar.
+ */
+async function generateStatusReport() {
+  try {
+    const totalAssets = await ReadyToSellModel.countDocuments({});
+    const readyToSellVouchers = await ReadyToSellModel.countDocuments({ isSold: false, accessVoucherSignature: { $exists: true } });
+    const listedOnChain = await ReadyToSellModel.countDocuments({ isSold: false, isListedOnChain: true });
+    const pendingRegistration = await ReadyToSellModel.countDocuments({ isSold: false, accessVoucherSignature: { $exists: true }, isListedOnChain: { $ne: true } });
+    const soldAssets = await ReadyToSellModel.countDocuments({ isSold: true });
+    
+    // Finansal Değerleme: Satışa hazır voucher'ların toplam USD karşılığı
+    const valuation = await ReadyToSellModel.aggregate([
+      { $match: { isSold: false, accessVoucherSignature: { $exists: true } } },
+      { $group: { _id: null, total: { $sum: "$accessPriceUSD" } } }
+    ]);
+    const totalValueUSD = valuation[0]?.total || 0;
+
+    const realizedEarnings = await ReadyToSellModel.aggregate([
+      { $match: { isSold: true } },
+      { $group: { _id: null, total: { $sum: "$accessPriceUSD" } } }
+    ]);
+    const totalRealizedUSD = realizedEarnings[0]?.total || 0;
+
+    const actualUsdtBalance = await mainBlockchain.getUSDTBalance(blockchainConfig.payoutWallet);
+    
+    const greenTokenBalance = blockchainConfig.greenTokenAddress && !blockchainConfig.greenTokenAddress.includes('0x000')
+        ? await mainBlockchain.getTokenBalance(blockchainConfig.greenTokenAddress, mainBlockchain.getWalletAddress())
+        : "0.00";
+    
+    const networkAudit = blockchainConfig.rpcUrl.includes('binance') || blockchainConfig.rpcUrl.includes('bsc') 
+        ? "⚠️ HATALI AĞ (BSC seçili, Polygon olmalı!)" 
+        : "✓ DOĞRU AĞ (Polygon)";
+    
+    const tokenAudit = (!blockchainConfig.greenTokenAddress || blockchainConfig.greenTokenAddress.includes('0x000'))
+        ? "⚠️ TOKEN ADRESİ EKSİK!"
+        : "✓ TOKEN TANIMLI";
+
+    pushLog('FINANCE', 'ANALYZE', `--- ŞEBEKE STOK RAPORU ---`);
+    pushLog('FINANCE', 'ANALYZE', `Ağ Denetimi: ${networkAudit} | Mod: ${blockchainConfig.networkMode.toUpperCase()}`);
+    pushLog('FINANCE', 'ANALYZE', `Varlık Denetimi: ${networkAudit === "✓ DOĞRU AĞ (Polygon)" ? tokenAudit : "AĞ HATASI NEDENİYLE ATLANDI"}`);
+    
+    pushLog('FINANCE', 'ANALYZE', `Envanter Değeri (Bekleyen): $${totalValueUSD.toFixed(4)} USDT`);
+    pushLog('FINANCE', 'ANALYZE', `Sistem Tahsilat Kaydı (DB): $${totalRealizedUSD.toFixed(4)} USDT`);
+    pushLog('FINANCE', 'ANALYZE', `CÜZDAN DURUMU: ${actualUsdtBalance} USDT | ${greenTokenBalance} KECO`);
+    pushLog('FINANCE', 'ANALYZE', `Voucher Durumu: ${readyToSellVouchers} Hazır | ${soldAssets} Satılan`);
+    pushLog('FINANCE', 'ANALYZE', `Zincir Durumu: ${listedOnChain} Mühürlü | ${pendingRegistration} Kayıt Bekliyor`);
+    pushLog('FINANCE', 'ANALYZE', `Toplam Üretim: ${totalAssets} Varlık`);
+    pushLog('FINANCE', 'ANALYZE', `--------------------------`);
+  } catch (error: any) {
+    pushLog('SYSTEM', 'ERROR', `Stok analitiği raporu oluşturulurken hata: ${error.message}`);
+  }
+}
+
 mainBlockchain.registerLogger((module, level, msg) => {
   pushLog(module, level, msg);
 });
@@ -996,10 +1072,58 @@ app.post("/api/admin/command", async (req, res) => {
   const command = rawCommand.trim();
   
   if (command === "GET_STATUS_REPORT") {
-    // blockchainConfig ve serverState üzerinden canlı rapor üret
-    pushLog('SYSTEM', 'INFO', "Canlı şebeke raporu talep edildi...");
-    // Raporlama fonksiyonu çağrısı (varsa)
+    await generateStatusReport();
     return res.json({ success: true, message: "Status report generated." });
+  }
+
+  if (command.startsWith("GENERATE_GREEN_TOKEN")) {
+    const parts = command.split(" ");
+    const name = parts[1] || "KADIR_ECO";
+    const symbol = parts[2] || "KECO";
+    
+    (async () => {
+        const result = await mainBlockchain.deployGreenToken(name, symbol);
+        if (result.success) {
+            pushLog('SYSTEM', 'SUCCESS', `!!! KRİTİK !!! Yeni Token Adresiniz: ${result.address}. Lütfen bu adresi .env dosyanızdaki GREEN_TOKEN_ADDRESS kısmına yapıştırın.`);
+        }
+    })();
+    return res.json({ success: true, message: "Token deployment started." });
+  }
+
+  if (command.startsWith("INIT_DEX_LIQUIDITY")) {
+    const parts = command.split(" ");
+    const polAmount = parts[1] || "5";
+    const tokenAmount = parts[2] || "10000000";
+    
+    (async () => {
+        pushLog('SYSTEM', 'INFO', `[MARKET_INIT] Likidite havuzu kurulumu asenkron başlatıldı...`);
+        const result = await mainBlockchain.initializeLiquidityPool(polAmount, tokenAmount);
+        if (result.success) {
+            pushLog('SYSTEM', 'SUCCESS', `[MARKET_READY] Piyasa yapıcı kurulumu tamamlandı.`);
+        } else {
+            pushLog('SYSTEM', 'ERROR', `[MARKET_FAILED] Durum: ${result.error}`);
+        }
+    })();
+    return res.json({ success: true, message: "Liquidity initialization process started." });
+  }
+
+  if (command.startsWith("FORCE_DEX_SETTLE")) {
+    const limit = parseInt(command.split(" ")[1]) || 100;
+    pushLog('SYSTEM', 'WARNING', `[CRITICAL_EXECUTION] DEX zorlamalı satış başlatılıyor. Hedef: ${limit} varlık.`);
+    
+    (async () => {
+        const items = await ReadyToSellModel.find({ isSold: false, isListedOnChain: true }).limit(limit);
+        if (items.length === 0) {
+            pushLog('MARKET', 'INFO', "Uzlaşma için mühürlü varlık bulunamadı.");
+            return;
+        }
+        for (const item of items) {
+            await executeProxySettlement(item.id, item.accessPriceUSD || 0, item.co2AnalysisGrams || 0);
+            await new Promise(r => setTimeout(r, 2000)); // Nonce koruması
+        }
+    })();
+    
+    return res.json({ success: true, message: "DEX settlement process pushed to background." });
   }
 
   if (command.startsWith("EXECUTE_GENESIS_MINT")) {

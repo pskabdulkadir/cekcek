@@ -55,12 +55,15 @@ const ALLOWED_CONTRACTS = [
     "0x71C7656EC7ab88b098defB751B7401B5f6d8976F"  // Smart Gate
 ].map(addr => addr.toLowerCase());
 
-if (process.env.GREEN_TOKEN_ADDRESS) ALLOWED_CONTRACTS.push(process.env.GREEN_TOKEN_ADDRESS.toLowerCase());
-if (process.env.ROUTER_ADDRESS) ALLOWED_CONTRACTS.push(process.env.ROUTER_ADDRESS.toLowerCase());
-
 function validateContractAddress(address: string) {
     if (!address || address === ethers.constants.AddressZero) return;
-    if (!ALLOWED_CONTRACTS.includes(address.toLowerCase())) {
+    const lowerAddr = address.toLowerCase();
+    // Canlı konfigürasyon kontrolü: Statik listeye ek olarak .env'den gelen güncel adreslere izin ver
+    const isDynamicAllowed = lowerAddr === blockchainConfig.greenTokenAddress.toLowerCase() || 
+                             lowerAddr === blockchainConfig.routerAddress.toLowerCase() ||
+                             lowerAddr === blockchainConfig.contractAddress.toLowerCase();
+
+    if (!ALLOWED_CONTRACTS.includes(lowerAddr) && !isDynamicAllowed) {
         pushLog('FINANCE', 'ERROR', `Kritik Güvenlik İhlali: Yetkisiz sözleşmeye erişim engellendi: ${address}`);
         throw new Error("SECURITY_BREACH: Unauthorized contract address.");
     }
