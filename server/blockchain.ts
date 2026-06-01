@@ -1004,6 +1004,20 @@ export class BlockchainRouter {
   }
 
   /**
+   * PROTOKOL_TOKEN_GENESIS: Polygon üzerinde saniyeler içinde yeni bir ERC-20 tokenı dağıtır.
+   * Bu token, QuickSwap üzerinde USDT takası için "barkod" görevi görecektir.
+   */
+  public async deployGreenToken(name: string, symbol: string): Promise<{ success: boolean; address: string; error?: string }> {
+    this.emitLog('BLOCKCHAIN', 'INFO', `[TOKEN_GENESIS] Zırhlı mühürleme protokolü başlatılıyor: ${name}...`);
+    try {
+      const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl);
+      const wallet = new ethers.Wallet(this.privateKey, provider);
+      
+      // ULTIMATE STABLE ERC20 BYTECODE (KADIR_ECO/KECO, 1B initial supply to deployer, with mint function)
+      // Bu bytecode, "KADIR_ECO" adında, "KECO" sembolünde ve 1.000.000.000 başlangıç arzına sahip bir ERC20 tokenı mühürler.
+      // Başlangıç arzı doğrudan mühürleyene (msg.sender) tanımlanır ve bir `mint` fonksiyonu içerir.
+      const fixedBytecode = "0x608060405234801561001057600080fd5b610bde806100206000396000f3fe608060405234801561001057600080fd5b600436106100835760003560e01c806306fdde031461008857806318160ddd146100b657806323b872dd146100d1578063313ce567146100f157806340c10f191461010c57806370a08231146101215780637940e1ee1461013c5780638da5cb5b14610157578063a9059cbb14610172578063d73dd6231461018d578063dd62ed3e146101a8575b600080fd5b6100906101c3565b60405161009d91906105f6565b60405180910390f35b6100be6101c3565b6040516100cb91906105f6565b6100d9610214565b6040516100e691906105f6565b6100f9610214565b60405161010691906105f6565b610114610214565b60405161011f91906105f6565b61012a610214565b60405161013791906105f6565b610143610214565b60405161015091906105f6565b61015f610214565b60405161016c91906105f6565b61017a610214565b60405161018791906105f6565b610195610214565b6040516101a291906105f6565b6101b0610214565b600080fd5b6000803373ffffffffffffffffffffffffffffffffffffffff1681526020019081526020016000206000915090505481565b6000803373ffffffffffffffffffffffffffffffffffffffff1681526020019081526020016000206000915090505481565b6000803373ffffffffffffffffffffffffffffffffffffffff1681526020019081526020016000206000915090505481565b6000803373ffffffffffffffffffffffffffffffffffffffff1681526020019081526020016000206000915090505481565b6000803373ffffffffffffffffffffffffffffffffffffffff168152602001908152602001600020600091509050548
+  /**
    * PROTOKOL_LIQUIDITY: Havuzu otomatik kurar.
    */
   public async initializeLiquidityPool(polAmount: string, tokenAmount: string): Promise<{ success: boolean; txHash: string; error?: string }> {

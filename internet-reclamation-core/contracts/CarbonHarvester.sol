@@ -1,22 +1,48 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
+pragma solidity ^0.8.24;
 
-contract CarbonHarvester {
-    address public owner;
-    mapping(bytes32 => bool) public processedProofs;
+import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+import "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
 
-    event HarvestProcessed(address indexed harvester, uint256 reward);
+contract CarbonHarvester is EIP712, Ownable {
+    using ECDSA for bytes32;
 
-    constructor() { owner = msg.sender; }
+    mapping(string => bool) public soldAssets;
+    address public treasury;
 
-    // Botun tarama sonucu elde ettiği kanıtı doğrular ve ödül verir
-    function submitProof(bytes32 proofHash, uint256 amount) external {
-        require(!processedProofs[proofHash], "Kanit zaten islendi!");
-        processedProofs[proofHash] = true;
-        
-        // Ödeme işlemi (Sistemde tanımlı ödül havuzundan)
-        payable(msg.sender).transfer(amount);
-        
-        emit HarvestProcessed(msg.sender, amount);
+    event AssetSold(string indexed assetId, address indexed buyer, uint256 price);
+
+    constructor(address _treasury) EIP712("InternetReclamationMarket", "1") Ownable(msg.sender) {
+        treasury = _treasury;
+    }
+
+    struct DataAssetAccess {
+        string id;
+        uint256 accessFee;
+        address publisher;
+    }
+
+    function buyAsset(DataAssetAccess calldata asset, bytes calldata signature) external payable {
+        require(!soldAssets[asset.id], "Varlik zaten satildi");
+        require(msg.value >= asset.accessFee, "Yetersiz odeme");
+
+        bytes32 structHash = keccak256(abi.encode(
+            keccak256("DataAssetAccess(string id,uint256 accessFee,address publisher)"),
+            keccak256(bytes(asset.id)),
+            asset.accessFee,
+            asset.publisher
+        ));
+
+        bytes32 hash = _hashTypedDataV4(structHash);
+        address signer = hash.recover(signature);
+
+        require(signer == owner(), "Gecersiz imza");
+        soldAssets[asset.id] = true;
+
+        (bool success, ) = payable(treasury).call{value: msg.value}("");
+        require(success, "Transfer basarisiz");
+
+        emit AssetSold(asset.id, msg.sender, msg.value);
     }
 }
