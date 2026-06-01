@@ -52,8 +52,10 @@ const AQUARIUS_URL = blockchainConfig.oceanProtocolUrl;
 // --- GÜVENLİK KATMANI: SÖZLEŞME BEYAZ LİSTESİ ---
 const ALLOWED_CONTRACTS = [
     "0x4544d5674066f7f6f966144510006327e5b56345", // Ocean Market
-    "0x71C7656EC7ab88b098defB751B7401B5f6d8976F"  // Smart Gate
-].map(addr => addr.toLowerCase());
+    "0x71C7656EC7ab88b098defB751B7401B5f6d8976F", // Smart Gate
+    process.env.GREEN_TOKEN_ADDRESS || "0x0000000000000000000000000000000000000000",
+    process.env.ROUTER_ADDRESS || "0xa5e0829caced8ffdd052420551415491d6993e2f"
+].filter(addr => addr && addr.length > 10).map(addr => addr.toLowerCase());
 
 if (process.env.GREEN_TOKEN_ADDRESS) ALLOWED_CONTRACTS.push(process.env.GREEN_TOKEN_ADDRESS.toLowerCase());
 if (process.env.ROUTER_ADDRESS) ALLOWED_CONTRACTS.push(process.env.ROUTER_ADDRESS.toLowerCase());
