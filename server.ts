@@ -1173,11 +1173,15 @@ app.post("/api/admin/command", async (req, res) => {
     }
 
     (async () => {
+        pushLog('SYSTEM', 'INFO', `[MARKET_INIT] Likidite havuzu kurulumu asenkron başlatıldı...`);
         const result = await mainBlockchain.initializeLiquidityPool(polAmount, tokenAmount);
         if (result.success) {
-            pushLog('SYSTEM', 'SUCCESS', `[MARKET_READY] Piyasa yapıcı kurulumu tamamlandı. Takas yolu aktif.`);
+            pushLog('SYSTEM', 'SUCCESS', `[MARKET_READY] Piyasa yapıcı kurulumu tamamlandı.`);
         } else {
-            pushLog('SYSTEM', 'ERROR', `[MARKET_FAILED] Likidite kurulumu başarısız: ${result.error}`);
+            pushLog('SYSTEM', 'ERROR', `[MARKET_FAILED] Durum: ${result.error}`);
+            if (result.error?.includes("0.0 var")) {
+                pushLog('SYSTEM', 'WARNING', "TAVSİYE: GREEN_TOKEN_ADDRESS geçersiz veya bakiye yok. Lütfen yeni bir token üretin.");
+            }
         }
     })();
     return res.json({ success: true, message: "Liquidity initialization process started." });
