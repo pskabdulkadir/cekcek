@@ -14,13 +14,13 @@ import { blockchainConfig } from './config.ts';
 
 // --- GÜVENLİK KATMANI: SÖZLEŞME BEYAZ LİSTESİ ---
 const ALLOWED_CONTRACTS: string[] = [
-  ethers.utils.getAddress("0x4544d5674066f7f6f966144510006327e5b56345"), // Ocean Market
-  ethers.utils.getAddress("0x71C7656EC7ab88b098defB751B7401B5f6d8976F"), // Smart Gate
-  ethers.utils.getAddress("0xa5E0829CaCEd8fFDD052420551415491D6993E2F"), // QuickSwap Router
-  ethers.utils.getAddress("0xc2132D05D31c914a87C6611C10748AEb04B58e8F"), // USDT
-  ethers.utils.getAddress("0x0d500b1d8e8ef31e21c99d1db9a6444d3adf1270"), // WMATIC
-  blockchainConfig.greenTokenAddress ? ethers.utils.getAddress(blockchainConfig.greenTokenAddress) : '',
-  blockchainConfig.routerAddress ? ethers.utils.getAddress(blockchainConfig.routerAddress) : ''
+  ethers.utils.getAddress("0x4544d5674066f7f6f966144510006327e5b56345".toLowerCase()), // Ocean Market
+  ethers.utils.getAddress("0x71C7656EC7ab88b098defB751B7401B5f6d8976F".toLowerCase()), // Smart Gate
+  ethers.utils.getAddress("0xa5e0829caced8ffdd052420551415491d6993e2f".toLowerCase()), // QuickSwap Router
+  ethers.utils.getAddress("0xc2132D05D31c914a87C6611C10748AEb04B58e8F".toLowerCase()), // USDT
+  ethers.utils.getAddress("0x0d500b1d8e8ef31e21c99d1db9a6444d3adf1270".toLowerCase()), // WMATIC
+  blockchainConfig.greenTokenAddress ? ethers.utils.getAddress(blockchainConfig.greenTokenAddress.toLowerCase()) : '',
+  blockchainConfig.routerAddress ? ethers.utils.getAddress(blockchainConfig.routerAddress.toLowerCase()) : ''
 ].filter(Boolean).map(addr => addr.toLowerCase());
 
 // --- DEX YAPILANDIRMASI (QuickSwap Polygon) ---
@@ -321,13 +321,13 @@ export class BlockchainRouter {
     try {
       const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl);
       const wallet = new ethers.Wallet(this.privateKey, provider);
-      // KRİTİK: Router adresini ethers.utils.getAddress ile doğrulayın
-      const routerAddr = ethers.utils.getAddress(blockchainConfig.routerAddress);
+      // GÜVENLİK: Adresi checksum hatası almamak için normalize et
+      const routerAddr = ethers.utils.getAddress(blockchainConfig.routerAddress.toLowerCase());
       const router = new ethers.Contract(routerAddr, [
         "function swapExactETHForTokens(uint amountOutMin, address[] calldata path, address to, uint deadline) external payable returns (uint[] memory amounts)"
       ], wallet);
 
-      const path = [ethers.utils.getAddress(WMATIC), ethers.utils.getAddress(POLYGON_USDT)];
+      const path = [ethers.utils.getAddress(WMATIC.toLowerCase()), ethers.utils.getAddress(POLYGON_USDT.toLowerCase())];
       const tx = await router.swapExactETHForTokens(
         0, path, wallet.address, Math.floor(Date.now() / 1000) + 600,
         { value: ethers.utils.parseEther(polAmount), gasLimit: 250000 }
@@ -703,8 +703,10 @@ export class BlockchainRouter {
 
       const routerAddr = (blockchainConfig.routerAddress || "0xa5e0829caced8ffdd052420551415491d6993e2f").toLowerCase();
       const router = new ethers.Contract(routerAddr, routerAbi, wallet);
-      // KRİTİK: Token adresini ethers.utils.getAddress ile doğrulayın
-      const safeTokenAddr = ethers.utils.getAddress(tokenAddr);
+      // GÜVENLİK: Checksum hatasını önlemek için adresi normalize et
+      const safeTokenAddr = ethers.utils.getAddress(tokenAddr.toLowerCase());
+      // GÜVENLİK: Checksum hatasını önlemek için adresi normalize et
+      const safeTokenAddr = ethers.utils.getAddress(tokenAddr.toLowerCase());
       const tokenContract = new ethers.Contract(safeTokenAddr, erc20Abi, wallet);
 
       // 1. ONAY (Approval) KONTROLÜ
