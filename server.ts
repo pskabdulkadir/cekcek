@@ -1110,6 +1110,11 @@ app.post("/api/admin/command", async (req, res) => {
     return res.json({ success: true, message: "Mint process started." });
   }
 
+  if (command === "GET_STATUS_REPORT") {
+    await generateStatusReport();
+    return res.json({ success: true, message: "Status report generated." });
+  }
+
   if (command === "SET_AUTONOMOUS_DEPLOYMENT_TRUE --gas-payer=buyer --mode=batch") {
     serverState.autonomousMode = true;
     serverState.commitThreshold = 10; // Talimat uyarınca 10'a çekildi
@@ -1119,7 +1124,7 @@ app.post("/api/admin/command", async (req, res) => {
   
   if (command === "GET_STATUS_REPORT") {
     await generateStatusReport();
-    return res.json({ success: true, message: "Status report generated." });
+    return res.json({ success: true, message: "Stok analitiği raporu oluşturuldu." });
   }
 
   if (command.startsWith("RUN_BULK_SELL")) {
