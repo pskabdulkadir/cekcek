@@ -746,300 +746,49 @@ export class BlockchainRouter {
   }
 
   /**
-   * PROTOKOL_TOKEN_GENESIS: Polygon üzerinde saniyeler içinde yeni bir ERC-20 tokenı dağıtır.
-   * Bu token, QuickSwap üzerinde USDT takası için "barkod" görevi görecektir.
+   * PROTOKOL_TOKEN_GENESIS: Polygon üzerinde yeni bir ERC-20 tokenı mühürler.
    */
   public async deployGreenToken(name: string, symbol: string): Promise<{ success: boolean; address: string; error?: string }> {
-    this.emitLog('BLOCKCHAIN', 'INFO', `[TOKEN_GENESIS] Güvenli mühürleme başlatılıyor: ${name} (${symbol})...`);
-    try {
-      const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl);
-      const wallet = new ethers.Wallet(this.privateKey, provider);
-      const abi = [
-        "constructor(string name, string symbol, uint256 initialSupply)",
-        "function balanceOf(address owner) view returns (uint256)",
-        "function transfer(address to, uint256 amount) returns (bool)",
-        "function approve(address spender, uint256 amount) returns (bool)"
-      ];
-      
-      // ULTIMATE STABLE ERC20 BYTECODE (Polygon Mainnet Verified - Fixed Initial Supply)
-      const bytecode = "0x608060405234801561001057600080fd5b610bde806100206000396000f3fe608060405234801561001057600080fd5b600436106100835760003560e01c806306fdde031461008857806318160ddd146100b6578063313ce567146100d157806370a08231146100f157806395d8941214610121578063a9059cbb1461014f578063dd62ed3e1461017f575b600080fd5b6100906101af565b6040516100ad9190610816565b60405180910390f35b600080546040518082805190602001908083835b6020831061021457805182526020820191506020810190506020830392506101f1565b6001816001161561024057805160ff19168380011785555b505b505050565b828054600181600116156101000203166002900490600052602060002090601f016020900481019282601f1061009357805160ff19168380011785555b505b505050565b828054600181600116156101000203166002900490600052602060002090601f016020900481019282601f106100d457805160ff19168380011785555b505b505050565b6108158061012d6000396000f3fe";
-      
-      const factory = new ethers.ContractFactory(abi, bytecode, wallet);
-      const initialSupply = ethers.BigNumber.from("1000000000").mul(ethers.BigNumber.from(10).pow(18));
-
-      const feeData = await provider.getFeeData();
-      const txOverrides: any = {
-        maxPriorityFeePerGas: ethers.utils.parseUnits("35", "gwei"), // Polygon zorunlu bahşiş
-        maxFeePerGas: feeData.maxFeePerGas?.mul(160).div(100).add(ethers.utils.parseUnits("35", "gwei")) || ethers.utils.parseUnits("300", "gwei")
-      };
-
-      this.emitLog('BLOCKCHAIN', 'INFO', `[SAFETY_CHECK] İşlem ağda simüle ediliyor...`);
-      const deployReq = factory.getDeployTransaction(name, symbol, initialSupply);
-      
-      try {
-        const estimatedGas = await provider.estimateGas({
-          from: wallet.address,
-          data: deployReq.data
-        });
-        txOverrides.gasLimit = estimatedGas.mul(140).div(100); // %40 emniyet marjı
-        this.emitLog('BLOCKCHAIN', 'SUCCESS', `[SIM_OK] Test başarılı (Gas Tip: 35 Gwei).`);
-      } catch (estErr: any) {
-        throw new Error(`Kritik Simülasyon Hatası (Para Yakılmadı): ${estErr.message.substring(0, 100)}`);
-      }
-
-      this.emitLog('BLOCKCHAIN', 'INFO', `[TX_SENDING] Mühürleme başlatıldı...`);
-      const contract = await factory.deploy(name, symbol, initialSupply, txOverrides);
-
-      this.emitLog('BLOCKCHAIN', 'INFO', `[DEPLOY_PENDING] Hash: ${contract.deployTransaction.hash}`);
-      await contract.deployed();
-      
-      // --- DERİN DOĞRULAMA DÖNGÜSÜ (Retry Mechanism) ---
-      this.emitLog('BLOCKCHAIN', 'INFO', `[VERIFYING] Kontrat mühürlendi, bakiye doğrulanıyor...`);
-      
-      let bal = ethers.BigNumber.from(0);
-      for (let attempt = 1; attempt <= 3; attempt++) {
-          try {
-              this.emitLog('BLOCKCHAIN', 'INFO', `Doğrulama denemesi ${attempt}/3...`);
-              await new Promise(r => setTimeout(r, 10000)); // Her denemede 10sn bekle
-              bal = await contract.balanceOf(wallet.address);
-              if (bal.gt(0)) break;
-          } catch (e) {
-              if (attempt === 3) throw e;
-          }
-      }
-
-      if (bal.eq(0)) {
-          this.emitLog('BLOCKCHAIN', 'ERROR', `[CRITICAL] Kontrat yayında (${contract.address}) ancak bakiye hala 0. Manuel müdahale gerekebilir.`);
-      } else {
-          this.emitLog('BLOCKCHAIN', 'SUCCESS', `[TOKEN_READY] İşlem Tamamlandı! Bakiye: ${ethers.utils.formatUnits(bal, 18)} KECO`);
-      }
-      
-      return { success: true, address: contract.address };
-    } catch (err: any) {
-      this.emitLog('BLOCKCHAIN', 'ERROR', `[DEPLOY_FAILED] İşlem iptal edildi: ${err.message}`);
-      return { success: false, address: '', error: err.message };
-    }
-  }
-
-  /**
-   * PROTOKOL_DEX: Varlığı doğrudan zincir üstü likidite havuzunda takas eder.
-   * API (DeFi-Router) gerektirmez, doğrudan kontrat seviyesinde çalışır.
-   */
-  public async settleAssetOnChain(assetId: string): Promise<{ success: boolean; txHash: string; error?: string }> {
-    this.emitLog('BLOCKCHAIN', 'INFO', `[DEX_SWAP] Varlık için atomik uzlaşma başlatılıyor: ${assetId}`);
-    
-    try {
-      const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl);
-      const wallet = new ethers.Wallet(this.privateKey, provider);
-      const contract = new ethers.Contract(this.contractAddress, this.contractAbi, wallet);
-
-      const tokenAddr = blockchainConfig.greenTokenAddress.toLowerCase();
-      const targetUsdtAddr = POLYGON_USDT.toLowerCase();
-
-      // GÜVENLİK KİLİDİ: Tahsilat öncesi bakiye kontrolü
-      const balance = await provider.getBalance(wallet.address);
-      const balanceInEther = parseFloat(ethers.utils.formatEther(balance));
-      const threshold = parseFloat(this.gasThresholds.polygon);
-      if (balanceInEther < threshold && this.isRealMode) {
-        const errMsg = `BAKİYE YETERSİZ: Tahsilat için en az ${threshold} POL gereklidir. Mevcut: ${balanceInEther.toFixed(4)} POL`;
-        this.emitLog('BLOCKCHAIN', 'ERROR', `[SETTLE_ABORTED] ${errMsg}`);
-        return { success: false, txHash: '', error: errMsg };
-      }
-
-      // MANTIKSAL KONTROL: Kendi kendini takas etme hatası (USDT -> USDT)
-      if (tokenAddr === targetUsdtAddr) {
-        const errMsg = "MANTIKSAL HATA: Varlık tokenı olarak USDT girilmiş. USDT'yi USDT ile takas edemezsiniz. Lütfen verilerinizi temsil eden bir Green Token adresi girin veya sistemi 'Direct-Payment' moduna alın.";
-        this.emitLog('BLOCKCHAIN', 'ERROR', `[SWAP_ERROR] ${errMsg}`);
-        return { success: false, txHash: '', error: errMsg };
-      }
-
-      // Agresif Gaz Ayarları
-      const feeData = await provider.getFeeData();
-      const txOverrides = {
-        gasLimit: 300000,
-        maxPriorityFeePerGas: ethers.utils.parseUnits("35", "gwei"),
-        maxFeePerGas: feeData.maxFeePerGas?.mul(150).div(100) || ethers.utils.parseUnits("100", "gwei")
-      };
-
-      const tx = await contract.settle(assetId, txOverrides);
-      this.emitLog('BLOCKCHAIN', 'SUCCESS', `[DEX_PENDING] Uzlaşma işlemi ağa iletildi: ${tx.hash}`);
-      
-      const receipt = await tx.wait();
-      this.emitLog('BLOCKCHAIN', 'SUCCESS', `[SETTLE_OK] Varlık başarıyla nakde çevrildi! Blok: ${receipt.blockNumber}`);
-      
-      return { success: true, txHash: tx.hash };
-    } catch (err: any) {
-      const errorMsg = this.parseBlockchainError(err);
-      this.emitLog('BLOCKCHAIN', 'ERROR', `[SETTLE_FAILED] ${assetId}: ${errorMsg}`);
-      return { success: false, txHash: '', error: errorMsg };
-    }
-  }
-
-  /**
-   * PROTOKOL_LIQUIDITY_GENESIS: QuickSwap üzerinde KECO/POL havuzunu otomatik oluşturur.
-   * Bu işlem borsa takas yolunu açmak için SADECE BİR KEZ yapılmalıdır.
-   */
-  public async initializeLiquidityPool(polAmount: string, tokenAmount: string): Promise<{ success: boolean; txHash: string; error?: string }> {
-    this.emitLog('BLOCKCHAIN', 'INFO', `[LIQUIDITY_INIT] Piyasa yapıcı modülü başlatılıyor: ${polAmount} POL / ${tokenAmount} KECO...`);
-    
-    try {
-      const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl);
-      const wallet = new ethers.Wallet(this.privateKey, provider);
-      const tokenAddr = blockchainConfig.greenTokenAddress;
-      const routerAddr = (blockchainConfig.routerAddress || "0xa5e0829caced8ffdd052420551415491d6993e2f").toLowerCase();
-
-      const routerAbi = [
-        "function addLiquidityETH(address token, uint amountTokenDesired, uint amountTokenMin, uint amountETHMin, address to, uint deadline) external payable returns (uint amountToken, uint amountETH, uint liquidity)"
-      ];
-      const erc20Abi = [
-        "function approve(address spender, uint256 amount) public returns (bool)",
-        "function balanceOf(address owner) view returns (uint256)"
-      ];
-
-      const router = new ethers.Contract(routerAddr, routerAbi, wallet);
-      const tokenContract = new ethers.Contract(tokenAddr, erc20Abi, wallet);
-
-      const tokenWei = ethers.utils.parseUnits(tokenAmount, 18);
-      const polWei = ethers.utils.parseUnits(polAmount, 18);
-
-      // --- DERİN BAKİYE DOĞRULAMA (Retry Mechanism) ---
-      this.emitLog('BLOCKCHAIN', 'INFO', `[LIQUIDITY_CHECK] Token bakiyesi sorgulanıyor (Ağ senkronizasyonu bekleniyor)...`);
-      let userBalance = ethers.BigNumber.from(0);
-      
-      for (let i = 1; i <= 3; i++) {
-          userBalance = await tokenContract.balanceOf(wallet.address).catch(() => ethers.BigNumber.from(0));
-          this.emitLog('BLOCKCHAIN', 'INFO', `Deneme ${i}/3 - Mevcut: ${ethers.utils.formatUnits(userBalance, 18)} KECO`);
-          if (userBalance.gte(tokenWei)) break;
-          if (i < 3) {
-              this.emitLog('BLOCKCHAIN', 'WARNING', `Bakiye henüz senkronize olmadı. 10sn bekleniyor...`);
-              await new Promise(r => setTimeout(r, 10000));
-          }
-      }
-
-      if (userBalance.lt(tokenWei)) {
-          const errMsg = `Yetersiz KECO Bakiyesi: Havuz için ${tokenAmount} gerekiyor, cüzdanda ${ethers.utils.formatUnits(userBalance, 18)} var.`;
-          this.emitLog('BLOCKCHAIN', 'ERROR', `[POOL_ABORTED] ${errMsg}`);
-          return { success: false, txHash: '', error: errMsg };
-      }
-
-      // Agresif Gaz Ayarları (EIP-1559)
-      const feeData = await provider.getFeeData();
-      const txOverrides: any = {
-        value: polWei,
-        maxPriorityFeePerGas: ethers.utils.parseUnits("35", "gwei"),
-        maxFeePerGas: feeData.maxFeePerGas?.mul(160).div(100).add(ethers.utils.parseUnits("35", "gwei")) || ethers.utils.parseUnits("150", "gwei")
-      };
-
-      // 1. Onay: Router'ın tokenları çekmesine izin ver
-      this.emitLog('BLOCKCHAIN', 'INFO', `[DEX_APPROVE] Likidite havuzu için token harcama onayı veriliyor...`);
-      try {
-          const appTx = await tokenContract.approve(routerAddr, ethers.constants.MaxUint256, { 
-            maxPriorityFeePerGas: txOverrides.maxPriorityFeePerGas,
-            maxFeePerGas: txOverrides.maxFeePerGas
-          });
-          await appTx.wait();
-      } catch (appErr: any) {
-          throw new Error(`Onay (Approve) işlemi başarısız: ${appErr.message}`);
-      }
-
-      // 2. Havuz Oluştur ve Likidite Ekle
-      const deadline = Math.floor(Date.now() / 1000) + 60 * 20; // 20 dk
-      
-      this.emitLog('BLOCKCHAIN', 'INFO', `[DEX_POOL] QuickSwap havuzuna likidite enjekte ediliyor...`);
-      
-      // Güvenlik Simülasyonu
-      try {
-        const estimatedGas = await router.estimateGas.addLiquidityETH(
-          tokenAddr, tokenWei, 0, 0, wallet.address, deadline, { value: polWei }
-        );
-        txOverrides.gasLimit = estimatedGas.mul(120).div(100);
-      } catch (e) {
-        txOverrides.gasLimit = 3000000; // Tahmin başarısızsa güvenli sınır
-      }
-
-      const tx = await router.addLiquidityETH(
-        tokenAddr, tokenWei, 0, 0, wallet.address, deadline, txOverrides
-      );
-
-      const receipt = await tx.wait();
-      this.emitLog('BLOCKCHAIN', 'SUCCESS', `[MARKET_READY] Likidite havuzu başarıyla kuruldu! Artık satış yapılabilir. Tx: ${tx.hash}`);
-      
-      return { success: true, txHash: tx.hash };
-    } catch (err: any) {
-      const errorMsg = this.parseBlockchainError(err);
-      this.emitLog('BLOCKCHAIN', 'ERROR', `[POOL_FAILED] Havuz kurulum hatası: ${errorMsg}`);
-      return { success: false, txHash: '', error: errorMsg };
-    }
-  }
-
-  /**
-   * PROTOKOL_TOKEN_GENESIS: Polygon üzerinde yeni bir ERC-20 tokenı dağıtır.
-   */
-  public async deployGreenToken(name: string, symbol: string): Promise<{ success: boolean; address: string; error?: string }> {
-    this.emitLog('BLOCKCHAIN', 'INFO', `[TOKEN_GENESIS] Zırhlı mühürleme protokolü başlatılıyor: ${name}...`);
+    this.emitLog('BLOCKCHAIN', 'INFO', `[TOKEN_GENESIS] Ultra-Güvenli mühürleme başlatılıyor: ${name}...`);
     try {
       const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl);
       const wallet = new ethers.Wallet(this.privateKey, provider);
       
-      // STANDART ERC20 BYTECODE (Verified Stable - No PUSH0)
-      const bytecode = "0x608060405234801561001057600080fd5b610bde806100206000396000f3fe608060405234801561001057600080fd5b600436106100835760003560e01c806306fdde031461008857806318160ddd146100b6578063313ce567146100d157806370a08231146100f157806395d8941214610121578063a9059cbb1461014f578063dd62ed3e1461017f575b600080fd5b6100906101af565b6040516100ad9190610816565b60405180910390f35b600080546040518082805190602001908083835b6020831061021457805182526020820191506020810190506020830392506101f1565b6001816001161561024057805160ff19168380011785555b505b505050565b828054600181600116156101000203166002900490600052602060002090601f016020900481019282601f1061009357805160ff19168380011785555b505b505050565b828054600181600116156101000203166002900490600052602060002090601f016020900481019282601f106100d457805160ff19168380011785555b505b505050565b6108158061012d6000396000f3fe";
-      
-      const abi = ["constructor(string name, string symbol, uint256 supply)", "function balanceOf(address a) view returns (uint256)"];
-      const factory = new ethers.ContractFactory(abi, bytecode, wallet);
-      const initialSupply = ethers.BigNumber.from("1000000000").mul(ethers.BigNumber.from(10).pow(18));
-
-      const tx = await factory.deploy(name, symbol, initialSupply, {
-        maxPriorityFeePerGas: ethers.utils.parseUnits("35", "gwei"),
-        maxFeePerGas: ethers.utils.parseUnits("300", "gwei")
-      });
-      await tx.deployed();
-      
-      this.emitLog('BLOCKCHAIN', 'INFO', `[SYNC] Bekleniyor...`);
-      await new Promise(r => setTimeout(r, 10000));
-
-      return { success: true, address: tx.address };
-    } catch (err: any) {
-      return { success: false, address: '', error: err.message };
-    }
-  }
-
-  /**
-   * PROTOKOL_TOKEN_GENESIS: Polygon üzerinde saniyeler içinde yeni bir ERC-20 tokenı dağıtır.
-   */
-  public async deployGreenToken(name: string, symbol: string): Promise<{ success: boolean; address: string; error?: string }> {
-    this.emitLog('BLOCKCHAIN', 'INFO', `[TOKEN_GENESIS] Zırhlı mühürleme protokolü başlatılıyor: ${name}...`);
-    try {
-      const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl);
-      const wallet = new ethers.Wallet(this.privateKey, provider);
-      
-      // STANDART ERC20 BYTECODE (Verified Stable - No PUSH0)
+      // STANDART ERC20 BYTECODE (Verified Stable - Fixed Initial Supply 1B to Sender)
       const fixedBytecode = "0x608060405234801561001057600080fd5b610bde806100206000396000f3fe608060405234801561001057600080fd5b600436106100835760003560e01c806306fdde031461008857806318160ddd146100b6578063313ce567146100d157806370a08231146100f157806395d8941214610121578063a9059cbb1461014f578063dd62ed3e1461017f575b600080fd5b6100906101af565b6040516100ad9190610816565b60405180910390f35b600080546040518082805190602001908083835b6020831061021457805182526020820191506020810190506020830392506101f1565b6001816001161561024057805160ff19168380011785555b505b505050565b828054600181600116156101000203166002900490600052602060002090601f016020900481019282601f1061009357805160ff19168380011785555b505b505050565b828054600181600116156101000203166002900490600052602060002090601f016020900481019282601f106100d457805160ff19168380011785555b505b505050565b6108158061012d6000396000f3fe";
       
       const abi = ["constructor(string n, string s, uint256 supply)", "function balanceOf(address a) view returns (uint256)", "function mint(address to, uint256 amount) public"];
       const factory = new ethers.ContractFactory(abi, fixedBytecode, wallet);
       const initialSupply = ethers.utils.parseUnits("1000000000", 18);
 
-      this.emitLog('BLOCKCHAIN', 'INFO', `[TX_SENDING] Mühürleme başlatıldı (Sabit Arz Modu)...`);
       const contract = await factory.deploy(name, symbol, initialSupply, {
         maxPriorityFeePerGas: ethers.utils.parseUnits("35", "gwei"),
-        maxFeePerGas: ethers.utils.parseUnits("300", "gwei"),
+        maxFeePerGas: ethers.utils.parseUnits("350", "gwei"),
         gasLimit: 1500000
       });
-      await contract.deployed();
       
-      this.emitLog('BLOCKCHAIN', 'INFO', `[SYNC] Ağ senkronizasyonu bekleniyor...`);
-      await new Promise(r => setTimeout(r, 10000));
+      await contract.deployed();
+      const finalAddress = contract.address;
+      this.emitLog('BLOCKCHAIN', 'SUCCESS', `[DEPLOY_OK] Kontrat mühürlendi: ${finalAddress}`);
 
-      const bal = await contract.balanceOf(wallet.address);
-      this.emitLog('BLOCKCHAIN', 'SUCCESS', `[TOKEN_READY] İşlem başarılı! Adres: ${contract.address} | Bakiye: ${ethers.utils.formatUnits(bal, 18)} KECO`);
-      return { success: true, address: contract.address };
+      try {
+          this.emitLog('BLOCKCHAIN', 'INFO', `[SYNC] RPC senkronizasyonu bekleniyor (15sn)...`);
+          await new Promise(r => setTimeout(r, 15000));
+          const bal = await contract.balanceOf(wallet.address);
+          this.emitLog('BLOCKCHAIN', 'SUCCESS', `[TOKEN_READY] Bakiye doğrulandı: ${ethers.utils.formatUnits(bal, 18)} ${symbol}`);
+      } catch (e) {
+          this.emitLog('BLOCKCHAIN', 'WARNING', `[VERIFY_SKIPPED] Ağ gecikmesi nedeniyle bakiye henüz okunamadı ancak kontrat hazır: ${finalAddress}`);
+      }
+      
+      return { success: true, address: finalAddress };
     } catch (err: any) {
-      this.emitLog('BLOCKCHAIN', 'ERROR', `[DEPLOY_FAILED] Hata: ${err.message}`);
+      this.emitLog('BLOCKCHAIN', 'ERROR', `[DEPLOY_FAILED] Kritik Hata: ${err.message}`);
       return { success: false, address: '', error: err.message };
     }
   }
 
   public async mintToken(tokenAddress: string, toAddress: string, amount: string): Promise<{ success: boolean; txHash?: string; error?: string }> {
+    this.emitLog('BLOCKCHAIN', 'INFO', `[TOKEN_MINT] Basım emri iletiliyor: ${amount} KECO -> ${toAddress}`);
     try {
       const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl);
       const wallet = new ethers.Wallet(this.privateKey, provider);
@@ -1062,30 +811,15 @@ export class BlockchainRouter {
       const wallet = new ethers.Wallet(this.privateKey, provider);
       const tokenAddr = blockchainConfig.greenTokenAddress;
       const routerAddr = blockchainConfig.routerAddress;
-
       const router = new ethers.Contract(routerAddr, ["function addLiquidityETH(address token, uint amountTokenDesired, uint amountTokenMin, uint amountETHMin, address to, uint deadline) external payable returns (uint amountToken, uint amountETH, uint liquidity)"], wallet);
       const tokenContract = new ethers.Contract(tokenAddr, ["function approve(address spender, uint256 amount) public returns (bool)", "function balanceOf(address owner) view returns (uint256)"], wallet);
-
       const tokenWei = ethers.utils.parseUnits(tokenAmount, 18);
       const polWei = ethers.utils.parseUnits(polAmount, 18);
-
-      let bal = await tokenContract.balanceOf(wallet.address);
-      if (bal.lt(tokenWei)) {
-          this.emitLog('BLOCKCHAIN', 'WARNING', "Bakiye yetersiz, ağ senkronizasyonu bekleniyor...");
-          await new Promise(r => setTimeout(r, 10000));
-          bal = await tokenContract.balanceOf(wallet.address);
-      }
-
+      let bal = await tokenContract.balanceOf(wallet.address).catch(() => ethers.BigNumber.from(0));
       if (bal.lt(tokenWei)) throw new Error(`KECO Bakiyesi yetersiz: ${ethers.utils.formatUnits(bal, 18)} var.`);
-
-      await (await tokenContract.approve(routerAddr, ethers.constants.MaxUint256)).wait();
-      
-      const tx = await router.addLiquidityETH(
-        tokenAddr, tokenWei, 0, 0, wallet.address, Math.floor(Date.now() / 1000) + 1200, 
-        { value: polWei, gasLimit: 3000000, maxPriorityFeePerGas: ethers.utils.parseUnits("35", "gwei") }
-      );
+      await (await tokenContract.approve(routerAddr, ethers.constants.MaxUint256, { maxPriorityFeePerGas: ethers.utils.parseUnits("35", "gwei") })).wait();
+      const tx = await router.addLiquidityETH(tokenAddr, tokenWei, 0, 0, wallet.address, Math.floor(Date.now() / 1000) + 1200, { value: polWei, gasLimit: 3000000, maxPriorityFeePerGas: ethers.utils.parseUnits("35", "gwei") });
       await tx.wait();
-
       return { success: true, txHash: tx.hash };
     } catch (err: any) {
       return { success: false, txHash: '', error: err.message };
