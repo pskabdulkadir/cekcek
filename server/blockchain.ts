@@ -294,13 +294,13 @@ export class BlockchainRouter {
         "function decimals() view returns (uint8)"
       ], provider);
 
-      // KRİTİK DÜZELTME: Her çağrıyı ayrı ayrı try-catch'e alarak Stack Underflow'un sistemi çökertmesini engelliyoruz
+      // KRİTİK DÜZELTME: Stack Underflow koruması için her çağrıyı izole ediyoruz
       const balanceBN = await contract.balanceOf(accountAddress).catch(() => ethers.BigNumber.from(0));
       const decimals = await contract.decimals().catch(() => 18);
       
       return ethers.utils.formatUnits(balanceBN, decimals);
     } catch (err) {
-      return "0.00"; // Hata durumunda sistemi kırma, sadece 0 döndür
+      return "0.00"; 
     }
   }
 
