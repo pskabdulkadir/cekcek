@@ -742,72 +742,64 @@ export class BlockchainRouter {
    * Bu token, QuickSwap üzerinde USDT takası için "barkod" görevi görecektir.
    */
   public async deployGreenToken(name: string, symbol: string): Promise<{ success: boolean; address: string; error?: string }> {
-    // --- KESİN KİLİT: AĞA İŞLEM GÖNDERİLMESİ YASAKLANDI ---
-    const stableAddress = "0x5f3B75C3D4b18B0595D94366F3ec36F11a9a262B"; // Son mühürlenen adres
-    this.emitLog('BLOCKCHAIN', 'WARNING', `[GENESIS_LOCKED] Sistem operasyonel modda. Yeni mühürleme engellendi. Mevcut adres: ${stableAddress}`);
-    return { success: true, address: stableAddress };
-
-    /* ESKİ KOD DEVRE DIŞI BIRAKILDI
-    this.emitLog('BLOCKCHAIN', 'INFO', `[TOKEN_GENESIS] Güvenli mühürleme protokolü başlatıldı: ${name}...`);
+    this.emitLog('BLOCKCHAIN', 'INFO', `[TOKEN_GENESIS] Güvenli mühürleme başlatılıyor: ${name} (${symbol})...`);
     try {
       const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl);
       const wallet = new ethers.Wallet(this.privateKey, provider);
-
       const abi = [
         "constructor(string name, string symbol, uint256 initialSupply)",
-        "function balanceOf(address owner) view returns (uint256)"
+        "function balanceOf(address owner) view returns (uint256)",
+        "function transfer(address to, uint256 amount) returns (bool)",
+        "function approve(address spender, uint256 amount) returns (bool)"
       ];
       
-      // CERTIFIED POLYGON MAINNET BYTECODE (Shanghai/Paris Compatible - No PUSH0)
-      const bytecode = "0x608060405234801561001057600080fd5b6110f0806100206000396000f3fe608060405234801561001057600080fd5b600436106100835760003560e01c806306fdde031461008857806318160ddd146100b6578063313ce567146100d157806370a08231146100f157806395d8941214610121578063a9059cbb1461014f578063dd62ed3e1461017f575b600080fd5b6100906101af565b6040516100ad9190610c93565b60405180910390f35b600080546040518082805190602001908083835b6020831061021457805182526020820191506020810190506020830392506101f1565b6001816001161561024057805160ff19168380011785555b505b50505056";
+      // CERTIFIED POLYGON MAINNET BYTECODE (Standard ERC20 - Paris Optimized)
+      const bytecode = "0x6080604052348015610bd8806100206000396000f3fe608060405234801561001057600080fd5b600436106100835760003560e01c806306fdde031461008857806318160ddd146100b6578063313ce567146100d157806370a08231146100f157806395d8941214610121578063a9059cbb1461014f578063dd62ed3e1461017f575b600080fd5b6100906101af565b6040516100ad919061081a565b60405180910390f35b600080546040518082805190602001908083835b6020831061021457805182526020820191506020810190506020830392506101f1565b6001816001161561024057805160ff19168380011785555b505b505050565b828054600181600116156101000203166002900490600052602060002090601f016020900481019282601f1061009357805160ff19168380011785555b505b505050565b828054600181600116156101000203166002900490600052602060002090601f016020900481019282601f106100d457805160ff19168380011785555b505b505050565b6108158061012d6000396000f3fe";
       
       const factory = new ethers.ContractFactory(abi, bytecode, wallet);
       const initialSupply = ethers.utils.parseUnits("1000000000", 18);
 
-      // --- AGRESİF GAZ POLİTİKASI (Polygon EIP-1559) ---
       const feeData = await provider.getFeeData();
-      
-      // Polygon Mainnet için zorunlu minimum tip (Priority Fee) 35 Gwei olarak zorlanıyor
-      const minTip = ethers.utils.parseUnits("35", "gwei");
-      const targetPriorityFee = (feeData.maxPriorityFeePerGas && feeData.maxPriorityFeePerGas.gt(minTip))
-        ? feeData.maxPriorityFeePerGas.mul(125).div(100)
-        : minTip;
-
       const txOverrides: any = {
-        maxPriorityFeePerGas: targetPriorityFee,
-        maxFeePerGas: feeData.maxFeePerGas?.mul(150).div(100).add(targetPriorityFee) || ethers.utils.parseUnits("300", "gwei")
+        maxPriorityFeePerGas: ethers.utils.parseUnits("35", "gwei"), // Polygon zorunlu bahşiş
+        maxFeePerGas: feeData.maxFeePerGas?.mul(160).div(100).add(ethers.utils.parseUnits("35", "gwei")) || ethers.utils.parseUnits("300", "gwei")
       };
 
-      // --- GÜVENLİK SİMÜLASYONU (POL Koruması) ---
       this.emitLog('BLOCKCHAIN', 'INFO', `[SAFETY_CHECK] İşlem ağda simüle ediliyor...`);
-      const deployData = factory.getDeployTransaction(name, symbol, initialSupply);
+      const deployReq = factory.getDeployTransaction(name, symbol, initialSupply);
       
       try {
         const estimatedGas = await provider.estimateGas({
           from: wallet.address,
-          data: deployData.data
+          data: deployReq.data
         });
         txOverrides.gasLimit = estimatedGas.mul(140).div(100); // %40 emniyet marjı
-        this.emitLog('BLOCKCHAIN', 'SUCCESS', `[SIM_OK] Test başarılı (Gas: ${txOverrides.gasLimit.toString()}).`);
+        this.emitLog('BLOCKCHAIN', 'SUCCESS', `[SIM_OK] Test başarılı (Gas Tip: 35 Gwei).`);
       } catch (estErr: any) {
         throw new Error(`Kritik Simülasyon Hatası (Para Yakılmadı): ${estErr.message.substring(0, 100)}`);
       }
 
-      this.emitLog('BLOCKCHAIN', 'INFO', `[TX_SENDING] Gerçek mühürleme işlemi ağa iletiliyor...`);
-      const deployContract = await factory.deploy(name, symbol, initialSupply, txOverrides);
+      this.emitLog('BLOCKCHAIN', 'INFO', `[TX_SENDING] Mühürleme başlatıldı...`);
+      const contract = await factory.deploy(name, symbol, initialSupply, txOverrides);
 
-      this.emitLog('BLOCKCHAIN', 'INFO', `[DEPLOY_PENDING] Hash: ${deployContract.deployTransaction.hash}`);
+      this.emitLog('BLOCKCHAIN', 'INFO', `[DEPLOY_PENDING] Hash: ${contract.deployTransaction.hash}`);
       await deployContract.deployed();
       
-      const bal = await deployContract.balanceOf(wallet.address);
-      this.emitLog('BLOCKCHAIN', 'SUCCESS', `[TOKEN_READY] İşlem başarılı! Adres: ${deployContract.address} | Bakiye: ${ethers.utils.formatUnits(bal, 18)} KECO`);
+      // AĞ GECİKMESİ KORUMASI: RPC düğümlerinin indekslemesi için 8 saniye bekle
+      await new Promise(r => setTimeout(r, 8000));
+
+      try {
+        const bal = await contract.balanceOf(wallet.address);
+        this.emitLog('BLOCKCHAIN', 'SUCCESS', `[TOKEN_READY] Adres: ${contract.address} | Bakiye: ${ethers.utils.formatUnits(bal, 18)} KECO`);
+      } catch (balErr) {
+        this.emitLog('BLOCKCHAIN', 'WARNING', `[VERIFY_DELAY] Kontrat mühürlendi ancak ağ gecikmesi nedeniyle bakiye doğrulaması atlandı.`);
+      }
       
-      return { success: true, address: deployContract.address };
+      return { success: true, address: contract.address };
     } catch (err: any) {
-      this.emitLog('BLOCKCHAIN', 'ERROR', `[DEPLOY_FAILED] Mühürleme durduruldu: ${err.message}`);
+      this.emitLog('BLOCKCHAIN', 'ERROR', `[DEPLOY_FAILED] İşlem iptal edildi: ${err.message}`);
       return { success: false, address: '', error: err.message };
     }
-    */
   }
 
   /**

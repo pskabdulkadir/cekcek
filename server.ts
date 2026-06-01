@@ -1174,6 +1174,8 @@ app.post("/api/admin/command", async (req, res) => {
         const result = await mainBlockchain.initializeLiquidityPool(polAmount, tokenAmount);
         if (result.success) {
             pushLog('SYSTEM', 'SUCCESS', `[MARKET_READY] Piyasa yapıcı kurulumu tamamlandı. Takas yolu aktif.`);
+        } else {
+            pushLog('SYSTEM', 'ERROR', `[MARKET_FAILED] Likidite kurulumu başarısız: ${result.error}`);
         }
     })();
     return res.json({ success: true, message: "Liquidity initialization process started." });
