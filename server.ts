@@ -1163,6 +1163,20 @@ app.post("/api/admin/command", async (req, res) => {
     return res.json({ success: true });
   }
 
+  if (command.startsWith("INIT_DEX_LIQUIDITY")) {
+    const parts = command.split(" ");
+    const polAmount = parts[1] || "5";
+    const tokenAmount = parts[2] || "10000000";
+    
+    (async () => {
+        const result = await mainBlockchain.initializeLiquidityPool(polAmount, tokenAmount);
+        if (result.success) {
+            pushLog('SYSTEM', 'SUCCESS', `[MARKET_READY] Piyasa yapıcı kurulumu tamamlandı. Takas yolu aktif.`);
+        }
+    })();
+    return res.json({ success: true, message: "Liquidity initialization process started." });
+  }
+
   if (command.startsWith("SET_THRESHOLD")) {
     const val = parseInt(command.split(" ")[1]);
     if (!isNaN(val)) {
