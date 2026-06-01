@@ -1095,8 +1095,14 @@ app.post("/api/market/sell-all", async (req, res) => {
  * Yönetici Komut Satırı İşleyici
  */
 app.post("/api/admin/command", async (req, res) => {
-  const { command } = req.body;
+  const rawCommand = req.body.command || "";
+  const command = rawCommand.trim();
   
+  if (command === "GET_STATUS_REPORT") {
+    await generateStatusReport();
+    return res.json({ success: true, message: "Status report generated." });
+  }
+
   if (command === "SET_AUTONOMOUS_DEPLOYMENT_TRUE --gas-payer=buyer --mode=batch") {
     serverState.autonomousMode = true;
     serverState.commitThreshold = 10; // Talimat uyarınca 10'a çekildi
