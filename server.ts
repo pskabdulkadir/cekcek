@@ -234,29 +234,29 @@ async function monitorAndLiquidate() {
     const walletAddr = mainBlockchain.getWalletAddress();
     if (!walletAddr) return;
 
-    // 1. ADIM: OTOMATİK YAKIT İKMALİ (Gas Refiller)
+    // 1. ADIM: YAKIT KONTROLÜ VE OTOMATİK İKMAL
     const gasCheck = await mainBlockchain.checkGasBalance('polygon');
     const currentPol = parseFloat(gasCheck.balance);
     
     if (blockchainConfig.gasRefillEnabled && currentPol < (blockchainConfig.gasRefillThreshold || 0.5)) {
-      pushLog('FINANCE', 'WARNING', `[AUTO_FUEL] Yakıt kritik: ${currentPol.toFixed(3)} POL. USDT takviyesi başlatılıyor...`);
+      pushLog('FINANCE', 'WARNING', `[AUTO_FUEL] Yakıt kritik: ${currentPol.toFixed(3)} POL. Rezerv USDT kontrol ediliyor...`);
       const usdtBalance = await mainBlockchain.getUSDTBalance();
       const refillUsdtAmount = blockchainConfig.gasRefillUsdtAmount || 5.0;
       
       if (parseFloat(usdtBalance) >= refillUsdtAmount) {
         const refillResult = await mainBlockchain.refillGasFromUSDT(refillUsdtAmount.toString());
-        if (refillResult.success) pushLog('FINANCE', 'SUCCESS', `[GAS_OK] Yakıt ikmali tamamlandı.`);
+        if (refillResult.success) pushLog('FINANCE', 'SUCCESS', `[GAS_OK] Yakıt takviyesi başarılı.`);
       } else {
-        pushLog('FINANCE', 'ERROR', `[FUEL_FAIL] Yetersiz USDT rezervi. Manuel müdahale gerekebilir.`);
+        pushLog('FINANCE', 'ERROR', `[FUEL_FAIL] Rezerv USDT yetersiz ($${usdtBalance}). Manuel POL gerekebilir.`);
       }
     }
 
-    // 2. ADIM: OTOMATİK SATIŞ (Market Maker)
+    // 2. ADIM: SATIŞ KONTROLÜ (PAZAR YAPICI)
     const balance = await mainBlockchain.getTokenBalance(blockchainConfig.greenTokenAddress, walletAddr);
     const balanceNum = parseFloat(balance);
 
-    if (balanceNum >= 100.0) { // Gas tasarrufu için eşik 100 token
-      pushLog('FINANCE', 'SUCCESS', `[PROFIT_TRIGGER] ${balanceNum.toFixed(2)} KECO tespit edildi. Nakde çevriliyor...`);
+    if (balanceNum >= 100.0) { // Gas verimliliği için minimum 100 token eşiği
+      pushLog('FINANCE', 'SUCCESS', `[PROFIT_TRIGGER] ${balanceNum.toFixed(2)} KECO tespit edildi. Otonom likidite takası başlıyor.`);
       const amountWei = ethers.utils.parseUnits(balance, 18).toString();
       const result = await mainBlockchain.performDEXSwap(amountWei);
       if (result.success) {
@@ -264,12 +264,11 @@ async function monitorAndLiquidate() {
       }
     }
   } catch (err: any) {
-    // Log kirliliğini önle
     if (err.message.includes('call exception') || err.message.includes('underflow') || err.message.includes('insufficient funds')) return;
     pushLog('SYSTEM', 'ERROR', `[OTONOM_HATA] ${err.message.slice(0, 60)}...`);
   }
 }
-setInterval(monitorAndLiquidate, 20000); // Mainnet için ideal hız: 20 saniye
+setInterval(monitorAndLiquidate, 300000); // Bütçe güvenliği için 5 dakika (Cooldown aktif)
 
 /**
  * --- GERÇEK FİNANSAL MUTABAKAT MOTORU ---
@@ -1172,57 +1171,122 @@ app.post("/api/admin/command", async (req, res) => {
     return res.json({ success: true, message: "Mint process started." });
   }
 
+  if (command === "GET_STATUS_REPORT") {
+    await generateStatusReport();
+    return res.json({ success: true, message: "Status report generated." });
+  }
+
+  if (command.startsWith("GENERATE_GREEN_TOKEN")) {
+    const parts = command.split(" ");
+    const name = parts[1] || "KADIR_ECO";
+    const symbol = parts[2] || "KECO";
+
+    const currentAddr = blockchainConfig.greenTokenAddress;
+    const isGhost = currentAddr && currentAddr.startsWith('0x9d8D');
+    const isDefault = !currentAddr || currentAddr.includes('0x000');
+
+    if (!isDefault && !isGhost) {
+      pushLog('SYSTEM', 'WARNING', `[TOKEN_GENESIS_SKIPPED] Aktif bir token adresi mevcut: ${currentAddr}.`);
+      return res.json({ success: true, message: "Active token contract already exists." });
+    }
+
+    if (isGhost) {
+      pushLog('SYSTEM', 'INFO', `[GHOST_CLEANUP] Eski hayalet adres temizleniyor...`);
+    }
+
+    const result = await mainBlockchain.deployGreenToken(name, symbol);
+    if (result.success) {
+      pushLog('SYSTEM', 'SUCCESS', `!!! KRİTİK !!! Yeni Token: ${result.address}`);
+    } else {
+      pushLog('SYSTEM', 'ERROR', `[TOKEN_GENESIS_FAILED] Hata: ${result.error}`);
+    }
+    return res.json({ success: result.success, message: result.success ? "Token deployment started." : "Token deployment failed." });
+  }
+
+  if (command.startsWith("INIT_DEX_LIQUIDITY")) {
+    const parts = command.split(" ");
+    const polAmount = parts[1] || "5";
+    const tokenAmount = parts[2] || "10000000";
+
+    const currentKecoBalance = await mainBlockchain.getTokenBalance(blockchainConfig.greenTokenAddress, mainBlockchain.getWalletAddress());
+    if (parseFloat(currentKecoBalance) < parseFloat(tokenAmount)) {
+      pushLog('SYSTEM', 'ERROR', `[LIQUIDITY_FAILED] Yetersiz KECO: Gerekli: ${tokenAmount}, Mevcut: ${currentKecoBalance}.`);
+      return res.json({ success: false, message: "Insufficient KECO balance for liquidity." });
+    }
+
+    pushLog('SYSTEM', 'INFO', `[MARKET_INIT] Likidite kurulumu başlatılıyor...`);
+    const result = await mainBlockchain.initializeLiquidityPool(polAmount, tokenAmount);
+    if (result.success) {
+      pushLog('SYSTEM', 'SUCCESS', `[MARKET_READY] Piyasa yapıcı kurulumu tamamlandı.`);
+    } else {
+      pushLog('SYSTEM', 'ERROR', `[MARKET_FAILED] Hata: ${result.error}`);
+    }
+    return res.json({ success: result.success, message: result.success ? "Liquidity OK" : result.error });
+  }
+
+  if (command.startsWith("EXECUTE_GENESIS_MINT")) {
+    const parts = command.split(" ");
+    const toAddress = parts[parts.indexOf("--to") + 1] || mainBlockchain.getWalletAddress();
+    const amount = parts[parts.indexOf("--amount") + 1] || "1000000000";
+
+    const result = await mainBlockchain.mintToken(blockchainConfig.greenTokenAddress, toAddress, amount);
+    if (result.success) {
+      pushLog('SYSTEM', 'SUCCESS', `[MINT_OK] Tx: ${result.txHash}`);
+    } else {
+      pushLog('SYSTEM', 'ERROR', `[MINT_FAILED] Hata: ${result.error}`);
+    }
+    return res.json({ success: result.success, message: result.success ? "Mint OK" : result.error });
+  }
+
   if (command === "SET_AUTONOMOUS_DEPLOYMENT_TRUE --gas-payer=buyer --mode=batch") {
     serverState.autonomousMode = true;
-    serverState.commitThreshold = 10; // Talimat uyarınca 10'a çekildi
-    pushLog('SYSTEM', 'SUCCESS', "PROTOKOL_AKTIF: Otonom mod (Batch) devreye alındı. Gas ücreti alıcıya devredildi.");
+    serverState.commitThreshold = 10;
+    pushLog('SYSTEM', 'SUCCESS', "PROTOKOL_AKTIF: Otonom mod (Batch) devreye alındı.");
     return res.json({ success: true, message: "Autonomous mode activated." });
+  }
+
+  if (command.startsWith("RUN_BULK_SELL")) {
+    const limit = parseInt(command.split(" ")[1]) || 500;
+    pushLog('SYSTEM', 'INFO', `Toplu satış başlatılıyor. Hedef: ${limit} varlık.`);
+    sellAllReadyAssets(limit);
+    return res.json({ success: true, message: "Bulk sell task started." });
   }
 
   if (command === "PAUSE_SCRAPER") {
     serverState.isCrawling = false;
     mainCrawler.stop();
-    pushLog('SYSTEM', 'WARNING', "Gaz tasarrufu için tarayıcı durduruldu.");
+    pushLog('SYSTEM', 'WARNING', "Tarayıcı durduruldu.");
     return res.json({ success: true });
-  }
-  
-  if (command.startsWith("RUN_BULK_SELL")) {
-    const limit = parseInt(command.split(" ")[1]) || 500;
-    pushLog('SYSTEM', 'INFO', `Admin komutu: Toplu satış başlatılıyor. Hedef: ${limit} varlık.`);
-    sellAllReadyAssets(limit); 
-    return res.json({ success: true, message: "Bulk sell task started in background." });
   }
 
   if (command.startsWith("FORCE_DEX_SETTLE")) {
     const limit = parseInt(command.split(" ")[1]) || 100;
-    pushLog('SYSTEM', 'WARNING', `[CRITICAL_EXECUTION] DEX zorlamalı satış başlatılıyor.`);
-    
-    (async () => {
-        const items = await ReadyToSellModel.find({ isSold: false, isListedOnChain: true }).limit(limit);
-        for (const item of items) {
-            await executeProxySettlement(item.id, item.accessPriceUSD || 0, item.co2AnalysisGrams || 0);
-            await new Promise(r => setTimeout(r, 2000));
-        }
-    })();
-    
-    return res.json({ success: true, message: "DEX settlement task initiated." });
-  }
+    pushLog('SYSTEM', 'WARNING', `[DEX_SETTLE] ${limit} varlık için zorlamalı satış başlatılıyor.`);
 
-  if (command === "INIT_PROXY_SETTLE") {
-    pushLog('SYSTEM', 'INFO', "Manuel Proxy Settlement tetiklendi."); // Bu komut genellikle tekil hatalarda veya debug için kullanılır
-    return res.json({ success: true });
+    (async () => {
+      const items = await ReadyToSellModel.find({ isSold: false, isListedOnChain: true }).limit(limit);
+      for (const item of items) {
+        await executeProxySettlement(item.id, item.accessPriceUSD || 0, item.co2AnalysisGrams || 0);
+        await new Promise(r => setTimeout(r, 2000));
+      }
+    })().catch(err => {
+      pushLog('SYSTEM', 'ERROR', `FORCE_DEX_SETTLE hatası: ${err.message}`);
+    });
+
+    return res.json({ success: true, message: "DEX settlement initiated." });
   }
 
   if (command.startsWith("SET_THRESHOLD")) {
     const val = parseInt(command.split(" ")[1]);
     if (!isNaN(val)) {
       serverState.commitThreshold = val;
-      pushLog('SYSTEM', 'INFO', `Onay eşiği ${val} olarak güncellendi.`);
+      pushLog('SYSTEM', 'INFO', `Eşik ${val} olarak güncellendi.`);
       return res.json({ success: true });
     }
+    return res.status(400).json({ error: "Geçersiz eşik değeri." });
   }
 
-  res.status(400).json({ error: "Geçersiz komut dizisi." });
+  return res.status(400).json({ error: "Geçersiz komut dizisi." });
 });
 
 /**

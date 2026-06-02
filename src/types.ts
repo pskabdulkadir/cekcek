@@ -10,8 +10,8 @@
 export interface TransactionRecord {
   url: string; // Veri kaynağı URL'si
   proofHash: string; // Analiz raporunun kriptografik kanıtı
-  co2AnalysisGrams: number; // CO2 analiz değeri (was co2SavingsGrams)
-  assetRegistrationTxHash: string; // Varlık kaydının işlem hash'i
+  co2AnalysisGrams: number; // CO2 analiz değeri
+  txHash: string; // İşlem hash'i
   timestamp: string;
 }
 

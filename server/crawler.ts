@@ -53,6 +53,11 @@ export class WebCrawler {
     this.onCrawlingStateChange = cb;
   }
 
+  public stop() {
+    this.isRunning = false;
+    this.queue = [];
+  }
+
   private emitLog(module: 'SYSTEM' | 'CRAWLER' | 'OPTIMIZER' | 'BLOCKCHAIN' | 'AI', level: 'INFO' | 'SUCCESS' | 'WARNING' | 'ERROR' | 'ANALYZE', msg: string) {
     if (this.logCallback) {
       this.logCallback(module, level, msg);
