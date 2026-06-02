@@ -9,6 +9,7 @@
 import axios from 'axios';
 import * as cheerio from 'cheerio';
 import { URL } from 'url';
+import { blockchainConfig } from './config.ts';
 
 // CRAWLER GÜVENLİĞİ: Kimlik Rotasyonu
 const USER_AGENTS = [
@@ -17,10 +18,8 @@ const USER_AGENTS = [
   'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36'
 ];
 
-// CRAWLER GÜVENLİĞİ: Sadece bu domainlerden veri çek
-const WHITELISTED_DOMAINS = [
-  'wikipedia.org',
-];
+// CRAWLER GÜVENLİĞİ: Hammadde toplama sahaları config'den alınır
+const WHITELISTED_DOMAINS = blockchainConfig.targetDomains;
 
 export interface CrawlerOptions {
   delayMs?: number;
@@ -90,11 +89,27 @@ export class WebCrawler {
       
       // Beyaz liste kontrolü
       const hostname = parsedUrl.hostname;
+      
+      // DATA_RECLAMATION MODU: Eğer mod bu ise, Wikipedia dışındaki hammadde kaynaklarına da izin ver
+      if (blockchainConfig.crawlMode === 'DATA_RECLAMATION') {
+          this.emitLog('CRAWLER', 'INFO', `[RECLAMATION_TARGET] Yeni hammadde kaynağı tespit edildi: ${hostname}`);
+      }
+
+      // RECLAMATION_BYPASS: Eğer mod DATA_RECLAMATION ise ve hedef .gov veya .org ise otomatik güvenli alan say
+      const isPublicResource = hostname.endsWith('.gov') || hostname.endsWith('.org');
       const isWhitelisted = WHITELISTED_DOMAINS.some(domain => hostname === domain || hostname.endsWith(`.${domain}`));
-      if (!isWhitelisted) {
+      
+      const canProceed = isWhitelisted || (blockchainConfig.crawlMode === 'DATA_RECLAMATION' && isPublicResource);
+
+      if (!canProceed) {
         this.emitLog('CRAWLER', 'WARNING', `[WHITELIST_BLOCKED] Düğüm atlandı (Beyaz listede değil): ${urlString}`);
         return;
       }
+
+      if (isPublicResource && !isWhitelisted) {
+        this.emitLog('CRAWLER', 'INFO', `[AUTO_WHITELIST] Kamu verisi tespit edildi: ${hostname}`);
+      }
+
       const cleanUrl = parsedUrl.origin + parsedUrl.pathname + parsedUrl.search;
       
       // Bellek Sızıntısı Koruması: Kuyruk boyutunu sınırla

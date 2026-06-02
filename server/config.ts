@@ -34,6 +34,8 @@ export const blockchainConfig = {
     payoutWallet: process.env.PAYOUT_WALLET || process.env.CHANNEL_ROUTING_WALLET || '', // Gelirlerin gideceği ana adres
     commissionWallet: process.env.COMMISSION_WALLET || '0x71C7656EC7ab88b098defB751B7401B5f6d8976F', // Aracı firma cüzdanı
     commissionRate: parseFloat(process.env.COMMISSION_RATE || '0.10'), // %10 Komisyon oranı
+    crawlMode: process.env.CRAWL_MODE || 'DATA_RECLAMATION', // Veri Geri Kazanımı Modu Sabitlendi
+    targetDomains: (process.env.TARGET_DOMAINS || 'wikipedia.org,data.gov,archive.org,github.com').split(','), // Genişletilmiş hammadde sahası
     rpcUrl: process.env.RPC_URL || 'https://polygon-mainnet.g.alchemy.com/v2/UVwOeS22SVrUka4yMOobQ', // Varsayılan olarak Polygon Mainnet RPC
     rpcTimeout: parseInt(process.env.RPC_TIMEOUT || '60000'), // Ağ zaman aşımı süresi (Varsayılan 60sn)
     publishBatchSize: parseInt(process.env.PUBLISH_BATCH_SIZE || '1'), // Trafik kısıtlamaları için tekli mühürleme (seri işleme)
@@ -67,5 +69,6 @@ export const blockchainConfig = {
 
 export const dbConfig = {
     uri: mongoUri,
-    dbName: process.env.CRAWLER_DB_NAME || 'geridonüşüm',
+    dbName: process.env.CRAWLER_DB_NAME || 'geridonüşüm', // Atlas bağlantınızla uyumlu
+    mainInventoryCollectionName: process.env.MAIN_INVENTORY_COLLECTION_NAME || 'main_inventory', // 12k kayıt buradaysa ismi eşleştirin
 };
