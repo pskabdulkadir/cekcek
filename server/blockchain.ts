@@ -204,6 +204,41 @@ export class BlockchainRouter {
   }
 
   /**
+   * Helper to fetch fee data and return safe EIP-1559 gas overrides with 30 Gwei floor for maxPriorityFeePerGas.
+   */
+  public async getSafeGasOverrides(provider: ethers.providers.Provider): Promise<ethers.providers.TransactionRequest> {
+    const txOverrides: ethers.providers.TransactionRequest = {};
+    try {
+      const feeData = await provider.getFeeData();
+      const minPriorityFee = ethers.utils.parseUnits("30", "gwei");
+
+      if (feeData.maxFeePerGas && feeData.maxPriorityFeePerGas) {
+        let targetPriorityFee = feeData.maxPriorityFeePerGas.mul(125).div(100);
+        if (targetPriorityFee.lt(minPriorityFee)) {
+          targetPriorityFee = minPriorityFee;
+        }
+
+        let targetMaxFee = feeData.maxFeePerGas.mul(160).div(100).add(targetPriorityFee);
+        if (targetMaxFee.lt(targetPriorityFee.mul(150).div(100))) {
+          targetMaxFee = targetPriorityFee.mul(150).div(100);
+        }
+
+        txOverrides.maxPriorityFeePerGas = targetPriorityFee;
+        txOverrides.maxFeePerGas = targetMaxFee;
+      } else if (feeData.gasPrice) {
+        txOverrides.gasPrice = feeData.gasPrice.mul(150).div(100);
+      } else {
+        txOverrides.gasPrice = ethers.utils.parseUnits("150", "gwei");
+      }
+    } catch (err: any) {
+      this.emitLog('BLOCKCHAIN', 'WARNING', `Gas tahmini alınamadı: ${err.message}. Varsayılanlar uygulanıyor.`);
+      txOverrides.maxPriorityFeePerGas = ethers.utils.parseUnits("30", "gwei");
+      txOverrides.maxFeePerGas = ethers.utils.parseUnits("150", "gwei");
+    }
+    return txOverrides;
+  }
+
+  /**
    * Cüzdan adresini döndür (PRIVATE_KEY'den türetilmiş)
    */
   public getWalletAddress(): string {
@@ -327,9 +362,10 @@ export class BlockchainRouter {
       ], wallet);
 
       const path = [ethers.utils.getAddress(WMATIC.toLowerCase()), ethers.utils.getAddress(POLYGON_USDT.toLowerCase())];
+      const gasOverrides = await this.getSafeGasOverrides(provider);
       const tx = await router.swapExactETHForTokens(
         0, path, wallet.address, Math.floor(Date.now() / 1000) + 600,
-        { value: ethers.utils.parseEther(polAmount), gasLimit: 250000 }
+        { value: ethers.utils.parseEther(polAmount), gasLimit: 250000, ...gasOverrides }
       );
       await tx.wait();
       return { success: true, txHash: tx.hash };
@@ -551,29 +587,11 @@ export class BlockchainRouter {
         this.emitLog('BLOCKCHAIN', 'INFO', `Sıcak cüzdan doğrulandı: ${wallet.address} | Bakiye: ${ethers.utils.formatEther(balance)} MATIC/POL`);
 
         // --- DİNAMİK GAZ FİYATI TAHMİNİ ---
-        const feeData = await provider.getFeeData();
-        const txOverrides: ethers.providers.TransactionRequest = {};
-        
-        // OPTİMİZE EDİLMİŞ GAZ POLİTİKASI: %20 Güvenlik Marjı (Düşük Maliyet - Yüksek Verim)
-        const minPriorityFee = ethers.utils.parseUnits("30", "gwei"); 
-
-        if (feeData.maxFeePerGas && feeData.maxPriorityFeePerGas) {
-            // İşlemin geçmesi için yeterli ama kâr marjını koruyan çarpan (1.2x)
-            txOverrides.maxFeePerGas = feeData.maxFeePerGas.mul(120).div(100);
-            txOverrides.maxPriorityFeePerGas = feeData.maxPriorityFeePerGas.mul(120).div(100);
-
-            if (txOverrides.maxPriorityFeePerGas.lt(minPriorityFee)) {
-                txOverrides.maxPriorityFeePerGas = minPriorityFee;
-            }
-            
-            this.emitLog('BLOCKCHAIN', 'INFO', `Optimize Gas (EIP-1559): MaxFee=${ethers.utils.formatUnits(txOverrides.maxFeePerGas || 0, "gwei")} gwei`);
-        } else if (feeData.gasPrice) {
-            // Legacy ağlar için standart fiyatı %50 artır
-            txOverrides.gasPrice = feeData.gasPrice.mul(150).div(100);
+        const txOverrides = await this.getSafeGasOverrides(provider);
+        if (txOverrides.maxFeePerGas) {
+            this.emitLog('BLOCKCHAIN', 'INFO', `Optimize Gas (EIP-1559): MaxFee=${ethers.utils.formatUnits(txOverrides.maxFeePerGas, "gwei")} gwei`);
+        } else if (txOverrides.gasPrice) {
             this.emitLog('BLOCKCHAIN', 'INFO', `Dinamik Gas (Legacy) kullanılıyor: GasPrice=${ethers.utils.formatUnits(txOverrides.gasPrice, "gwei")} gwei`);
-        } else {
-            txOverrides.gasPrice = ethers.utils.parseUnits("50", "gwei");
-            this.emitLog('BLOCKCHAIN', 'WARNING', `Gas verisi alınamadı, güvenli varsayılan 50 gwei kullanılıyor.`);
         }
 
         // Check if contract is zero-address to trigger Direct Proof anchoring on-chain
@@ -698,9 +716,10 @@ export class BlockchainRouter {
       const path = [usdtAddr, WMATIC]; // USDT -> WMATIC (POL)
       const deadline = Math.floor(Date.now() / 1000) + 600;
 
+      const gasOverrides = await this.getSafeGasOverrides(provider);
       const tx = await router.swapExactTokensForETH(
         amountInWei, 0, path, wallet.address, deadline,
-        { gasLimit: 300000, maxPriorityFeePerGas: ethers.utils.parseUnits("35", "gwei") }
+        { gasLimit: 300000, ...gasOverrides }
       );
       
       await tx.wait();
@@ -797,12 +816,8 @@ export class BlockchainRouter {
       // %1 Slippage Tolerance (Kayma Toleransı)
       const amountOutMin = ethers.BigNumber.from(expectedUsdt).mul(99).div(100);
 
-      const txOverrides = {
-        gasLimit: 300000, // Stabil gaz limiti
-        // DEX OPTİMİZE: %20 Pay
-        maxPriorityFeePerGas: (feeData.maxPriorityFeePerGas || ethers.utils.parseUnits("30", "gwei")).mul(120).div(100),
-        maxFeePerGas: (feeData.maxFeePerGas || ethers.utils.parseUnits("50", "gwei")).mul(120).div(100)
-      };
+      const txOverrides = await this.getSafeGasOverrides(provider);
+      txOverrides.gasLimit = 300000; // Stabil gaz limiti
 
       this.emitLog('BLOCKCHAIN', 'INFO', `[DEX_LIVE] Fiyat: $${ethers.utils.formatUnits(expectedUsdt, 6)} USDT | Tolerans: %1 | Emre çıkılıyor...`);
       
