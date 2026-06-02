@@ -565,7 +565,7 @@ export class BlockchainRouter {
                 : minPriorityFee;
 
             txOverrides.maxPriorityFeePerGas = targetPriorityFee;
-            // MaxFee'yi baz ücretin 7 katı yaparak işlemin "pend" (bekleme) durumuna düşmesini engelliyoruz (Mainnet Ultra Rapid)
+            // MaxFee'yi baz ücretin 7 katı yaparak işlemin "pend" (bekleme) durumuna düşmesini engelliyoruz (Ultra Rapid)
             txOverrides.maxFeePerGas = feeData.maxFeePerGas.mul(700).div(100).add(targetPriorityFee);
             
             this.emitLog('BLOCKCHAIN', 'INFO', `Agresif Gas (EIP-1559) Tetiklendi: MaxFee=${ethers.utils.formatUnits(txOverrides.maxFeePerGas, "gwei")} gwei, PriorityFee=${ethers.utils.formatUnits(txOverrides.maxPriorityFeePerGas, "gwei")} gwei`);
@@ -702,7 +702,7 @@ export class BlockchainRouter {
 
       const tx = await router.swapExactTokensForETH(
         amountInWei, 0, path, wallet.address, deadline,
-        { gasLimit: 250000, maxPriorityFeePerGas: ethers.utils.parseUnits("95", "gwei"), maxFeePerGas: ethers.utils.parseUnits("550", "gwei") }
+        { gasLimit: 250000, maxPriorityFeePerGas: ethers.utils.parseUnits("100", "gwei"), maxFeePerGas: ethers.utils.parseUnits("600", "gwei") }
       );
       
       await tx.wait();
@@ -801,9 +801,9 @@ export class BlockchainRouter {
 
       const txOverrides = {
         gasLimit: 500000, // Takas işlemleri için limiti artırdık
-        // DEX ULTRA RAPID: %120 Pay ekleyerek ilk blokta girmeyi garanti ederiz
-        maxPriorityFeePerGas: feeData.maxPriorityFeePerGas?.mul(220).div(100) || ethers.utils.parseUnits("100", "gwei"),
-        maxFeePerGas: feeData.maxFeePerGas?.mul(350).div(100) || ethers.utils.parseUnits("500", "gwei")
+        // DEX ULTRA RAPID: %150 Pay ekleyerek ilk blokta girmeyi garanti ederiz
+        maxPriorityFeePerGas: feeData.maxPriorityFeePerGas?.mul(250).div(100) || ethers.utils.parseUnits("110", "gwei"),
+        maxFeePerGas: feeData.maxFeePerGas?.mul(400).div(100) || ethers.utils.parseUnits("600", "gwei")
       };
 
       this.emitLog('BLOCKCHAIN', 'INFO', `[DEX_LIVE] Fiyat: $${ethers.utils.formatUnits(expectedUsdt, 6)} USDT | Tolerans: %1 | Emre çıkılıyor...`);

@@ -51,17 +51,17 @@ const AQUARIUS_URL = blockchainConfig.oceanProtocolUrl;
 
 // --- GÜVENLİK KATMANI: SÖZLEŞME BEYAZ LİSTESİ ---
 const ALLOWED_CONTRACTS = [
-    "0x4544d5674066f7f6f966144510006327e5b56345", // Ocean Market
-    "0x71C7656EC7ab88b098defB751B7401B5f6d8976F", // Smart Gate
+    ethers.utils.getAddress("0x4544d5674066f7f6f966144510006327e5b56345".toLowerCase()), // Ocean Market
+    ethers.utils.getAddress("0x71C7656EC7ab88b098defB751B7401B5f6d8976F".toLowerCase()), // Smart Gate
 ].map(addr => addr.toLowerCase());
 
 function validateContractAddress(address: string) {
     if (!address || address === ethers.constants.AddressZero) return;
     const lowerAddr = address.toLowerCase();
-    // Canlı konfigürasyon kontrolü: Statik listeye ek olarak .env'den gelen güncel adreslere izin ver
-    const isDynamicAllowed = lowerAddr === blockchainConfig.greenTokenAddress.toLowerCase() || 
-                             lowerAddr === blockchainConfig.routerAddress.toLowerCase() ||
-                             lowerAddr === blockchainConfig.contractAddress.toLowerCase();
+    // Canlı konfigürasyon kontrolü
+    const isDynamicAllowed = lowerAddr === (blockchainConfig.greenTokenAddress || "").toLowerCase() || 
+                             lowerAddr === (blockchainConfig.routerAddress || "").toLowerCase() ||
+                             lowerAddr === (blockchainConfig.contractAddress || "").toLowerCase();
 
     if (!ALLOWED_CONTRACTS.includes(lowerAddr) && !isDynamicAllowed) {
         pushLog('FINANCE', 'ERROR', `Kritik Güvenlik İhlali: Yetkisiz sözleşmeye erişim engellendi: ${address}`);
@@ -224,35 +224,38 @@ const serverState = {
 };
 
 /**
- * PROTOKOL_MARKET_MAKER: Cüzdan bakiyesini 5 saniyede bir izler ve otonom satış tetikler.
+ * --- OTONOM YAŞAM DÖNGÜSÜ (CORE ENGINE) ---
+ * Pazar Yapıcı (Market Maker) ve Yakıt İkmal (Gas Refiller) sistemini yönetir.
  */
 async function monitorAndLiquidate() {
   if (!serverState.autonomousMode || !blockchainConfig.greenTokenAddress || blockchainConfig.greenTokenAddress.includes('0x000')) return;
 
   try {
-    // 1. ADIM: YAKIT KONTROLÜ (Gas Refiller)
+    const walletAddr = mainBlockchain.getWalletAddress();
+    if (!walletAddr) return;
+
+    // 1. ADIM: YAKIT KONTROLÜ VE OTOMATİK İKMAL
     const gasCheck = await mainBlockchain.checkGasBalance('polygon');
-    const currentPol = parseFloat(gasCheck?.balance || "0");
+    const currentPol = parseFloat(gasCheck.balance);
     
-    if (blockchainConfig.gasRefillEnabled && currentPol < (blockchainConfig.gasRefillThreshold || 0.8)) {
-      pushLog('FINANCE', 'WARNING', `[AUTO_FUEL] Yakıt kritik: ${currentPol.toFixed(3)} POL. USDT rezervi taranıyor...`);
-      const usdtBalance = await mainBlockchain.getUSDTBalance(blockchainConfig.payoutWallet);
+    if (blockchainConfig.gasRefillEnabled && currentPol < (blockchainConfig.gasRefillThreshold || 0.5)) {
+      pushLog('FINANCE', 'WARNING', `[AUTO_FUEL] Yakıt kritik: ${currentPol.toFixed(3)} POL. Rezerv USDT kontrol ediliyor...`);
+      const usdtBalance = await mainBlockchain.getUSDTBalance();
       const refillUsdtAmount = blockchainConfig.gasRefillUsdtAmount || 5.0;
+      
       if (parseFloat(usdtBalance) >= refillUsdtAmount) {
         const refillResult = await mainBlockchain.refillGasFromUSDT(refillUsdtAmount.toString());
-        if (refillResult.success) pushLog('FINANCE', 'SUCCESS', `[GAS_OK] Yakıt takviyesi mühürlendi. Tx: ${refillResult.txHash.slice(0,10)}...`);
+        if (refillResult.success) pushLog('FINANCE', 'SUCCESS', `[GAS_OK] Yakıt takviyesi başarılı.`);
       } else {
-        pushLog('FINANCE', 'ERROR', `[FUEL_FAIL] Yetersiz USDT ($${usdtBalance}). Manuel POL takviyesi gerekebilir!`);
+        pushLog('FINANCE', 'ERROR', `[FUEL_FAIL] Rezerv USDT yetersiz ($${usdtBalance}). Manuel POL gerekebilir.`);
       }
     }
 
-    // 2. ADIM: SATIŞ KONTROLÜ (Market Maker)
-    const walletAddr = mainBlockchain.getWalletAddress();
+    // 2. ADIM: SATIŞ KONTROLÜ (PAZAR YAPICI)
     const balance = await mainBlockchain.getTokenBalance(blockchainConfig.greenTokenAddress, walletAddr);
     const balanceNum = parseFloat(balance);
 
-    // Minimum 100 token eşiği (Polygon gas maliyet verimliliği için optimize edildi)
-    if (balanceNum >= 100.0) { // Gas verimliliği için 100 token eşiği
+    if (balanceNum >= 100.0) { // Gas verimliliği için minimum 100 token eşiği
       pushLog('FINANCE', 'SUCCESS', `[PROFIT_TRIGGER] ${balanceNum.toFixed(2)} KECO tespit edildi. Otonom likidite takası başlıyor.`);
       const amountWei = ethers.utils.parseUnits(balance, 18).toString();
       const result = await mainBlockchain.performDEXSwap(amountWei);
@@ -261,12 +264,11 @@ async function monitorAndLiquidate() {
       }
     }
   } catch (err: any) {
-    // CALL_EXCEPTION veya Underflow hatalarının telemetriyi kirletmesini önle
     if (err.message.includes('call exception') || err.message.includes('underflow')) return;
-    pushLog('SYSTEM', 'ERROR', `[OTONOM_HATA] ${err.message.slice(0, 50)}...`);
+    pushLog('SYSTEM', 'ERROR', `[OTONOM_HATA] ${err.message.slice(0, 60)}...`);
   }
 }
-setInterval(monitorAndLiquidate, 15000); // Mainnet için en güvenli hız (15sn)
+setInterval(monitorAndLiquidate, 20000); // Mainnet için ideal hız: 20 saniye
 
 /**
  * --- GERÇEK FİNANSAL MUTABAKAT MOTORU ---
