@@ -110,18 +110,6 @@ export class WebCrawler {
       }
       const cleanUrl = parsedUrl.origin + parsedUrl.pathname + parsedUrl.search;
       
-      // Bellek Sızıntısı Koruması: Kuyruk boyutunu sınırla
-      if (this.queue.length >= 1000) {
-        return;
-      }
-
-      // RECLAMATION_BYPASS: Eğer mod DATA_RECLAMATION ise ve hedef .gov veya .org ise otomatik güvenli alan say
-      const isPublicResource = hostname.endsWith('.gov') || hostname.endsWith('.org');
-      if (blockchainConfig.crawlMode === 'DATA_RECLAMATION' && isPublicResource) {
-          this.emitLog('CRAWLER', 'INFO', `[AUTO_WHITELIST] Kamu verisi tespit edildi, hammadde sahasına eklendi: ${hostname}`);
-          // Whitelist kontrolünü geçmesine izin vermek için burada işlem yapılabilir
-      }
-
       if (!this.visitedUrls.has(cleanUrl) && !this.queue.includes(cleanUrl)) {
         this.queue.push(cleanUrl);
         // Performans Koruması: Alt düğümleri sadece konsola yaz, SSE kanalını boğma
