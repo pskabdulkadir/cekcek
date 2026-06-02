@@ -89,22 +89,20 @@ export class WebCrawler {
       
       // Beyaz liste kontrolü
       const hostname = parsedUrl.hostname;
-      const isPublicResource = hostname.endsWith('.gov') || hostname.endsWith('.org');
+      const isPublicDomain = hostname.endsWith('.gov') || hostname.endsWith('.org');
       const isWhitelisted = WHITELISTED_DOMAINS.some(domain => hostname === domain || hostname.endsWith(`.${domain}`));
       
       // DATA_RECLAMATION MODU: Eğer mod bu ise, Wikipedia dışındaki hammadde kaynaklarına da izin ver
       if (blockchainConfig.crawlMode === 'DATA_RECLAMATION') {
-          if (isPublicResource && !isWhitelisted) {
+          if (isPublicDomain && !isWhitelisted) {
               this.emitLog('CRAWLER', 'INFO', `[AUTO_WHITELIST] Kamu verisi hammadde sahasına eklendi: ${hostname}`);
           } else if (isWhitelisted) {
               this.emitLog('CRAWLER', 'INFO', `[RECLAMATION_TARGET] Hedef kaynak tespit edildi: ${hostname}`);
           }
       }
 
-      // Karar: Whitelist'te mi VEYA Kamu Kaynağı (RECLAMATION_BYPASS) mı?
-      const canProceed = isWhitelisted || (blockchainConfig.crawlMode === 'DATA_RECLAMATION' && isPublicResource);
-
-      if (!canProceed) {
+      // Karar: Whitelist'te mi VEYA Kamu Kaynağı mı?
+      if (!isWhitelisted && !(blockchainConfig.crawlMode === 'DATA_RECLAMATION' && isPublicDomain)) {
         this.emitLog('CRAWLER', 'WARNING', `[WHITELIST_BLOCKED] Düğüm atlandı (Beyaz listede değil): ${urlString}`);
         return;
       }

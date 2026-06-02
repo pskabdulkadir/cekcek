@@ -69,6 +69,6 @@ export const blockchainConfig = {
 
 export const dbConfig = {
     uri: mongoUri,
-    dbName: process.env.CRAWLER_DB_NAME || 'geridonüşüm', // Atlas bağlantınızla uyumlu
-    mainInventoryCollectionName: process.env.MAIN_INVENTORY_COLLECTION_NAME || 'main_inventory', // 12k kayıt buradaysa ismi eşleştirin
+    dbName: process.env.CRAWLER_DB_NAME || 'geridonizm', // Verinin bulunduğu asıl veritabanı
+    mainInventoryCollectionName: process.env.MAIN_INVENTORY_COLLECTION_NAME || 'main_inventory', // Koleksiyon adını .env'den eşleştirin
 };

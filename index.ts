@@ -147,6 +147,7 @@ app.post('/api/crawl/start', async (req, res) => {
                         if (!targetUrl || !targetHtml) {
                             throw new Error(`Eksik veri alanları (URL/HTML bulunamadı). ID: ${doc._id}`);
                         }
+                        emitLog('SYSTEM', 'INFO', `[RECLAMATION] İşleniyor: ${targetUrl.substring(0, 40)}...`);
 
                         await processPageReclamation(targetUrl, targetHtml);
                         await db.collection(dbConfig.mainInventoryCollectionName).updateOne(
@@ -155,7 +156,7 @@ app.post('/api/crawl/start', async (req, res) => {
                         );
                         totalProcessed++;
                     } catch (processingError: any) {
-                        emitLog('SYSTEM', 'ERROR', `[DATABASE_RECLAMATION_ERROR] Kayıt işlenirken hata oluştu (${doc._id}): ${processingError.message}`);
+                        emitLog('SYSTEM', 'ERROR', `[DATABASE_RECLAMATION_ERROR] Hata (${doc._id}): ${processingError.message || "Bilinmeyen hata"}`);
                         // Hatalı kayıtları 'failed' olarak işaretle, böylece daha sonra incelenebilir
                         await db.collection(dbConfig.mainInventoryCollectionName).updateOne(
                             { _id: doc._id },
@@ -200,7 +201,20 @@ async function init() {
     try {
         const client = await MongoClient.connect(dbConfig.uri);
         db = client.db(dbConfig.dbName);
-        console.log(`Connected to MongoDB: ${dbConfig.dbName}`);
+        
+        // Başlangıç Kontrolü: Yapılandırılan koleksiyonda kaç varlık var?
+        const inventoryCount = await db.collection(dbConfig.mainInventoryCollectionName)
+            .countDocuments({ $or: [{ status: 'unprocessed' }, { status: { $exists: false } }] });
+            
+        console.log(`[DB_CONNECT] MongoDB Atlas bağlantısı kuruldu: ${dbConfig.dbName}`);
+        console.log(`[DB_CONNECT] '${dbConfig.mainInventoryCollectionName}' koleksiyonunda işlenmeyi bekleyen ${inventoryCount} varlık bulunmaktadır.`);
+
+        if (inventoryCount === 0) {
+            const collections = await db.listCollections().toArray();
+            console.log(`[DB_WARNING] Mevcut koleksiyonlar: ${collections.map(c => c.name).join(', ')}`);
+            console.log(`[DB_ADVICE] Lütfen .env dosyasında MAIN_INVENTORY_COLLECTION_NAME değişkenini yukarıdaki isimlerden biriyle güncelleyin.`);
+        }
+
         app.listen(3001, () => console.log('Server running on port 3001'));
     } catch (err) {
         console.error('DB Connection Failed', err);
