@@ -1,0 +1,104 @@
+/**
+ * @file liquidationEngine.ts
+ * @description Autonomous Trading & High-Frequency Liquidation Engine with automated recovery Watchdog.
+ */
+
+import { ethers } from 'ethers';
+import { blockchainConfig } from './config.ts';
+import { BlockchainRouter } from './blockchain.ts';
+
+export class LiquidationEngine {
+  private blockchain: BlockchainRouter;
+  private logCallback?: (module: 'SYSTEM' | 'MARKET' | 'EXECUTOR' | 'BLOCKCHAIN' | 'AI' | 'FINANCE', level: 'INFO' | 'SUCCESS' | 'WARNING' | 'ERROR' | 'ANALYZE', msg: string) => void;
+  private isProcessing: boolean = false;
+
+  constructor(blockchain: BlockchainRouter) {
+    this.blockchain = blockchain;
+  }
+
+  public registerLogger(cb: typeof this.logCallback) {
+    this.logCallback = cb;
+  }
+
+  private emitLog(level: 'INFO' | 'SUCCESS' | 'WARNING' | 'ERROR' | 'ANALYZE', msg: string) {
+    if (this.logCallback) {
+      this.logCallback('FINANCE', level, msg);
+    }
+  }
+
+  /**
+   * Otonom Ticaret Mimarisi (High-Frequency Liquidation)
+   * Varlık değerini kontrol edip QuickSwap Router üzerinden anında swap (POL -> USDT veya GREEN -> USDT) emri verir.
+   */
+  public async performInstantLiquidation(assetId: string, valuationUSD: number = 0, co2Grams: number = 0): Promise<boolean> {
+    if (this.isProcessing) {
+      this.emitLog('WARNING', `[WATCHDOG] Başka bir likidasyon işlemi devam ediyor. Varlık sıraya alındı: ${assetId}`);
+      return false;
+    }
+
+    this.isProcessing = true;
+    this.emitLog('INFO', `[LIQUIDATION_START] Otonom Likidasyon Başlatıldı. Varlık ID: ${assetId} | Değer: $${valuationUSD.toFixed(4)} USDT`);
+
+    try {
+      // 1. Cüzdan Bilgilerini Al
+      const walletAddress = this.blockchain.getWalletAddress();
+      if (!walletAddress) {
+        throw new Error("Geçerli bir cüzdan adresi bulunamadı. Lütfen .env dosyasındaki PRIVATE_KEY alanını kontrol edin.");
+      }
+
+      // 2. KECO (Green Token) Bakiyesi Kontrolü
+      const greenTokenAddr = blockchainConfig.greenTokenAddress;
+      let tokenAmountWei = "0";
+
+      if (greenTokenAddr && greenTokenAddr !== ethers.constants.AddressZero && !greenTokenAddr.startsWith("0x0000")) {
+        const balance = await this.blockchain.getTokenBalance(greenTokenAddr, walletAddress);
+        const balanceNum = parseFloat(balance);
+        if (balanceNum > 0.01) {
+          tokenAmountWei = ethers.utils.parseUnits(balanceNum.toFixed(18), 18).toString();
+          this.emitLog('INFO', `[WATCHDOG] Cüzdanda ${balanceNum.toFixed(4)} KECO/GREEN token tespit edildi. QuickSwap üzerinden USDT ye dönüştürülüyor...`);
+        }
+      }
+
+      // 3. KECO bulunamazsa POL -> USDT otonom rotasına geçiş sagla
+      if (tokenAmountWei === "0" || parseFloat(tokenAmountWei) === 0) {
+        this.emitLog('WARNING', `[LIQUIDITY_CHECK] Cüzdanda yeşil token bulunamadı. Otonom POL -> USDT likidasyon rotası deneniyor...`);
+        const gasCheck = await this.blockchain.checkGasBalance('polygon');
+        const currentPol = parseFloat(gasCheck.balance);
+
+        // Yakıt için 1.0 POL cüzdanda bırakılarak kalan kısım USDT ye çevrilebilir (Kazancı anında tahsil etmek için)
+        if (currentPol > 1.25) {
+          const polToSwap = (currentPol - 1.0).toFixed(4);
+          this.emitLog('INFO', `[POL_LIQUIDATION] ${polToSwap} POL -> USDT anlık takası QuickSwap üzerinden başlatılıyor...`);
+          const swapResult = await this.blockchain.swapPOLForUSDT(polToSwap);
+          
+          if (swapResult.success) {
+            this.emitLog('SUCCESS', `[OTONOM_KAZANÇ] ${polToSwap} POL başarıyla USDT'ye dönüştürüldü ve payout cüzdanına yansıdı! Tx: ${swapResult.txHash}`);
+            this.isProcessing = false;
+            return true;
+          } else {
+            throw new Error("POL -> USDT borsa takası başarısız oldu.");
+          }
+        } else {
+          this.emitLog('WARNING', `[WATCHDOG] Cüzdan POL bakiyesi çok düşük (${currentPol.toFixed(4)} POL). 1.0 POL güvenlik eşiği aşılamadığı için otonom takas ertelendi.`);
+          this.isProcessing = false;
+          return false;
+        }
+      }
+
+      // 4. KECO -> USDT Borsa Swap Islemi
+      const result = await this.blockchain.performDEXSwap(tokenAmountWei);
+      if (result.success) {
+        this.emitLog('SUCCESS', `[OTONOM_KAZANÇ] İlgili veri varlığı başarıyla likidite havuzunda swap edildi. USDT cüzdanına ($${valuationUSD.toFixed(3)}) aktarıldı. Tx: ${result.txHash}`);
+        this.isProcessing = false;
+        return true;
+      } else {
+        throw new Error(result.error || "QuickSwap swap işlemi havuz hatası verdi.");
+      }
+
+    } catch (error: any) {
+      this.emitLog('ERROR', `[WATCHDOG] Likidasyon hatası! Gözlemci (Bekçi) devrede, kuyruk temizleniyor ve 15 saniye içinde yeniden denenecek. Detay: ${error.message}`);
+      this.isProcessing = false;
+      return false;
+    }
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "name": "İnternet Geri Kazanım Çekirdeği",
+  "description": "Dijital atıkları temizleyen, enerji tasarrufu hesaplayan ve kriptografik blokzincir kanıtları üreten otonom bir karanlık veri tarayıcısı ve kaynak kodu optimize edici.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
