@@ -51,8 +51,8 @@ const AQUARIUS_URL = blockchainConfig.oceanProtocolUrl;
 
 // --- GÜVENLİK KATMANI: SÖZLEŞME BEYAZ LİSTESİ ---
 const ALLOWED_CONTRACTS = [
-    ethers.utils.getAddress("0x4544d5674066f7f6f966144510006327e5b56345".toLowerCase()), // Ocean Market
-    ethers.utils.getAddress("0x71C7656EC7ab88b098defB751B7401B5f6d8976F".toLowerCase()), // Smart Gate
+    ethers.utils.getAddress("0x4544d5674066f7f6f966144510006327e5b56345".toLowerCase()), // Ocean Market (Örnek)
+    ethers.utils.getAddress("0x71C7656EC7ab88b098defB751B7401B5f6d8976F".toLowerCase()), // Smart Gate (Örnek)
 ].map(addr => addr.toLowerCase());
 
 function validateContractAddress(address: string) {
@@ -234,37 +234,38 @@ async function monitorAndLiquidate() {
     const walletAddr = mainBlockchain.getWalletAddress();
     if (!walletAddr) return;
 
-    // 1. ADIM: YAKIT KONTROLÜ VE OTOMATİK İKMAL
+    // 1. ADIM: OTOMATİK YAKIT İKMALİ (Gas Refiller)
     const gasCheck = await mainBlockchain.checkGasBalance('polygon');
     const currentPol = parseFloat(gasCheck.balance);
     
     if (blockchainConfig.gasRefillEnabled && currentPol < (blockchainConfig.gasRefillThreshold || 0.5)) {
-      pushLog('FINANCE', 'WARNING', `[AUTO_FUEL] Yakıt kritik: ${currentPol.toFixed(3)} POL. Rezerv USDT kontrol ediliyor...`);
+      pushLog('FINANCE', 'WARNING', `[AUTO_FUEL] Yakıt kritik: ${currentPol.toFixed(3)} POL. USDT takviyesi başlatılıyor...`);
       const usdtBalance = await mainBlockchain.getUSDTBalance();
       const refillUsdtAmount = blockchainConfig.gasRefillUsdtAmount || 5.0;
       
       if (parseFloat(usdtBalance) >= refillUsdtAmount) {
         const refillResult = await mainBlockchain.refillGasFromUSDT(refillUsdtAmount.toString());
-        if (refillResult.success) pushLog('FINANCE', 'SUCCESS', `[GAS_OK] Yakıt takviyesi başarılı.`);
+        if (refillResult.success) pushLog('FINANCE', 'SUCCESS', `[GAS_OK] Yakıt ikmali tamamlandı.`);
       } else {
-        pushLog('FINANCE', 'ERROR', `[FUEL_FAIL] Rezerv USDT yetersiz ($${usdtBalance}). Manuel POL gerekebilir.`);
+        pushLog('FINANCE', 'ERROR', `[FUEL_FAIL] Yetersiz USDT rezervi. Manuel müdahale gerekebilir.`);
       }
     }
 
-    // 2. ADIM: SATIŞ KONTROLÜ (PAZAR YAPICI)
+    // 2. ADIM: OTOMATİK SATIŞ (Market Maker)
     const balance = await mainBlockchain.getTokenBalance(blockchainConfig.greenTokenAddress, walletAddr);
     const balanceNum = parseFloat(balance);
 
-    if (balanceNum >= 100.0) { // Gas verimliliği için minimum 100 token eşiği
-      pushLog('FINANCE', 'SUCCESS', `[PROFIT_TRIGGER] ${balanceNum.toFixed(2)} KECO tespit edildi. Otonom likidite takası başlıyor.`);
+    if (balanceNum >= 100.0) { // Gas tasarrufu için eşik 100 token
+      pushLog('FINANCE', 'SUCCESS', `[PROFIT_TRIGGER] ${balanceNum.toFixed(2)} KECO tespit edildi. Nakde çevriliyor...`);
       const amountWei = ethers.utils.parseUnits(balance, 18).toString();
       const result = await mainBlockchain.performDEXSwap(amountWei);
       if (result.success) {
-        pushLog('FINANCE', 'SUCCESS', `[MONETIZED] Satış onaylandı. USDT rezervi güncellendi.`);
+        pushLog('FINANCE', 'SUCCESS', `[MONETIZED] Varlık USDT'ye dönüştürüldü.`);
       }
     }
   } catch (err: any) {
-    if (err.message.includes('call exception') || err.message.includes('underflow')) return;
+    // Log kirliliğini önle
+    if (err.message.includes('call exception') || err.message.includes('underflow') || err.message.includes('insufficient funds')) return;
     pushLog('SYSTEM', 'ERROR', `[OTONOM_HATA] ${err.message.slice(0, 60)}...`);
   }
 }
@@ -1144,7 +1145,7 @@ app.post("/api/market/sell-all", async (req, res) => {
     const limit = req.body.limit ? parseInt(req.body.limit) : undefined;
     pushLog('SYSTEM', 'INFO', `Manuel toplu satış tetiği alındı. Hedef limit: ${limit || 'Sınırsız'}`);
     sellAllReadyAssets(limit); // Arka planda çalıştır
-    res.json({ success: true, message: "Toplu satış işlemi başlatıldı." });
+    return res.json({ success: true, message: "Toplu satış işlemi başlatıldı." });
 });
 
 /**
@@ -1177,6 +1178,13 @@ app.post("/api/admin/command", async (req, res) => {
     pushLog('SYSTEM', 'SUCCESS', "PROTOKOL_AKTIF: Otonom mod (Batch) devreye alındı. Gas ücreti alıcıya devredildi.");
     return res.json({ success: true, message: "Autonomous mode activated." });
   }
+
+  if (command === "PAUSE_SCRAPER") {
+    serverState.isCrawling = false;
+    mainCrawler.stop();
+    pushLog('SYSTEM', 'WARNING', "Gaz tasarrufu için tarayıcı durduruldu.");
+    return res.json({ success: true });
+  }
   
   if (command.startsWith("RUN_BULK_SELL")) {
     const limit = parseInt(command.split(" ")[1]) || 500;
@@ -1187,74 +1195,22 @@ app.post("/api/admin/command", async (req, res) => {
 
   if (command.startsWith("FORCE_DEX_SETTLE")) {
     const limit = parseInt(command.split(" ")[1]) || 100;
-    pushLog('SYSTEM', 'WARNING', `[CRITICAL_EXECUTION] DEX zorlamalı satış başlatılıyor. Hedef: ${limit} varlık.`);
+    pushLog('SYSTEM', 'WARNING', `[CRITICAL_EXECUTION] DEX zorlamalı satış başlatılıyor.`);
     
-    // Arka planda asenkron olarak yürüt
     (async () => {
         const items = await ReadyToSellModel.find({ isSold: false, isListedOnChain: true }).limit(limit);
-        if (items.length === 0) {
-            pushLog('MARKET', 'INFO', "Uzlaşma için mühürlü varlık bulunamadı.");
-            return;
-        }
         for (const item of items) {
             await executeProxySettlement(item.id, item.accessPriceUSD || 0, item.co2AnalysisGrams || 0);
-            await new Promise(r => setTimeout(r, 2000)); // Nonce koruması
+            await new Promise(r => setTimeout(r, 2000));
         }
     })();
     
-    return res.json({ success: true, message: "DEX settlement process pushed to background." });
-  }
-
-  if (command.startsWith("GENERATE_GREEN_TOKEN")) {
-    const parts = command.split(" ");
-    const name = parts[1] || "KADIR_ECO";
-    const symbol = parts[2] || "KECO";
-    
-    (async () => {
-        const result = await mainBlockchain.deployGreenToken(name, symbol);
-        if (result.success) {
-            pushLog('SYSTEM', 'SUCCESS', `!!! KRİTİK !!! Yeni Token Adresiniz: ${result.address}. Lütfen bu adresi .env dosyanızdaki GREEN_TOKEN_ADDRESS kısmına yapıştırın.`);
-        }
-    })();
-    return res.json({ success: true, message: "Token deployment started." });
-  }
-
-  if (command === "PAUSE_SCRAPER") {
-    serverState.isCrawling = false;
-    mainCrawler.stop();
-    pushLog('SYSTEM', 'WARNING', "Gaz tasarrufu için tarayıcı durduruldu.");
-    return res.json({ success: true });
+    return res.json({ success: true, message: "DEX settlement task initiated." });
   }
 
   if (command === "INIT_PROXY_SETTLE") {
-    pushLog('SYSTEM', 'INFO', "Manuel Proxy Settlement tetiklendi.");
-    // Bu komut genellikle tekil hatalarda veya debug için kullanılır
+    pushLog('SYSTEM', 'INFO', "Manuel Proxy Settlement tetiklendi."); // Bu komut genellikle tekil hatalarda veya debug için kullanılır
     return res.json({ success: true });
-  }
-
-  if (command.startsWith("INIT_DEX_LIQUIDITY")) {
-    const parts = command.split(" ");
-    const polAmount = parts[1] || "5";
-    const tokenAmount = parts[2] || "10000000";
-    
-    if (process.env.LIQUIDITY_INIT_ENABLED === "false") {
-        pushLog('SYSTEM', 'WARNING', "[LIQUIDITY_SKIPPED] Havuz kurulumu .env üzerinden devre dışı bırakıldı.");
-        return res.json({ success: true, message: "Liquidity init skipped by config." });
-    }
-
-    (async () => {
-        pushLog('SYSTEM', 'INFO', `[MARKET_INIT] Likidite havuzu kurulumu asenkron başlatıldı...`);
-        const result = await mainBlockchain.initializeLiquidityPool(polAmount, tokenAmount);
-        if (result.success) {
-            pushLog('SYSTEM', 'SUCCESS', `[MARKET_READY] Piyasa yapıcı kurulumu tamamlandı.`);
-        } else {
-            pushLog('SYSTEM', 'ERROR', `[MARKET_FAILED] Durum: ${result.error}`);
-            if (result.error?.includes("0.0 var")) {
-                pushLog('SYSTEM', 'WARNING', "TAVSİYE: GREEN_TOKEN_ADDRESS geçersiz veya bakiye yok. Lütfen yeni bir token üretin.");
-            }
-        }
-    })();
-    return res.json({ success: true, message: "Liquidity initialization process started." });
   }
 
   if (command.startsWith("SET_THRESHOLD")) {
@@ -1294,7 +1250,7 @@ app.get("/api/stats", async (req, res) => {
       pushLog('SYSTEM', 'WARNING', 'MongoDB bağlantısı aktif değil. İstatistikler veritabanından alınamadı.');
     }
 
-    res.json({
+    return res.json({
       pagesProcessed: serverState.pagesProcessed,
       originalSizeTotal: serverState.originalSizeTotal,
       optimizedSizeTotal: serverState.optimizedSizeTotal,
@@ -1342,7 +1298,7 @@ app.get("/api/wallet-balance", async (req, res) => {
     const maticPrice = 0.42; // Güncel yaklaşık fiyat
     const balanceUSD = (parseFloat(balance) * maticPrice).toFixed(2);
 
-    res.json({
+    return res.json({
       address: walletAddress,
       balanceMATIC: parseFloat(balance).toFixed(6),
       balanceUSD: balanceUSD,
@@ -1372,7 +1328,7 @@ app.post("/api/payout-config", (req, res) => {
   }
   
   pushLog('SYSTEM', 'SUCCESS', `Cüzdan ayarları güncellendi. Hedef: ${serverState.payoutWalletAddress} | Sıfır-Gas Satış Modu: ${serverState.zeroGasModeActive ? "AKTİF" : "PASİF"}`);
-  res.json({ success: true, payoutWalletAddress: serverState.payoutWalletAddress, zeroGasModeActive: serverState.zeroGasModeActive });
+  return res.json({ success: true, payoutWalletAddress: serverState.payoutWalletAddress, zeroGasModeActive: serverState.zeroGasModeActive });
 });
 
 /**
@@ -1400,7 +1356,7 @@ app.post("/api/market/confirm-sale", async (req, res) => {
     }
     
     pushLog('BLOCKCHAIN', 'SUCCESS', `[ON_CHAIN_SALE] Varlık ${itemId} başarıyla satıldı! Tx: ${txHash}`);
-    res.json({ success: true });
+    return res.json({ success: true });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -1446,7 +1402,7 @@ app.post("/api/crawl/start", (req, res) => {
   serverState.isCrawling = true;
   pushLog('SYSTEM', 'INFO', 'Otonom Ticaret Motoru: MARKET_LISTENER başlatıldı.');
 
-  // Madencilik ve Geri Dönüşüm çarklarını döndür
+  // Madencilik ve Geri Dönüşüm çarklarını döndür (Sonsuz döngü)
   runRecyclingMining();
 
   res.json({ success: true, message: "Otonom tarama iş parçacıkları başlatıldı." });
@@ -1463,7 +1419,7 @@ app.post("/api/crawl/stop", (req, res) => {
   serverState.isCrawling = false;
   mainCrawler.stop(); // Ensure the internal crawler loop is signaled to break immediately
   pushLog('SYSTEM', 'WARNING', 'Durdurma sinyali: Otonom emirler donduruluyor.');
-  
+
   res.json({ success: true, message: "Bağımsız tarama döngüsü durduruldu." });
 });
 
@@ -1522,7 +1478,7 @@ app.post("/api/optimize-url", async (req, res) => {
     pushLog('EXECUTOR', 'SUCCESS', `[ASSET_CREATED] ID: ${generatedId} | QUALITY: ${qualityScore} | VALUATION: ${valuation} USDT`);
 
     res.json({
-      url,
+      url: url,
       originalSize: originalBytes,
       optimizedSize: optimizedBytes,
       bytesSaved: savings.bytesSaved,
@@ -1554,7 +1510,7 @@ async function startServer() {
       const uri = dbConfig.uri;
       if (!uri) throw new Error("MONGO_URI tanımlanmamış!");
       
-      console.log(`[DB] MongoDB Atlas'a bağlanılıyor: ${dbConfig.dbName}...`);
+      pushLog('SYSTEM', 'INFO', `[DB] MongoDB Atlas'a bağlanılıyor: ${dbConfig.dbName}...`);
       await mongoose.connect(uri, { 
         dbName: dbConfig.dbName,
         connectTimeoutMS: 10000, // 10 saniye içinde bağlanamazsa hata ver
@@ -1576,9 +1532,9 @@ async function startServer() {
       const derivedSigner = mainBlockchain.getWalletAddress();
       const configPayout = web3Config.payoutWallet;
       
-      console.log(`[IDENTITY] İşlem İmzalayıcı (Signer): ${derivedSigner}`);
-      console.log(`[IDENTITY] Ödeme Alıcı (Recipient): ${configPayout}`);
-      console.log(`[IDENTITY] Güncel Bakiye: ${initialBalance.balance} POL`);
+      pushLog('SYSTEM', 'INFO', `[IDENTITY] İşlem İmzalayıcı (Signer): ${derivedSigner}`);
+      pushLog('SYSTEM', 'INFO', `[IDENTITY] Ödeme Alıcı (Recipient): ${configPayout}`);
+      pushLog('SYSTEM', 'INFO', `[IDENTITY] Güncel Bakiye: ${initialBalance.balance} POL`);
       
       pushLog('BLOCKCHAIN', 'INFO', `Sistem Kimliği: İmzalayıcı=${derivedSigner.slice(0,10)}... | Bakiye=${initialBalance.balance} POL`);
 
@@ -1590,7 +1546,7 @@ async function startServer() {
       // Motoru başlat
       startAutomatedTrading();
     } catch (error: any) {
-      pushLog('SYSTEM', 'ERROR', `Gecikmeli Bağlantı Hatası: ${error.message}`);
+      pushLog('SYSTEM', 'ERROR', `[CRITICAL] Arka plan bağlantı hatası: ${error.message}`);
       console.error("[CRITICAL] Background initialization failed:", error.message);
     }
   };
@@ -1606,7 +1562,7 @@ async function startServer() {
         appType: "spa",
       });
       app.use(vite.middlewares);
-      console.log("[SERVER] Vite middleware initialized in Development mode.");
+      pushLog('SYSTEM', 'INFO', "[SERVER] Vite middleware initialized in Development mode.");
     } else {
       const distPath = path.join(process.cwd(), "dist");
       app.use(express.static(distPath));
@@ -1615,7 +1571,7 @@ async function startServer() {
         if (req.path.startsWith('/api')) return next();
         res.sendFile(path.join(distPath, "index.html"));
       });
-      console.log("[SERVER] Serving pre-compiled production templates from /dist folder.");
+      pushLog('SYSTEM', 'INFO', "[SERVER] Serving pre-compiled production templates from /dist folder.");
     }
 
     // Global error middleware to prevent crash on async route errors
@@ -1627,12 +1583,12 @@ async function startServer() {
     });
 
     app.listen(Number(PORT), "0.0.0.0", () => {
-      console.log(`=========================================`);
-      console.log(`[CORE] SYSTEM RUNNING ON PORT: ${PORT}`);
-      console.log(`=========================================`);
+      pushLog('SYSTEM', 'INFO', `=========================================`);
+      pushLog('SYSTEM', 'INFO', `[CORE] SYSTEM RUNNING ON PORT: ${PORT}`);
+      pushLog('SYSTEM', 'INFO', `=========================================`);
     });
   } catch (err: any) {
-    console.error("[CRITICAL] Server failed to start:", err.message);
+    pushLog('SYSTEM', 'ERROR', `[CRITICAL] Sunucu başlatılamadı: ${err.message}`);
     process.exit(1);
   }
 
@@ -1647,8 +1603,8 @@ async function startServer() {
       offset: `${serverState.totalCo2SavedGrams.toFixed(4)} g`
     };
 
-    pushLog('SYSTEM', 'INFO', `[KEEP_ALIVE] ${timeString} - Heartbeat OK.`);
-    pushLog('MARKET', 'INFO', `[CRAWLER_REPORT] Aktif Düğüm: ${report.nodes} | Geri Kazanım: ${report.reclaimed} | Karbon Offset: ${report.offset}`);
+    pushLog('SYSTEM', 'INFO', `[KEEP_ALIVE] ${timeString} - Otonom Sistem Canlı.`);
+    pushLog('MARKET', 'INFO', `[CRAWLER_REPORT] Düğüm: ${report.nodes} | CO2: ${report.offset}`);
   }, 5 * 60 * 1000); // 5 minutes (300,000 ms)
 }
 

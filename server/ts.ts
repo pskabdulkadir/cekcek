@@ -1089,26 +1089,26 @@ app.post("/api/admin/command", async (req, res) => {
     const name = parts[1] || "KADIR_ECO";
     const symbol = parts[2] || "KECO";
 
-    const currentAddr = blockchainConfig.greenTokenAddress;
-    const isGhost = currentAddr && currentAddr.startsWith('0x9d8D');
-    const isDefault = !currentAddr || currentAddr.includes('0x000');
+    const currentAddr = blockchainConfig.greenTokenAddress; // Mevcut token adresini al
+    const isGhost = currentAddr && currentAddr.startsWith('0x9d8D'); // Hayalet adres kontrolü (örnek)
+    const isDefault = !currentAddr || currentAddr.includes('0x000'); // Varsayılan boş adres kontrolü
 
-    if (!isDefault && !isGhost) {
-        pushLog('SYSTEM', 'WARNING', `[TOKEN_GENESIS_SKIPPED] Geçerli bir kontrat zaten aktif: ${currentAddr}. Adresi değiştirmek için Render panelinden silin.`);
-        return res.json({ success: true, message: "Active contract found." });
+    if (!isDefault && !isGhost) { // Eğer geçerli bir adres varsa ve hayalet değilse
+        pushLog('SYSTEM', 'WARNING', `[TOKEN_GENESIS_SKIPPED] Aktif bir token adresi mevcut: ${currentAddr}. Yeni üretim iptal edildi.`);
+        return res.json({ success: true, message: "Active token contract already exists." });
     }
 
-    if (isGhost) {
-        pushLog('SYSTEM', 'INFO', `[GHOST_CLEANUP] Eski hayalet adres (${currentAddr}) temizleniyor, üzerine yazılacak...`);
+    if (isGhost) { // Hayalet adres varsa temizle
+        pushLog('SYSTEM', 'INFO', `[GHOST_CLEANUP] Eski hayalet adres (${currentAddr}) temizleniyor...`);
     }
     
-    (async () => {
-        const result = await mainBlockchain.deployGreenToken(name, symbol);
-        if (result.success) {
-            pushLog('SYSTEM', 'SUCCESS', `!!! KRİTİK !!! Yeni Token Adresiniz: ${result.address}. Lütfen bu adresi .env dosyanızdaki GREEN_TOKEN_ADDRESS kısmına yapıştırın.`);
-        }
-    })();
-    return res.json({ success: true, message: "Token deployment started." });
+    const result = await mainBlockchain.deployGreenToken(name, symbol); // deployGreenToken'ı await et
+    if (result.success) {
+        pushLog('SYSTEM', 'SUCCESS', `!!! KRİTİK !!! Yeni Token Adresiniz: ${result.address}. Lütfen bu adresi Render Dashboard'a GREEN_TOKEN_ADDRESS olarak ekleyin.`);
+    } else {
+        pushLog('SYSTEM', 'ERROR', `[TOKEN_GENESIS_FAILED] Token üretimi başarısız oldu: ${result.error}`);
+    }
+    return res.json({ success: result.success, message: result.success ? "Token deployment started." : "Token deployment failed." });
   }
 
   if (command.startsWith("INIT_DEX_LIQUIDITY")) {
@@ -1140,18 +1140,21 @@ app.post("/api/admin/command", async (req, res) => {
     pushLog('SYSTEM', 'WARNING', `[CRITICAL_EXECUTION] DEX zorlamalı satış başlatılıyor. Hedef: ${limit} varlık.`);
     
     (async () => {
-        const items = await ReadyToSellModel.find({ isSold: false, isListedOnChain: true }).limit(limit);
+        const items = await ReadyToSellModel.find({ isSold: false, isListedOnChain: true }).limit(limit); // await et
         if (items.length === 0) {
             pushLog('MARKET', 'INFO', "Uzlaşma için mühürlü varlık bulunamadı.");
-            return;
+            return res.json({ success: true, message: "No sealed assets found for settlement." });
         }
         for (const item of items) {
-            await executeProxySettlement(item.id, item.accessPriceUSD || 0, item.co2AnalysisGrams || 0);
+            await executeProxySettlement(item.id, item.accessPriceUSD || 0, item.co2AnalysisGrams || 0); // await et
             await new Promise(r => setTimeout(r, 2000)); // Nonce koruması
         }
-    })();
-    
-    return res.json({ success: true, message: "DEX settlement process pushed to background." });
+        return res.json({ success: true, message: "DEX settlement process completed." });
+    })().catch(err => {
+        pushLog('SYSTEM', 'ERROR', `FORCE_DEX_SETTLE hatası: ${err.message}`);
+        return res.status(500).json({ success: false, message: `DEX settlement failed: ${err.message}` });
+    });
+    return res.json({ success: true, message: "DEX settlement process initiated." }); // Asenkron başlatıldığı için hemen yanıt ver
   }
 
   if (command.startsWith("EXECUTE_GENESIS_MINT")) {
@@ -1159,13 +1162,13 @@ app.post("/api/admin/command", async (req, res) => {
     const toAddress = parts[parts.indexOf("--to") + 1] || mainBlockchain.getWalletAddress();
     const amount = parts[parts.indexOf("--amount") + 1] || "1000000000";
     
-    mainBlockchain.mintToken(blockchainConfig.greenTokenAddress, toAddress, amount)
-      .then(result => {
-        if (result.success) pushLog('SYSTEM', 'SUCCESS', `[MINT_OK] Token basildi: ${result.txHash}`);
-        else pushLog('SYSTEM', 'ERROR', `[MINT_FAILED] Hata: ${result.error}`);
-      });
-
-    return res.json({ success: true, message: "Mint process started." });
+    const result = await mainBlockchain.mintToken(blockchainConfig.greenTokenAddress, toAddress, amount); // mintToken'ı await et
+    if (result.success) {
+        pushLog('SYSTEM', 'SUCCESS', `[MINT_OK] Token basildi: ${result.txHash}`);
+    } else {
+        pushLog('SYSTEM', 'ERROR', `[MINT_FAILED] Hata: ${result.error}`);
+    }
+    return res.json({ success: result.success, message: result.success ? "Mint process started." : "Mint process failed." });
   }
 
   if (command === "SET_AUTONOMOUS_DEPLOYMENT_TRUE --gas-payer=buyer --mode=batch") {
