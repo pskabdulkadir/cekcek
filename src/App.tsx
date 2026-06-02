@@ -118,14 +118,77 @@ export default function App() {
     payoutAddress?: string;
     balanceMATIC: string;
     balanceUSD: string;
+    balanceUSDT?: string;
     isLow: boolean;
     payoutBalanceMATIC?: string;
     payoutBalanceUSD?: string;
+    payoutBalanceUSDT?: string;
     payoutIsLow?: boolean;
     error?: string;
     timestamp: string;
   } | null>(null);
   const [isLoadingBalance, setIsLoadingBalance] = useState<boolean>(false);
+  
+  const [isRefillingGas, setIsRefillingGas] = useState<boolean>(false);
+  const [refillAmount, setRefillAmount] = useState<string>("5");
+  const [refillSuccessMsg, setRefillSuccessMsg] = useState<string>("");
+  const [refillErrorMsg, setRefillErrorMsg] = useState<string>("");
+
+  const handleManualGasRefill = async (amount: string) => {
+    setIsRefillingGas(true);
+    setRefillSuccessMsg("");
+    setRefillErrorMsg("");
+    try {
+      const res = await fetch("/api/finance/refill-gas", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ amount: parseFloat(amount) })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setRefillSuccessMsg(`Gaz takviyesi başarıyla gerçekleştirildi.`);
+        fetchWalletBalance();
+        setTimeout(() => setRefillSuccessMsg(""), 5000);
+      } else {
+        setRefillErrorMsg(data.error || "DEX takası başarısız oldu.");
+      }
+    } catch (err: any) {
+      setRefillErrorMsg(err.message || "Bağlantı hatası oluştu.");
+    } finally {
+      setIsRefillingGas(false);
+    }
+  };
+
+  const [isWithdrawingUsdt, setIsWithdrawingUsdt] = useState<boolean>(false);
+  const [withdrawUsdtAmount, setWithdrawUsdtAmount] = useState<string>("");
+  const [withdrawSuccessMsg, setWithdrawSuccessMsg] = useState<string>("");
+  const [withdrawErrorMsg, setWithdrawErrorMsg] = useState<string>("");
+
+  const handleManualRevenueWithdrawal = async (amount: string, assetType: 'USDT' | 'POL' = 'USDT') => {
+    setIsWithdrawingUsdt(true);
+    setWithdrawSuccessMsg("");
+    setWithdrawErrorMsg("");
+    try {
+      const res = await fetch("/api/finance/withdraw-revenue", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ amount: amount ? parseFloat(amount) : undefined, assetType })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setWithdrawSuccessMsg(`✓ ${amount || "Tüm"} ${assetType} birikimi Payout cüzdanınıza başarıyla aktarıldı.`);
+        setWithdrawUsdtAmount("");
+        fetchWalletBalance();
+        setTimeout(() => setWithdrawSuccessMsg(""), 8000);
+      } else {
+        setWithdrawErrorMsg(data.error || "Aktarım veya transfer adımı başarısız oldu.");
+      }
+    } catch (err: any) {
+      setWithdrawErrorMsg(err.message || "Bağlantı hatası oluştu.");
+    } finally {
+      setIsWithdrawingUsdt(false);
+    }
+  };
 
   const totalEarnings = stats.totalServiceFeesCollected || 0; // totalEarnings -> totalServiceFeesCollected
 
@@ -1512,7 +1575,7 @@ export default function App() {
                               </span>
                             </div>
                             
-                            <div className="flex justify-between items-end mt-3">
+                             <div className="flex justify-between items-end mt-3 border-b border-slate-900/40 pb-3">
                               <span className="text-[9px] font-mono text-slate-400 select-all">
                                 {walletBalance.address ? `${walletBalance.address.slice(0, 8)}...${walletBalance.address.slice(-6)}` : "Tanımsız"}
                               </span>
@@ -1520,11 +1583,45 @@ export default function App() {
                                 <span className="text-sm font-bold text-purple-400 font-mono block">
                                   {walletBalance.balanceMATIC} POL
                                 </span>
-                                <span className="text-[9px] text-slate-500 font-mono block">
+                                <span className="text-[9px] text-slate-500 font-mono block mt-0.5">
                                   ≈ ${walletBalance.balanceUSD} USD
+                                </span>
+                                <span className="text-xs font-bold text-emerald-400 font-mono block mt-1">
+                                  {walletBalance.balanceUSDT || "0.00"} USDT
                                 </span>
                               </div>
                             </div>
+
+                            {/* Manuel Gas Takviyesi (USDT -> POL Swap) Seçeneği */}
+                            {parseFloat(walletBalance.balanceUSDT || "0") > 0 && (
+                              <div className="mt-3 bg-purple-950/20 p-3 rounded-xl border border-purple-500/10">
+                                <span className="text-[9px] font-bold text-purple-300 font-mono block mb-2 uppercase tracking-wide">
+                                  ⛽ USDT BAkİYESİNDEN GAS SATIN AL
+                                </span>
+                                <div className="flex gap-2">
+                                  <input
+                                    type="number"
+                                    value={refillAmount}
+                                    onChange={(e) => setRefillAmount(e.target.value)}
+                                    placeholder="USDT"
+                                    className="bg-slate-950 text-xs font-mono px-2 py-1 rounded-lg border border-purple-500/20 text-purple-300 w-24 focus:outline-none focus:border-purple-500/50"
+                                  />
+                                  <button
+                                    onClick={() => handleManualGasRefill(refillAmount)}
+                                    disabled={isRefillingGas || !refillAmount || parseFloat(refillAmount) <= 0}
+                                    className="bg-purple-600 hover:bg-purple-500 text-white text-[9px] font-bold uppercase py-1 px-3 rounded-lg transition-all disabled:opacity-50"
+                                  >
+                                    {isRefillingGas ? "ALINIYOR..." : "POL AL (USDT'den)"}
+                                  </button>
+                                </div>
+                                {refillSuccessMsg && (
+                                  <p className="text-[9px] text-emerald-400 font-sans mt-2">✓ {refillSuccessMsg}</p>
+                                )}
+                                {refillErrorMsg && (
+                                  <p className="text-[9px] text-red-400 font-sans mt-2">❌ {refillErrorMsg}</p>
+                                )}
+                              </div>
+                            )}
 
                             {walletBalance.isLow && (
                               <div className="mt-2.5 pt-2 border-t border-purple-950/50 text-[9px] text-amber-400/90 leading-relaxed font-sans">
@@ -1551,17 +1648,82 @@ export default function App() {
                                 {walletBalance.payoutAddress ? `${walletBalance.payoutAddress.slice(0, 8)}...${walletBalance.payoutAddress.slice(-6)}` : "Tanımsız"}
                               </span>
                               <div className="text-right">
-                                <span className="text-sm font-bold text-emerald-400 font-mono block">
+                                <span className="text-sm font-bold text-slate-300 font-mono block">
                                   {walletBalance.payoutBalanceMATIC || "0.00"} POL
                                 </span>
-                                <span className="text-[9px] text-slate-500 font-mono block">
+                                <span className="text-[9px] text-slate-500 font-mono block mt-0.5">
                                   ≈ ${walletBalance.payoutBalanceUSD || "0.00"} USD
+                                </span>
+                                <span className="text-xs font-bold text-emerald-400 font-mono block mt-1">
+                                  {walletBalance.payoutBalanceUSDT || "0.00"} USDT
                                 </span>
                               </div>
                             </div>
 
                             <div className="mt-2.5 pt-2 border-t border-slate-800/80 text-[9px] text-slate-400 leading-relaxed font-sans">
                               ℹ️ Akıllı kontrat üzerindeki tüm otonom satış gelirleri (USDT/POL) anında ve kesintisiz olarak doğrudan bu cüzdana yönlendirilir.
+                            </div>
+                          </div>
+
+                          {/* 3. Manuel Gelir Çekimi */}
+                          <div className="bg-slate-950/60 rounded-xl p-4 border border-emerald-500/20">
+                            <div className="flex justify-between items-start mb-2">
+                              <div>
+                                <span className="text-[10px] font-bold text-cyan-400 font-mono block">
+                                  💸 MANUEL KAZANÇ TRANSFERİ / PAYOUT
+                                </span>
+                                <span className="text-[9px] text-slate-500 font-mono block mt-0.5">
+                                  Bot operasyon cüzdanındaki birikmiş USDT/POL kazançlarınızı payout adresinize aktarın
+                                </span>
+                              </div>
+                            </div>
+
+                            <div className="mt-3 space-y-3">
+                              <div className="flex items-center gap-2 justify-between border-b border-slate-900 pb-2">
+                                <span className="text-[10px] text-slate-400 font-mono">Mevcut Çekilebilir USDT:</span>
+                                <span className="text-xs font-bold font-mono text-emerald-400">{walletBalance.balanceUSDT || "0.00"} USDT</span>
+                              </div>
+
+                              <div className="bg-slate-900/40 p-2.5 rounded-lg border border-slate-800/60 space-y-2">
+                                <span className="text-[9px] font-bold text-slate-300 font-mono block uppercase">USD AKTARIMI TETİKLE</span>
+                                <div className="flex gap-2">
+                                  <input
+                                    type="text"
+                                    value={withdrawUsdtAmount}
+                                    onChange={(e) => setWithdrawUsdtAmount(e.target.value)}
+                                    placeholder={`Miktar girin (Tümü: ${walletBalance.balanceUSDT || "0.00"})`}
+                                    className="bg-slate-950 text-[10px] font-mono px-2 py-1.5 rounded-lg border border-slate-800 text-slate-300 w-full focus:outline-none focus:border-emerald-500/40"
+                                  />
+                                  <button
+                                    onClick={() => handleManualRevenueWithdrawal(withdrawUsdtAmount, 'USDT')}
+                                    disabled={isWithdrawingUsdt}
+                                    className="bg-emerald-600 hover:bg-emerald-500 text-slate-950 text-[10px] font-bold uppercase py-1 px-3.5 rounded-lg transition-all disabled:opacity-50 shrink-0 cursor-pointer font-mono"
+                                  >
+                                    {isWithdrawingUsdt ? "AKTARILIYOR..." : "USDT AKTAR"}
+                                  </button>
+                                </div>
+                              </div>
+
+                              <div className="bg-slate-900/40 p-2.5 rounded-lg border border-slate-800/60 flex items-center justify-between">
+                                <div className="text-left">
+                                  <span className="text-[9px] font-bold text-slate-300 font-mono block uppercase">POL (GAS) AKTARIMI</span>
+                                  <span className="text-[8px] text-slate-500 font-mono block">(0.1 POL güvenlik gazı ayrılır)</span>
+                                </div>
+                                <button
+                                  onClick={() => handleManualRevenueWithdrawal("", 'POL')}
+                                  disabled={isWithdrawingUsdt || parseFloat(walletBalance.balanceMATIC || "0") <= 0.15}
+                                  className="bg-purple-600 hover:bg-purple-500 text-white text-[10px] font-bold uppercase py-1.5 px-3.5 rounded-lg transition-all disabled:opacity-30 cursor-pointer font-mono"
+                                >
+                                  POL'LERİ ÇEK
+                                </button>
+                              </div>
+
+                              {withdrawSuccessMsg && (
+                                <p className="text-[10px] text-emerald-400 bg-emerald-950/20 p-2 rounded-lg border border-emerald-500/10 font-sans">✓ {withdrawSuccessMsg}</p>
+                              )}
+                              {withdrawErrorMsg && (
+                                <p className="text-[10px] text-red-400 bg-red-950/20 p-2 rounded-lg border border-red-500/10 font-sans">❌ {withdrawErrorMsg}</p>
+                              )}
                             </div>
                           </div>
 

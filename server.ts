@@ -1626,9 +1626,11 @@ app.get("/api/wallet-balance", async (req, res) => {
 
     // Get bot (gas/operations) wallet balance
     const botBalRes = botAddress ? await mainBlockchain.checkGasBalance('polygon', botAddress) : { balance: "0.000000", isLow: true };
+    const botUSDT = botAddress ? await mainBlockchain.getUSDTBalance(botAddress) : "0.00";
     
     // Get payout (revenue distribution) wallet balance
     const payoutBalRes = payoutAddress ? await mainBlockchain.checkGasBalance('polygon', payoutAddress) : { balance: "0.000000", isLow: true };
+    const payoutUSDT = payoutAddress ? await mainBlockchain.getUSDTBalance(payoutAddress) : "0.00";
     
     const maticPrice = 0.42; // Güncel yaklaşık fiyat
     const balanceUSD = (parseFloat(botBalRes.balance) * maticPrice).toFixed(2);
@@ -1639,9 +1641,11 @@ app.get("/api/wallet-balance", async (req, res) => {
       payoutAddress: payoutAddress,
       balanceMATIC: parseFloat(botBalRes.balance).toFixed(6),
       balanceUSD: balanceUSD,
+      balanceUSDT: parseFloat(botUSDT).toFixed(2),
       isLow: botBalRes.isLow,
       payoutBalanceMATIC: parseFloat(payoutBalRes.balance).toFixed(6),
       payoutBalanceUSD: payoutBalanceUSD,
+      payoutBalanceUSDT: parseFloat(payoutUSDT).toFixed(2),
       payoutIsLow: payoutBalRes.isLow,
       timestamp: new Date().toISOString()
     });
@@ -1662,6 +1666,8 @@ app.post("/api/payout-config", (req, res) => {
   const { payoutWalletAddress, zeroGasModeActive } = req.body;
   if (typeof payoutWalletAddress === "string") {
     serverState.payoutWalletAddress = payoutWalletAddress.trim();
+    // GÜVENLİK SYNC: Blokzincir katmanındaki konfigürasyonu da eşitle
+    blockchainConfig.payoutWallet = serverState.payoutWalletAddress;
   }
   if (typeof zeroGasModeActive === "boolean") {
     serverState.zeroGasModeActive = zeroGasModeActive;
@@ -1669,6 +1675,109 @@ app.post("/api/payout-config", (req, res) => {
   
   pushLog('SYSTEM', 'SUCCESS', `Cüzdan ayarları güncellendi. Hedef: ${serverState.payoutWalletAddress} | Sıfır-Gas Satış Modu: ${serverState.zeroGasModeActive ? "AKTİF" : "PASİF"}`);
   return res.json({ success: true, payoutWalletAddress: serverState.payoutWalletAddress, zeroGasModeActive: serverState.zeroGasModeActive });
+});
+
+/**
+ * Manually withdraw operational/data sales revenue (USDT or POL) from bot wallet to payout wallet
+ */
+app.post("/api/finance/withdraw-revenue", async (req, res) => {
+  try {
+    const { amount, assetType } = req.body; // assetType: 'USDT' or 'POL'
+    const type = assetType || 'USDT';
+    
+    const botAddress = mainBlockchain.getWalletAddress();
+    const payoutAddress = serverState.payoutWalletAddress || blockchainConfig.payoutWallet;
+
+    if (!payoutAddress || payoutAddress === '0x0000000000000000000000000000000000000000') {
+      return res.status(400).json({ success: false, error: "Lütfen önce geçerli bir payout (gelir) cüzdan adresi tanımlayın." });
+    }
+
+    pushLog('FINANCE', 'INFO', `[MANUEL_ÇEKİM] Çekim tetiklendi: Bot -> ${payoutAddress} | Varlık: ${type}`);
+
+    if (type === 'USDT') {
+      const currentUsdt = await mainBlockchain.getUSDTBalance(botAddress);
+      const withdrawAmount = amount ? parseFloat(amount) : parseFloat(currentUsdt);
+
+      if (isNaN(withdrawAmount) || withdrawAmount <= 0) {
+        return res.status(400).json({ success: false, error: "Çekilecek geçerli bir miktar girilmedi." });
+      }
+
+      if (parseFloat(currentUsdt) < withdrawAmount) {
+        return res.status(400).json({ success: false, error: `Yetersiz USDT bakiye. Mevcut: ${currentUsdt} USDT, Talep: ${withdrawAmount} USDT` });
+      }
+
+      const txResult = await mainBlockchain.transferUSDT(payoutAddress, withdrawAmount.toString());
+      if (txResult.success) {
+        pushLog('FINANCE', 'SUCCESS', `[ÇEKİM_OK] ${withdrawAmount} USDT başarıyla payout cüzdanına (${payoutAddress.slice(0, 8)}...) transfer edildi. Tx: ${txResult.txHash}`);
+        return res.json({ success: true, txHash: txResult.txHash, message: `${withdrawAmount} USDT başarıyla aktarıldı.` });
+      } else {
+        return res.status(500).json({ success: false, error: txResult.error || "USDT transfer işlemi ağda başarısız oldu." });
+      }
+    } else {
+      // POL native transfer
+      const gasBalanceInfo = await mainBlockchain.checkGasBalance('polygon', botAddress);
+      const currentPol = parseFloat(gasBalanceInfo.balance);
+      const withdrawAmount = amount ? parseFloat(amount) : (currentPol - 0.1); // Reserve 0.1 POL for safety/gas
+
+      if (isNaN(withdrawAmount) || withdrawAmount <= 0) {
+        return res.status(400).json({ success: false, error: "Çekilecek POL miktarı güvenlik rezervini (0.1 POL) korumalıdır." });
+      }
+
+      if (currentPol - 0.1 < withdrawAmount) {
+        return res.status(400).json({ success: false, error: `Yetersiz POL bakiye. Güvenlik rezervi (0.1 POL) korunduğunda maksimum çekilebilir: ${(currentPol - 0.1).toFixed(4)} POL` });
+      }
+
+      const provider = new ethers.providers.JsonRpcProvider(mainBlockchain.rpcUrl);
+      const wallet = new ethers.Wallet(mainBlockchain.privateKey, provider);
+      const gasOverrides = await mainBlockchain.getSafeGasOverrides(provider);
+      
+      const tx = await wallet.sendTransaction({
+        to: payoutAddress,
+        value: ethers.utils.parseEther(withdrawAmount.toString()),
+        ...gasOverrides
+      });
+      await tx.wait();
+
+      pushLog('FINANCE', 'SUCCESS', `[ÇEKİM_POL_OK] ${withdrawAmount} POL başarıyla payout cüzdanına aktarıldı. Tx: ${tx.hash}`);
+      return res.json({ success: true, txHash: tx.hash, message: `${withdrawAmount} POL başarıyla aktarıldı.` });
+    }
+  } catch (err: any) {
+    pushLog('SYSTEM', 'ERROR', `[MANUEL_ÇEKİM_HATA] Çekim hatası: ${err.message}`);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
+ * Manually trigger gas refill from USDT to POL
+ */
+app.post("/api/finance/refill-gas", async (req, res) => {
+  try {
+    const { amount } = req.body;
+    const refillAmount = amount ? parseFloat(amount) : 5.0;
+    
+    if (isNaN(refillAmount) || refillAmount <= 0) {
+      return res.status(400).json({ success: false, error: "Geçersiz miktar belirtildi." });
+    }
+
+    pushLog('FINANCE', 'INFO', `[MANUEL_YAKIT] Kullanıcı tarafından manuel yakıt ikmali tetiklendi. Miktar: ${refillAmount} USDT`);
+    const usdtBalance = await mainBlockchain.getUSDTBalance();
+    
+    if (parseFloat(usdtBalance) < refillAmount) {
+      pushLog('FINANCE', 'ERROR', `[MANUEL_YAKIT] Yetersiz USDT bakiyesi! Cüzdandaki USDT: ${usdtBalance}, Talep: ${refillAmount}`);
+      return res.status(400).json({ success: false, error: `Yetersiz USDT bakiyesi (Cüzdanda: ${usdtBalance} USDT var)` });
+    }
+
+    const refillResult = await mainBlockchain.refillGasFromUSDT(refillAmount.toString());
+    if (refillResult.success) {
+      pushLog('FINANCE', 'SUCCESS', `[MANUEL_YAKIT] Başarıyla ${refillAmount} USDT -> POL takası yapıldı.`);
+      return res.json({ success: true, txHash: refillResult.txHash });
+    } else {
+      return res.status(500).json({ success: false, error: "DEX takas işlemi başarısız oldu. RPC veya ağ gaz ücreti hatası." });
+    }
+  } catch (err: any) {
+    pushLog('SYSTEM', 'ERROR', `[MANUEL_YAKIT_HATA] Hata: ${err.message}`);
+    return res.status(500).json({ success: false, error: err.message });
+  }
 });
 
 /**

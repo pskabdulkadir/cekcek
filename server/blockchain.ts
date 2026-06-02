@@ -274,6 +274,35 @@ export class BlockchainRouter {
   }
 
   /**
+   * Transfers USDT from the bot address to another address.
+   */
+  public async transferUSDT(toAddress: string, amount: string): Promise<{ success: boolean; txHash: string; error?: string }> {
+    this.emitLog('BLOCKCHAIN', 'INFO', `USDT Transferi başlatılıyor: ${amount} USDT -> ${toAddress}`);
+    try {
+      const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl);
+      const wallet = new ethers.Wallet(this.privateKey, provider);
+      
+      const usdtAddress = ethers.utils.getAddress("0xc2132D05D31c914a87C6611C10748AEb04B58e8F".toLowerCase());
+      const contract = new ethers.Contract(usdtAddress, [
+        "function transfer(address to, uint256 value) public returns (bool)"
+      ], wallet);
+
+      const amountWei = ethers.utils.parseUnits(amount, 6); // USDT uses 6 decimals on Polygon
+      const gasOverrides = await this.getSafeGasOverrides(provider);
+      
+      const tx = await contract.transfer(toAddress, amountWei, gasOverrides);
+      await tx.wait();
+      
+      this.emitLog('BLOCKCHAIN', 'SUCCESS', `USDT transfer tamamlandı! Tx: ${tx.hash}`);
+      return { success: true, txHash: tx.hash };
+    } catch (err: any) {
+      const errorMsg = this.parseBlockchainError(err);
+      this.emitLog('BLOCKCHAIN', 'ERROR', `USDT transfer başarısız: ${errorMsg}`);
+      return { success: false, txHash: '', error: errorMsg };
+    }
+  }
+
+  /**
    * PRE-FLIGHT CHECK: Adresin geçerli bir EVM adresi olduğunu doğrular
    */
   private isValidAddress(address: string): boolean {

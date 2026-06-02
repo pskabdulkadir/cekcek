@@ -59,30 +59,11 @@ export class LiquidationEngine {
         }
       }
 
-      // 3. KECO bulunamazsa POL -> USDT otonom rotasına geçiş sagla
+      // 3. KECO bulunamazsa POL -> USDT otonom rotasını devredışı bırakıyoruz (Cüzdan gazı korunması ve komisyon dairesel döngü kaybını önlemek için)
       if (tokenAmountWei === "0" || parseFloat(tokenAmountWei) === 0) {
-        this.emitLog('WARNING', `[LIQUIDITY_CHECK] Cüzdanda yeşil token bulunamadı. Otonom POL -> USDT likidasyon rotası deneniyor...`);
-        const gasCheck = await this.blockchain.checkGasBalance('polygon');
-        const currentPol = parseFloat(gasCheck.balance);
-
-        // Yakıt için 1.0 POL cüzdanda bırakılarak kalan kısım USDT ye çevrilebilir (Kazancı anında tahsil etmek için)
-        if (currentPol > 1.25) {
-          const polToSwap = (currentPol - 1.0).toFixed(4);
-          this.emitLog('INFO', `[POL_LIQUIDATION] ${polToSwap} POL -> USDT anlık takası QuickSwap üzerinden başlatılıyor...`);
-          const swapResult = await this.blockchain.swapPOLForUSDT(polToSwap);
-          
-          if (swapResult.success) {
-            this.emitLog('SUCCESS', `[OTONOM_KAZANÇ] ${polToSwap} POL başarıyla USDT'ye dönüştürüldü ve payout cüzdanına yansıdı! Tx: ${swapResult.txHash}`);
-            this.isProcessing = false;
-            return true;
-          } else {
-            throw new Error("POL -> USDT borsa takası başarısız oldu.");
-          }
-        } else {
-          this.emitLog('WARNING', `[WATCHDOG] Cüzdan POL bakiyesi çok düşük (${currentPol.toFixed(4)} POL). 1.0 POL güvenlik eşiği aşılamadığı için otonom takas ertelendi.`);
-          this.isProcessing = false;
-          return false;
-        }
+        this.emitLog('INFO', `[LIQUIDITY_CHECK] Cüzdanda GREEN/KECO yeşil token bulunamadı. Otonom likidasyon için üretim bekleniyor, cüzdan POL gaz bakiyesi korunuyor.`);
+        this.isProcessing = false;
+        return false;
       }
 
       // 4. KECO -> USDT Borsa Swap Islemi
