@@ -126,8 +126,13 @@ app.post('/api/crawl/start', async (req, res) => {
 
             while (hasMore) {
                 const unprocessedBatch = await db.collection(dbConfig.mainInventoryCollectionName)
-                                                // 'unprocessed' olanlar VEYA henüz hiç status atanmamış kayıtları çek
-                                                .find({ $or: [{ status: 'unprocessed' }, { status: { $exists: false } }] })
+                                                // GENİŞLETİLMİŞ FİLTRE: Her türlü işlenebilir durumu kabul et
+                                                .find({ 
+                                                    $or: [
+                                                        { status: 'unprocessed' }, { status: 'pending' }, 
+                                                        { status: 'ready' }, { status: { $exists: false } }
+                                                    ] 
+                                                })
                                                 .limit(BATCH_SIZE)
                                                 .toArray();
 
@@ -203,16 +208,28 @@ async function init() {
         db = client.db(dbConfig.dbName);
         
         // Başlangıç Kontrolü: Yapılandırılan koleksiyonda kaç varlık var?
-        const inventoryCount = await db.collection(dbConfig.mainInventoryCollectionName)
-            .countDocuments({ $or: [{ status: 'unprocessed' }, { status: { $exists: false } }] });
+        const targetCollection = dbConfig.mainInventoryCollectionName;
+        const inventoryCount = await db.collection(targetCollection).countDocuments({ 
+            $or: [
+                { status: 'unprocessed' }, { status: 'pending' }, 
+                { status: 'ready' }, { status: { $exists: false } }
+            ] 
+        });
             
-        console.log(`[DB_CONNECT] MongoDB Atlas bağlantısı kuruldu: ${dbConfig.dbName}`);
-        console.log(`[DB_CONNECT] '${dbConfig.mainInventoryCollectionName}' koleksiyonunda işlenmeyi bekleyen ${inventoryCount} varlık bulunmaktadır.`);
+        emitLog('SYSTEM', 'SUCCESS', `[DB_BAĞLANTISI] Veritabanı: ${dbConfig.dbName} Aktif.`);
+        emitLog('SYSTEM', 'INFO', `[ENVANTER_KONTROL] '${targetCollection}' tablosunda ${inventoryCount} işlenebilir varlık bulundu.`);
 
         if (inventoryCount === 0) {
+            emitLog('SYSTEM', 'WARNING', `[TABLO_BOŞ] '${targetCollection}' içinde veri yok. Sistem otomatik tarama başlatıyor...`);
             const collections = await db.listCollections().toArray();
-            console.log(`[DB_WARNING] Mevcut koleksiyonlar: ${collections.map(c => c.name).join(', ')}`);
-            console.log(`[DB_ADVICE] Lütfen .env dosyasında MAIN_INVENTORY_COLLECTION_NAME değişkenini yukarıdaki isimlerden biriyle güncelleyin.`);
+            
+            for (const col of collections) {
+                const docCount = await db.collection(col.name).countDocuments({});
+                if (docCount > 0) {
+                    emitLog('SYSTEM', 'SUCCESS', `[VERİ_KEŞFEDİLDİ] '${col.name}' tablosunda ${docCount} adet potansiyel hammadde bulundu!`);
+                }
+            }
+            emitLog('SYSTEM', 'ANALYZE', `[AKSİYON_GEREKLİ] Lütfen Render panelinden MAIN_INVENTORY_COLLECTION_NAME değerini yukarıdaki dolu isimlerden biriyle değiştirin.`);
         }
 
         app.listen(3001, () => console.log('Server running on port 3001'));

@@ -89,23 +89,26 @@ export class WebCrawler {
       
       // Beyaz liste kontrolü
       const hostname = parsedUrl.hostname;
-      const isPublicDomain = hostname.endsWith('.gov') || hostname.endsWith('.org');
+      const isPublicDomain = hostname.endsWith('.gov') || hostname.endsWith('.org') || hostname.endsWith('.edu');
       const isWhitelisted = WHITELISTED_DOMAINS.some(domain => hostname === domain || hostname.endsWith(`.${domain}`));
       
       // DATA_RECLAMATION MODU: Eğer mod bu ise, Wikipedia dışındaki hammadde kaynaklarına da izin ver
       if (blockchainConfig.crawlMode === 'DATA_RECLAMATION') {
           if (isPublicDomain && !isWhitelisted) {
-              this.emitLog('CRAWLER', 'INFO', `[AUTO_WHITELIST] Kamu verisi hammadde sahasına eklendi: ${hostname}`);
+              this.emitLog('CRAWLER', 'INFO', `[AUTO_WHITELIST] Hammadde sahası onaylandı: ${hostname}`);
           } else if (isWhitelisted) {
-              this.emitLog('CRAWLER', 'INFO', `[RECLAMATION_TARGET] Hedef kaynak tespit edildi: ${hostname}`);
+              this.emitLog('CRAWLER', 'INFO', `[RECLAMATION_TARGET] Kaynak tespit edildi: ${hostname}`);
           }
       }
 
-      // Karar: Whitelist'te mi VEYA Kamu Kaynağı mı?
-      if (!isWhitelisted && !(blockchainConfig.crawlMode === 'DATA_RECLAMATION' && isPublicDomain)) {
-        this.emitLog('CRAWLER', 'WARNING', `[WHITELIST_BLOCKED] Düğüm atlandı (Beyaz listede değil): ${urlString}`);
+      // Karar: Eğer beyaz listede değilse VE kamu verisi değilse engelle
+      const canProceed = isWhitelisted || (blockchainConfig.crawlMode === 'DATA_RECLAMATION' && isPublicDomain);
+
+      if (!canProceed) {
+        this.emitLog('CRAWLER', 'WARNING', `[WHITELIST_BLOCKED] Erişim izni yok: ${urlString}`);
         return;
       }
+
       const cleanUrl = parsedUrl.origin + parsedUrl.pathname + parsedUrl.search;
       
       if (!this.visitedUrls.has(cleanUrl) && !this.queue.includes(cleanUrl)) {
