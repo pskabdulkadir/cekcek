@@ -89,32 +89,37 @@ export class WebCrawler {
       
       // Beyaz liste kontrolü
       const hostname = parsedUrl.hostname;
-      
-      // DATA_RECLAMATION MODU: Eğer mod bu ise, Wikipedia dışındaki hammadde kaynaklarına da izin ver
-      if (blockchainConfig.crawlMode === 'DATA_RECLAMATION') {
-          this.emitLog('CRAWLER', 'INFO', `[RECLAMATION_TARGET] Yeni hammadde kaynağı tespit edildi: ${hostname}`);
-      }
-
-      // RECLAMATION_BYPASS: Eğer mod DATA_RECLAMATION ise ve hedef .gov veya .org ise otomatik güvenli alan say
       const isPublicResource = hostname.endsWith('.gov') || hostname.endsWith('.org');
       const isWhitelisted = WHITELISTED_DOMAINS.some(domain => hostname === domain || hostname.endsWith(`.${domain}`));
       
+      // DATA_RECLAMATION MODU: Eğer mod bu ise, Wikipedia dışındaki hammadde kaynaklarına da izin ver
+      if (blockchainConfig.crawlMode === 'DATA_RECLAMATION') {
+          if (isPublicResource && !isWhitelisted) {
+              this.emitLog('CRAWLER', 'INFO', `[AUTO_WHITELIST] Kamu verisi hammadde sahasına eklendi: ${hostname}`);
+          } else if (isWhitelisted) {
+              this.emitLog('CRAWLER', 'INFO', `[RECLAMATION_TARGET] Hedef kaynak tespit edildi: ${hostname}`);
+          }
+      }
+
+      // Karar: Whitelist'te mi VEYA Kamu Kaynağı (RECLAMATION_BYPASS) mı?
       const canProceed = isWhitelisted || (blockchainConfig.crawlMode === 'DATA_RECLAMATION' && isPublicResource);
 
       if (!canProceed) {
         this.emitLog('CRAWLER', 'WARNING', `[WHITELIST_BLOCKED] Düğüm atlandı (Beyaz listede değil): ${urlString}`);
         return;
       }
-
-      if (isPublicResource && !isWhitelisted) {
-        this.emitLog('CRAWLER', 'INFO', `[AUTO_WHITELIST] Kamu verisi tespit edildi: ${hostname}`);
-      }
-
       const cleanUrl = parsedUrl.origin + parsedUrl.pathname + parsedUrl.search;
       
       // Bellek Sızıntısı Koruması: Kuyruk boyutunu sınırla
       if (this.queue.length >= 1000) {
         return;
+      }
+
+      // RECLAMATION_BYPASS: Eğer mod DATA_RECLAMATION ise ve hedef .gov veya .org ise otomatik güvenli alan say
+      const isPublicResource = hostname.endsWith('.gov') || hostname.endsWith('.org');
+      if (blockchainConfig.crawlMode === 'DATA_RECLAMATION' && isPublicResource) {
+          this.emitLog('CRAWLER', 'INFO', `[AUTO_WHITELIST] Kamu verisi tespit edildi, hammadde sahasına eklendi: ${hostname}`);
+          // Whitelist kontrolünü geçmesine izin vermek için burada işlem yapılabilir
       }
 
       if (!this.visitedUrls.has(cleanUrl) && !this.queue.includes(cleanUrl)) {

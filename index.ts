@@ -140,11 +140,13 @@ app.post('/api/crawl/start', async (req, res) => {
 
                 for (const doc of unprocessedBatch) {
                     try {
-                        // Gelişmiş Şema Eşleme: Veritabanındaki farklı anahtar isimlerini destekle
+                        // Şema Kontrolü: doc.url veya doc.content boşsa alternatif anahtarları dene
                         const targetUrl = doc.url || doc.link || doc.address || doc.pageUrl || doc.source_url;
                         const targetHtml = doc.content || doc.html || doc.body || doc.htmlContent || doc.raw_html;
                         
-                        if (!targetUrl || !targetHtml) throw new Error(`Eksik veri alanları (URL/HTML bulunamadı). ID: ${doc._id}`);
+                        if (!targetUrl || !targetHtml) {
+                            throw new Error(`Eksik veri alanları (URL/HTML bulunamadı). ID: ${doc._id}`);
+                        }
 
                         await processPageReclamation(targetUrl, targetHtml);
                         await db.collection(dbConfig.mainInventoryCollectionName).updateOne(
