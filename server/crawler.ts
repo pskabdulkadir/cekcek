@@ -53,9 +53,13 @@ export class WebCrawler {
     this.onCrawlingStateChange = cb;
   }
 
+  /**
+   * Stop automated crawler sequence safely
+   */
   public stop() {
     this.isRunning = false;
     this.queue = [];
+    this.emitLog('SYSTEM', 'WARNING', `Tarayıcı iptal dizisi yayını başlatıldı.`);
   }
 
   private emitLog(module: 'SYSTEM' | 'CRAWLER' | 'OPTIMIZER' | 'BLOCKCHAIN' | 'AI', level: 'INFO' | 'SUCCESS' | 'WARNING' | 'ERROR' | 'ANALYZE', msg: string) {
@@ -163,14 +167,6 @@ export class WebCrawler {
       this.emitLog('CRAWLER', 'ERROR', `[${currentUrl}] düğümünde ağ hatası: ${err.message}`);
       return { html: '', links: [] };
     }
-  }
-
-  /**
-   * Stop automated crawler sequence safely
-   */
-  public stop() {
-    this.isRunning = false;
-    this.emitLog('SYSTEM', 'WARNING', `Tarayıcı iptal dizisi yayını başlatıldı.`);
   }
 
   /**

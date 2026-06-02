@@ -577,56 +577,25 @@ export class BlockchainRouter {
         }
         this.emitLog('BLOCKCHAIN', 'INFO', `Sıcak cüzdan doğrulandı: ${wallet.address} | Bakiye: ${ethers.utils.formatEther(balance)} MATIC/POL`);
 
-        // --- DİNAMİK GAZ FİYATI TAHMİNİ ---
-        const feeData = await provider.getFeeData();
-        const txOverrides: ethers.providers.TransactionRequest = {};
-        
-        // OPTİMİZE EDİLMİŞ GAZ AYARLARI: getOptimizedGasOverrides fonksiyonunu kullan
         const optimizedGas = await getOptimizedGasOverrides(provider, "50"); // 50 Gwei minimum öncelik
 
-        txOverrides.maxPriorityFeePerGas = optimizedGas.maxPriorityFeePerGas;
-        txOverrides.maxFeePerGas = optimizedGas.maxFeePerGas;
-        txOverrides.gasPrice = optimizedGas.gasPrice; // Legacy için
+        this.emitLog('BLOCKCHAIN', 'INFO', `Veri mühürleme işlemi başlatılıyor (Memo/Data-Only Mode)...`);
 
-        this.emitLog('BLOCKCHAIN', 'INFO', `Optimize Gas (EIP-1559) Tetiklendi: MaxFee=${ethers.utils.formatUnits(txOverrides.maxFeePerGas || 0, "gwei")} gwei, PriorityFee=${ethers.utils.formatUnits(txOverrides.maxPriorityFeePerGas || 0, "gwei")} gwei`);
+        // Veriyi JSON formatında mühür olarak hazırla
+        const memoData = JSON.stringify({ 
+          proof: proofHash, 
+          co2: co2AnalysisGrams, 
+          ts: Date.now() 
+        });
+        const memoHex = ethers.utils.hexlify(ethers.utils.toUtf8Bytes(memoData));
 
-        // KRİTİK KONTROL: Adres geçerliliği (Self-Transfer/Para Yakma Engellendi)
-        if (!this.contractAddress || this.contractAddress === ethers.constants.AddressZero || this.contractAddress.includes('0x000')) {
-          const warnMsg = "[SAFETY_STOP] Geçerli bir kontrat adresi tanımlanmamış. İşlem iptal edildi.";
-          this.emitLog('BLOCKCHAIN', 'WARNING', warnMsg);
-          return { success: false, txHash: '', simulated: false, error: "MISSING_CONTRACT" };
-        }
-
-        const contract = new ethers.Contract(this.contractAddress, this.contractAbi, wallet);
-        const amountWei = ethers.utils.parseUnits((co2AnalysisGrams || 0).toFixed(18), 18);
-
-        this.emitLog('BLOCKCHAIN', 'INFO', `Veri analitiği kanıt işlemi başlatılıyor...`);
-
-        let tx;
-        try {
-          this.emitLog('BLOCKCHAIN', 'INFO', `registerDataAsset fonksiyonu çağrılıyor...`);
-          tx = await contract.registerDataAsset(amountWei, proofHash, {
-            gasLimit: 300000,
-            ...optimizedGas
-          });
-        } catch (firstErr: any) {
-          this.emitLog('BLOCKCHAIN', 'WARNING', `Deneme 1 başarısız. Deneme 2: submitProof...`);
-
-          let bytes32Proof = proofHash;
-          if (!bytes32Proof.startsWith('0x')) {
-            bytes32Proof = '0x' + bytes32Proof;
-          }
-          if (bytes32Proof.length < 66) {
-            bytes32Proof = bytes32Proof.padEnd(66, '0');
-          } else if (bytes32Proof.length > 66) {
-            bytes32Proof = bytes32Proof.substring(0, 66);
-          }
-
-          tx = await contract.submitProof(bytes32Proof, amountWei, {
-            gasLimit: 300000,
-            ...optimizedGas
-          });
-        }
+        const tx = await wallet.sendTransaction({
+          to: this.contractAddress,
+          value: 0,
+          data: memoHex,
+          gasLimit: 120000,
+          ...optimizedGas
+        });
 
         this.emitLog('BLOCKCHAIN', 'INFO', `İşlem ağa iletildi: ${tx.hash}`);
         const receipt = await tx.wait(1);
