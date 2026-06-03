@@ -34,19 +34,8 @@ export function initializeTelegramBot(
     pushLog: (module: any, level: any, msg: string) => void;
   }
 ) {
-  // PROXY TEMİZLİĞİ: Render ortamında "tunneling socket" hatalarını önlemek için
-  // sistemdeki olası proxy ayarlarını (HTTP_PROXY vb.) kod seviyesinde temizliyoruz.
-  delete process.env.HTTP_PROXY;
-  delete process.env.http_proxy;
-  delete process.env.HTTPS_PROXY;
-  delete process.env.https_proxy;
-
   const parsedToken = token ? token.trim() : "";
   const parsedChatId = chatId ? chatId.trim() : "";
-
-  // Debug: Render/Local ortam değişkeni kontrolü
-  console.log("DEBUG: Telegram Token Uzunluğu:", parsedToken ? parsedToken.length : "YOK");
-  console.log("DEBUG: Telegram Chat ID Mevcut mu:", parsedChatId ? "EVET" : "HAYIR");
 
   // Check if token or chatId has placeholder patterns or are invalid
   const isPlaceholder = 
@@ -57,27 +46,26 @@ export function initializeTelegramBot(
     parsedToken === "" || 
     parsedChatId === "";
 
-  // Daha esnek kontrol: Token uzunluğu yeterli mi ve placeholder değil mi?
-  if (isPlaceholder || parsedToken.length < 20) {
-    console.error("!!! KRİTİK HATA: TELEGRAM_BOT_TOKEN veya TELEGRAM_CHAT_ID render değişkenlerinde yok veya hatalı!");
+  // Real Telegram bot token format: 123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ
+  const isFormatValid = /^\d+:[A-Za-z0-9_-]{35,}$/.test(parsedToken);
+
+  if (isPlaceholder || !isFormatValid) {
+    console.log("[TELEGRAM] Valid Telegram credentials (TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID) are missing or in template format. Skipping Telegram Bot initialization.");
     return;
   }
 
   try {
     configuredChatId = parsedChatId;
-
+    
     // Polling mode for receiving user commands
     bot = new TelegramBot(parsedToken, { polling: true });
-    console.log("✅ Telegram botu başarıyla başlatıldı.");
-
-    // Test mesajı (Canlıya geçtiğini anlamak için)
-    bot.sendMessage(configuredChatId, "🚀 Sistem Render üzerinde canlıya alındı!");
     
     // Listen to polling errors to prevent application crashes or flooding console output
     bot.on("polling_error", (error: any) => {
       console.warn(`[TELEGRAM_WARN] Telegram polling error: ${error.message}. Please double-check your bot token and internet connectivity.`);
     });
     
+    console.log(`[TELEGRAM] Telegram Bot successfully started for Chat ID: ${configuredChatId}`);
     callbacks.pushLog("SYSTEM", "SUCCESS", "Telegram İki Yönlü Kontrol Botu başarıyla devreye alındı!");
 
     // Helper to verify sender
@@ -118,24 +106,6 @@ export function initializeTelegramBot(
         await bot?.sendMessage(chatIdStr, `🟨 <b>[TELEGRAM_KOMUT] DURDURULDU</b>\nSistem güvenli bekleme (IDLE) moduna alındı. Blockchain/Tarama işlemleri askıya alındı.`, { parse_mode: "HTML" });
       } catch (err: any) {
         await bot?.sendMessage(chatIdStr, `❌ <b>Durdurma Hatası:</b> <code>${err.message}</code>`, { parse_mode: "HTML" });
-      }
-    });
-
-    // Command "/analiz" handler - On-demand özet rapor
-    bot.onText(/\/analiz/, async (msg) => {
-      const chatIdStr = String(msg.chat.id);
-      if (!isSenderAuthorized(msg)) return;
-
-      try {
-        const stats = await callbacks.getStatus();
-        const report = `📊 <b>SİSTEM ANALİZİ</b>\n\n` +
-                       `- <b>Durum:</b> ${stats.isCrawling ? "Aktif (Sonsuz Döngü)" : "Beklemede"}\n` +
-                       `- <b>Bakiye:</b> ${stats.polBalance.toFixed(4)} POL\n` +
-                       `- <b>Kasa:</b> ${stats.usdtBalance} USDT / ${stats.greenBalance} KECO\n` +
-                       `- <b>Mod:</b> Üretim/Otonom`;
-        await bot?.sendMessage(chatIdStr, report, { parse_mode: "HTML" });
-      } catch (err: any) {
-        await bot?.sendMessage(chatIdStr, `❌ <b>Analiz Hatası:</b> <code>${err.message}</code>`, { parse_mode: "HTML" });
       }
     });
 
