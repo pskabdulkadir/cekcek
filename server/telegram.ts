@@ -1,5 +1,9 @@
 import TelegramBot from "node-telegram-bot-api";
 
+// GELİŞTİRME SÜRECİNDE BİLDİRİM VE BOT TELEMETRİSİNİ KESMEK İÇİN DURAKLATMA BAYRAĞI
+// Kullanıcı tekrar 'çalıştır' dediği için bu bayrak false olarak güncellenmiştir.
+const isTelegramTemporarilyDisabled = false;
+
 let bot: TelegramBot | null = null;
 let configuredChatId: string | null = null;
 
@@ -34,6 +38,11 @@ export function initializeTelegramBot(
     pushLog: (module: any, level: any, msg: string) => void;
   }
 ) {
+  if (isTelegramTemporarilyDisabled) {
+    console.log("[TELEGRAM] Telegram Bot kullanıcı talebi doğrultusunda geçici olarak DEVRE DIŞI bırakıldı.");
+    return;
+  }
+
   const parsedToken = token ? token.replace(/['"]/g, '').trim() : "";
   const parsedChatId = chatId ? chatId.replace(/['"]/g, '').trim() : "";
 
@@ -218,6 +227,7 @@ export function initializeTelegramBot(
  * Filters out high-frequency crawling telemetry noise as requested by "Sessizlik Kuralı".
  */
 export async function sendTelegramNotification(message: string, isUrgent: boolean = false) {
+  if (isTelegramTemporarilyDisabled) return;
   if (!bot || !configuredChatId) return;
   
   const upperMsg = message.toUpperCase();

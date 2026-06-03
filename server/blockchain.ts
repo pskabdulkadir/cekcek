@@ -1063,15 +1063,19 @@ export class BlockchainRouter {
       const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl);
       const wallet = new ethers.Wallet(this.privateKey, provider);
       const contract = new ethers.Contract(ethers.utils.getAddress(tokenAddress.toLowerCase()), ["function mint(address to, uint256 amount) public"], wallet);
+      
+      this.emitLog('BLOCKCHAIN', 'INFO', `[MINTER_CHECK] Manuel limitlerle işlem gönderiliyor...`);
       const tx = await contract.mint(toAddress, ethers.utils.parseUnits(amount, 18), {
+        gasLimit: 150000, // Manuel gas limit belirleyerek "cannot estimate gas" hatasını bypass et
         maxPriorityFeePerGas: ethers.utils.parseUnits("40", "gwei"),
         maxFeePerGas: ethers.utils.parseUnits("400", "gwei")
       });
       await tx.wait();
       return { success: true, txHash: tx.hash };
     } catch (err: any) {
-      this.emitLog('BLOCKCHAIN', 'ERROR', `[MINT_FAILED] Hata: ${err.message}`);
-      return { success: false, error: err.message };
+      const errorMsg = this.parseBlockchainError(err);
+      this.emitLog('BLOCKCHAIN', 'ERROR', `[MINT_FAILED] Akıllı kontrat seviyesinde hata: ${errorMsg}`);
+      return { success: false, error: errorMsg };
     }
   }
 

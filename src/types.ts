@@ -31,6 +31,8 @@ export interface ReadyToSellItem {
   accessVoucherSignature?: string; // Veri erişim voucheri imzası
   publisherAddress?: string; // Varlığı yayınlayan cüzdan adresi
   accessPriceWei?: string; // Kontrat için hassas erişim ücreti verisi (BigNumber string olarak)
+  isMintedOnChain?: boolean; // Zincir üstünde KECO basılıp basılmadığı
+  mintAmountKECO?: string; // Basılan veya basılacak KECO miktarı
 }
 
 export interface SalesLedgerEntry {
