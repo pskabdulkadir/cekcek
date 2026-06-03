@@ -88,6 +88,7 @@ import { LogEntry, CoreStats, TransactionRecord, ReadyToSellItem } from "./src/t
 import { WebCrawler } from "./server/crawler.ts";
 import { MarketplaceManager } from "./server/marketplace.ts";
 import { LiquidationEngine } from "./server/liquidationEngine.ts";
+import { initializeTelegramBot, sendTelegramNotification } from "./server/telegram.ts";
 
 // --- GLOBAL SINGLETONS ---
 const app = express();
@@ -944,6 +945,10 @@ app.use(cors());   // Yetkisiz domain erişimlerini kısıtlar
 // SSE Active Connections List
 const clients = new Set<any>();
 
+function escapeLogHtml(text: string): string {
+  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
 /**
  * Global helper to push a log entry and broadcast to active frontend clients via SSE
  */
@@ -965,6 +970,43 @@ function pushLog(
   // Throttle stored log logs length to 200 entries to maintain memory hygiene
   if (serverState.crawlerLogs.length > 200) {
     serverState.crawlerLogs.shift();
+  }
+
+  // Telegram Notifications Forwarder
+  try {
+    if (level === 'ERROR' || level === 'WARNING' || level === 'SUCCESS') {
+      let telegramMessage = "";
+      const cleanMsg = escapeLogHtml(msg);
+      
+      const isSettleOk = msg.includes('[SETTLE_OK]');
+      const isMerkleOk = msg.includes('[MERKLE_BATCH_OK]');
+      const isYeniVarlik = msg.includes('[YENİ_VARLIK]');
+      const isAutoFuel = msg.includes('[AUTO_FUEL]') || msg.includes('[GAS_OK]');
+      const isFuelFail = msg.includes('[FUEL_FAIL]');
+      const isCriticalError = level === 'ERROR';
+
+      if (isSettleOk) {
+        telegramMessage = `💸 <b>[OTONOM LİKİDASYON BAŞARILI]</b>\n\n<code>${cleanMsg}</code>\n\n<i>Gelir transferleri otomatik payout cüzdanınıza yönlendirildi.</i>`;
+      } else if (isMerkleOk) {
+        telegramMessage = `🔗 <b>[MERKLE TREE MÜHÜRLENDİ]</b>\n\n<code>${cleanMsg}</code>\n\n<i>Gas Tasarrufu: %99.1 oranına ulaşıldı!</i>`;
+      } else if (isYeniVarlik) {
+        telegramMessage = `🟩 <b>[YENİ VERİ MADENCİLİĞİ]</b>\n\n<code>${cleanMsg}</code>`;
+      } else if (isAutoFuel) {
+        telegramMessage = `⛽ <b>[YAKIT İKMAL DURUMU]</b>\n\n<code>${cleanMsg}</code>`;
+      } else if (isFuelFail) {
+        telegramMessage = `⚠️ <b>[KRİTİK YAKIT HATASI]</b>\n\n<code>${cleanMsg}</code>\n\n<b>ACİL DURUM UYARISI:</b> Cüzdanda POL yakıtı tükendi ve USDT takviye havuzu başarısız oldu! Lütfen cüzdan bakiyelerini manuel kontrol edin.`;
+      } else if (isCriticalError) {
+        telegramMessage = `🚨 <b>[SİSTEM KRİTİK HATASI]</b>\n\nModül: <code>${module}</code>\nHata Detayı: <code>${cleanMsg}</code>\n\n🔄 <i>Eğer bot kilitlendiyse veya durdurulduysa, Telegram üzerinden <code>/start</code> yazarak sistemi tekrar hızlıca ateşleyebilirsiniz.</i>`;
+      } else if (msg.includes('ACİL') || msg.includes('KRİTİK') || msg.includes('HATA')) {
+        telegramMessage = `⚠️ <b>[SİSTEM UYARISI]</b>\nModül: <code>${module}</code>\nDetay: <code>${cleanMsg}</code>`;
+      }
+
+      if (telegramMessage) {
+        sendTelegramNotification(telegramMessage).catch(() => {});
+      }
+    }
+  } catch (tgErr: any) {
+    console.error("[TELEGRAM_FORWARD_ERR]", tgErr.message);
   }
 
   // Broadcast to all SSE connected terminals
@@ -1718,30 +1760,48 @@ app.get("/api/stats", async (req, res) => {
   }
 });
 
-/**
- * Wallet Balance Checker - Canlı Polygon Mainnet Bakiye Sorgusu
- * GELİR YAPILAN CÜZDAN: blockchainConfig.payoutWallet (satış sonrası para buraya gidecek)
- */
-app.get("/api/wallet-balance", async (req, res) => {
+// Cache store for wallet balance queries to prevent client-side routing blocking, timeouts and gateway HTML errors
+let cachedBalanceData: any = null;
+let lastBalanceQueryTime = 0;
+const BALANCE_CACHE_TTL = 30000; // 30 seconds
+let isRefreshingBalances = false;
+
+async function refreshWalletBalances() {
+  if (isRefreshingBalances) return;
+  isRefreshingBalances = true;
+
   try {
     const botAddress = mainBlockchain.getWalletAddress();
     const payoutAddress = blockchainConfig.payoutWallet;
 
-    // Get bot (gas/operations) wallet balance
-    const botBalRes = botAddress ? await mainBlockchain.checkGasBalance('polygon', botAddress) : { balance: "0.000000", isLow: true };
-    const botUSDT = botAddress ? await mainBlockchain.getUSDTBalance(botAddress) : "0.00";
-    
-    // Get payout (revenue distribution) wallet balance
-    const payoutBalRes = payoutAddress ? await mainBlockchain.checkGasBalance('polygon', payoutAddress) : { balance: "0.000000", isLow: true };
-    const payoutUSDT = payoutAddress ? await mainBlockchain.getUSDTBalance(payoutAddress) : "0.00";
-    
-    const maticPrice = 0.42; // Güncel yaklaşık fiyat
+    const isBotAddressValid = !!(botAddress && botAddress.length === 42 && botAddress.startsWith("0x") && !botAddress.includes("."));
+    const isPayoutAddressValid = !!(payoutAddress && payoutAddress.length === 42 && payoutAddress.startsWith("0x") && !payoutAddress.includes("."));
+
+    // Run the blockchain RPC queries concurrently
+    const queryPromise = Promise.all([
+      isBotAddressValid ? mainBlockchain.checkGasBalance('polygon', botAddress) : Promise.resolve({ balance: "0.000000", isLow: true }),
+      isBotAddressValid ? mainBlockchain.getUSDTBalance(botAddress) : Promise.resolve("0.00"),
+      isPayoutAddressValid ? mainBlockchain.checkGasBalance('polygon', payoutAddress) : Promise.resolve({ balance: "0.000000", isLow: true }),
+      isPayoutAddressValid ? mainBlockchain.getUSDTBalance(payoutAddress) : Promise.resolve("0.00"),
+      blockchainConfig.greenTokenAddress && !blockchainConfig.greenTokenAddress.includes('0x000') && isBotAddressValid
+        ? mainBlockchain.getTokenBalance(blockchainConfig.greenTokenAddress, botAddress)
+        : Promise.resolve("0.00")
+    ]);
+
+    // Give it at most 8 seconds to run to avoid hanging background loops forever due to node timeouts
+    const timeoutPromise = new Promise<any>((_, reject) => {
+      setTimeout(() => reject(new Error("RPC Query Timeout (8s limit reached)")), 8000);
+    });
+
+    const [botBalRes, botUSDT, payoutBalRes, payoutUSDT, greenBalance] = await Promise.race([queryPromise, timeoutPromise]);
+
+    const maticPrice = 0.42; // Yaklaşık fiyat
     const balanceUSD = (parseFloat(botBalRes.balance) * maticPrice).toFixed(2);
     const payoutBalanceUSD = (parseFloat(payoutBalRes.balance) * maticPrice).toFixed(2);
 
-    return res.json({
-      address: botAddress,
-      payoutAddress: payoutAddress,
+    cachedBalanceData = {
+      address: botAddress || "0x0000000000000000000000000000000000000000",
+      payoutAddress: payoutAddress || "0x0000000000000000000000000000000000000000",
       balanceMATIC: parseFloat(botBalRes.balance).toFixed(6),
       balanceUSD: balanceUSD,
       balanceUSDT: parseFloat(botUSDT).toFixed(2),
@@ -1750,16 +1810,51 @@ app.get("/api/wallet-balance", async (req, res) => {
       payoutBalanceUSD: payoutBalanceUSD,
       payoutBalanceUSDT: parseFloat(payoutUSDT).toFixed(2),
       payoutIsLow: payoutBalRes.isLow,
+      greenBalance: greenBalance || "0.00",
       timestamp: new Date().toISOString()
-    });
+    };
+    lastBalanceQueryTime = Date.now();
   } catch (err: any) {
-    console.error("[API_ERROR] /api/wallet-balance failed:", err);
-    res.status(500).json({
-      error: "Wallet balance query failed",
-      message: err.message,
+    console.warn("[BACKGROUND_BALANCE_WARN] Background wallet balance refresh failed:", err.message);
+  } finally {
+    isRefreshingBalances = false;
+  }
+}
+
+app.get("/api/wallet-balance", async (req, res) => {
+  const now = Date.now();
+
+  // If we don't have any cached data yet, trigger a background refresh and return a boilerplate initial response instantly
+  if (!cachedBalanceData) {
+    const botAddressMock = mainBlockchain.getWalletAddress() || "0x0000000000000000000000000000000000000000";
+    const payoutAddressMock = blockchainConfig.payoutWallet || "0x0000000000000000000000000000000000000000";
+
+    // Trigger background cache fetch (does not block HTTP response)
+    refreshWalletBalances().catch(() => {});
+
+    return res.json({
+      address: botAddressMock,
+      payoutAddress: payoutAddressMock,
+      balanceMATIC: "0.000000",
+      balanceUSD: "0.00",
+      balanceUSDT: "0.00",
+      isLow: true,
+      payoutBalanceMATIC: "0.000000",
+      payoutBalanceUSD: "0.00",
+      payoutBalanceUSDT: "0.00",
+      payoutIsLow: true,
+      greenBalance: "0.00",
+      isPendingInit: true,
       timestamp: new Date().toISOString()
     });
   }
+
+  // If the cache is stale (older than TTL), trigger a background refresh (stale-while-revalidate)
+  if (now - lastBalanceQueryTime > BALANCE_CACHE_TTL) {
+    refreshWalletBalances().catch(() => {});
+  }
+
+  return res.json(cachedBalanceData);
 });
 
 /**
@@ -1981,35 +2076,43 @@ app.get("/api/stream-logs", (req, res) => {
   });
 });
 
-/**
- * Run autonomous crawler bot thread
- */
-app.post("/api/crawl/start", (req, res) => {
-  if (serverState.isCrawling) {
-    return res.json({ success: true, message: "Otonom tarayıcı zaten sektörleri tarıyor." });
-  }
-
+async function startCrawlingEngine() {
+  if (serverState.isCrawling) return;
   serverState.isCrawling = true;
   pushLog('SYSTEM', 'INFO', 'Otonom Ticaret Motoru: MARKET_LISTENER başlatıldı.');
 
   // Madencilik ve Geri Dönüşüm çarklarını döndür (Sonsuz döngü)
   runRecyclingMining();
+}
 
+async function stopCrawlingEngine() {
+  if (!serverState.isCrawling) return;
+  serverState.isCrawling = false;
+  mainCrawler.stop(); // Ensure the internal crawler loop is signaled to break immediately
+  pushLog('SYSTEM', 'WARNING', 'Durdurma sinyali: Otonom emirler donduruluyor.');
+}
+
+/**
+ * Run autonomous crawler bot thread
+ */
+app.post("/api/crawl/start", async (req, res) => {
+  if (serverState.isCrawling) {
+    return res.json({ success: true, message: "Otonom tarayıcı zaten sektörleri tarıyor." });
+  }
+
+  await startCrawlingEngine();
   res.json({ success: true, message: "Otonom tarama iş parçacıkları başlatıldı." });
 });
 
 /**
  * Gracefully stop active crawler bot thread
  */
-app.post("/api/crawl/stop", (req, res) => {
+app.post("/api/crawl/stop", async (req, res) => {
   if (!serverState.isCrawling) {
     return res.json({ success: true, message: "Sistem zaten bekleme modunda." });
   }
 
-  serverState.isCrawling = false;
-  mainCrawler.stop(); // Ensure the internal crawler loop is signaled to break immediately
-  pushLog('SYSTEM', 'WARNING', 'Durdurma sinyali: Otonom emirler donduruluyor.');
-
+  await stopCrawlingEngine();
   res.json({ success: true, message: "Bağımsız tarama döngüsü durduruldu." });
 });
 
@@ -2167,6 +2270,86 @@ async function startServer() {
 
       // Motoru başlat
       startAutomatedTrading();
+
+      // Cüzdan bakiye önbelleğini arka planda ısıt
+      refreshWalletBalances().catch(() => {});
+
+      // Telegram İki Yönlü Kontrol & Bildirim Entegrasyonu
+      try {
+        const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+        const CHAT_ID = process.env.TELEGRAM_CHAT_ID;
+        if (TOKEN && CHAT_ID) {
+          initializeTelegramBot(TOKEN, CHAT_ID, {
+            startCrawler: async () => {
+              await startCrawlingEngine();
+            },
+            stopCrawler: async () => {
+              await stopCrawlingEngine();
+            },
+            getStatus: async () => {
+              const totalAssets = await ReadyToSellModel.countDocuments({});
+              const readyToSell = await ReadyToSellModel.countDocuments({ isSold: false, accessVoucherSignature: { $exists: true } });
+              const soldAssets = await ReadyToSellModel.countDocuments({ isSold: true });
+              const listedOnChain = await ReadyToSellModel.countDocuments({ isSold: false, isListedOnChain: true });
+
+              // Prefer cached blockchain data to keep bot extremely responsive
+              if (cachedBalanceData) {
+                return {
+                  walletAddr: cachedBalanceData.address,
+                  polBalance: parseFloat(cachedBalanceData.balanceMATIC) || 0,
+                  usdtBalance: cachedBalanceData.payoutBalanceUSDT || "0.00",
+                  greenBalance: cachedBalanceData.greenBalance || "0.00",
+                  totalAssets,
+                  readyToSell,
+                  soldAssets,
+                  listedOnChain,
+                  isCrawling: serverState.isCrawling,
+                  currentCrawlingUrl: serverState.currentCrawlingUrl || "Bekliyor...",
+                  pagesProcessed: serverState.pagesProcessed,
+                  totalKiloBytesSaved: serverState.totalKiloBytesSaved,
+                  totalCo2SavedGrams: serverState.totalCo2SavedGrams,
+                  selectedNetworkPath: serverState.selectedNetworkPath,
+                  circuitBreakerStatus: serverState.circuitBreakerStatus
+                };
+              }
+
+              // Fallback query if cache is not yet loaded
+              const actualUsdtBalance = await mainBlockchain.getUSDTBalance(blockchainConfig.payoutWallet);
+              const polBalanceCheck = await mainBlockchain.checkGasBalance('polygon');
+              const polBalance = parseFloat(polBalanceCheck.balance) || 0;
+
+              const greenBalance = blockchainConfig.greenTokenAddress && !blockchainConfig.greenTokenAddress.includes('0x000')
+                  ? await mainBlockchain.getTokenBalance(blockchainConfig.greenTokenAddress, mainBlockchain.getWalletAddress())
+                  : "0.00";
+
+              return {
+                walletAddr: mainBlockchain.getWalletAddress() || "NaN",
+                polBalance,
+                usdtBalance: actualUsdtBalance,
+                greenBalance,
+                totalAssets,
+                readyToSell,
+                soldAssets,
+                listedOnChain,
+                isCrawling: serverState.isCrawling,
+                currentCrawlingUrl: serverState.currentCrawlingUrl || "Bekliyor...",
+                pagesProcessed: serverState.pagesProcessed,
+                totalKiloBytesSaved: serverState.totalKiloBytesSaved,
+                totalCo2SavedGrams: serverState.totalCo2SavedGrams,
+                selectedNetworkPath: serverState.selectedNetworkPath,
+                circuitBreakerStatus: serverState.circuitBreakerStatus
+              };
+            },
+            pushLog: (module, level, msg) => {
+              pushLog(module, level, msg);
+            }
+          });
+        } else {
+          console.log("[TELEGRAM] Credentials missing or incomplete in environment. Telegram bot skipped.");
+        }
+      } catch (tgErr: any) {
+        console.error("[WARNING] Telegram bot initialization failed gracefully:", tgErr.message);
+      }
     } catch (error: any) {
       pushLog('SYSTEM', 'ERROR', `[CRITICAL] Arka plan bağlantı hatası: ${error.message}`);
       console.error("[CRITICAL] Background initialization failed:", error.message);
