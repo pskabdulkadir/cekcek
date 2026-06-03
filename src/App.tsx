@@ -85,6 +85,11 @@ export default function App() {
   const [isUpdatingHft, setIsUpdatingHft] = useState<boolean>(false);
   const [hftSaveSuccess, setHftSaveSuccess] = useState<boolean>(false);
 
+  // Telegram Bot State Değişkenleri
+  const [telegramEnabled, setTelegramEnabled] = useState<boolean>(false);
+  const [telegramHasCredentials, setTelegramHasCredentials] = useState<boolean>(false);
+  const [isLoadingTelegram, setIsLoadingTelegram] = useState<boolean>(false);
+
   // Savaş Modülü Ayarlarını Kaydet (POST /api/hft-config)
   const handleSaveHftSettings = async (e: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -238,10 +243,47 @@ export default function App() {
     }
   };
 
+  // Load and refresh Telegram Bot Status
+  const fetchTelegramStatus = async () => {
+    try {
+      const res = await fetch("/api/telegram/status");
+      if (res.ok) {
+        const data = await res.json();
+        setTelegramEnabled(data.enabled);
+        setTelegramHasCredentials(data.hasCredentials);
+      }
+    } catch (err) {
+      console.error("Failed to fetch Telegram status:", err);
+    }
+  };
+
+  const toggleTelegram = async () => {
+    setIsLoadingTelegram(true);
+    try {
+      const res = await fetch("/api/telegram/toggle", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: !telegramEnabled })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setTelegramEnabled(data.enabled);
+      }
+    } catch (err) {
+      console.error("Failed to toggle Telegram status:", err);
+    } finally {
+      setIsLoadingTelegram(false);
+    }
+  };
+
   // Poll server state API for dynamic dashboard synchronization
   useEffect(() => {
     fetchStats();
-    const interval = setInterval(fetchStats, 30000); // PROTOKOL: 30 saniyede bir güncelle
+    fetchTelegramStatus();
+    const interval = setInterval(() => {
+      fetchStats();
+      fetchTelegramStatus();
+    }, 30000); // PROTOKOL: 30 saniyede bir güncelle
     return () => clearInterval(interval);
   }, []);
 
@@ -744,6 +786,39 @@ export default function App() {
                     ) : (
                       <div className="text-slate-500 text-center py-2 italic font-sans animate-pulse">
                         Sistem, otonom döngüyü başlatmanız için emir bekliyor.
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Telegram Message Control Bar */}
+                  <div className="bg-slate-950/40 border border-slate-800/80 rounded-xl p-3.5 mb-4 font-mono text-xs">
+                    <div className="flex justify-between items-center">
+                      <div className="space-y-1">
+                        <span className="text-slate-400 font-bold block text-[11px] uppercase tracking-wider">Telegram Bildirim ve Kontrol Kanalı</span>
+                        <p className="text-slate-500 text-[10px] leading-normal max-w-[260px]">
+                          Cihazınızdan iki yönlü kontrol komutları gönderebilir ve anlık başarı/likidasyon telemetrisini dilediğiniz an sessize alabilirsiniz.
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className={`w-2 h-2 rounded-full ${telegramEnabled ? "bg-green-500" : "bg-red-500"}`}></span>
+                        <button
+                          onClick={toggleTelegram}
+                          disabled={isLoadingTelegram}
+                          id="telegram_toggle_btn"
+                          className={`px-3 py-1.5 rounded-lg border text-[11px] font-bold cursor-pointer font-mono tracking-wide transition-all ${
+                            telegramEnabled 
+                              ? "bg-green-950/45 border-green-500/40 text-green-400 hover:bg-green-950/75 shadow-lg shadow-green-950/20" 
+                              : "bg-red-950/45 border-red-500/40 text-red-400 hover:bg-red-950/75 shadow-lg shadow-red-950/20"
+                          }`}
+                        >
+                          {isLoadingTelegram ? "İŞLENİYOR..." : telegramEnabled ? "DURDUR" : "AKTİFLEŞTİR"}
+                        </button>
+                      </div>
+                    </div>
+                    {!telegramHasCredentials && (
+                      <div className="mt-2.5 text-[10px] text-amber-500/90 leading-relaxed border-t border-slate-800/60 pt-2 flex items-center gap-1.5">
+                        <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0"></span>
+                        Ortam değişkenleri (TELEGRAM_BOT_TOKEN veya TELEGRAM_CHAT_ID) eksik. Lütfen yapılandırın.
                       </div>
                     )}
                   </div>

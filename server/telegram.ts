@@ -2,7 +2,11 @@ import TelegramBot from "node-telegram-bot-api";
 
 // GELİŞTİRME SÜRECİNDE BİLDİRİM VE BOT TELEMETRİSİNİ KESMEK İÇİN DURAKLATMA BAYRAĞI
 // Kullanıcı 'şimdi tegramı burada durdur' dediği için başlangıçta true olarak konfigüre edilmiştir.
-let isTelegramTemporarilyDisabled = true;
+export let isTelegramTemporarilyDisabled = true;
+
+export function setTelegramTemporarilyDisabled(disabled: boolean) {
+  isTelegramTemporarilyDisabled = disabled;
+}
 
 let bot: TelegramBot | null = null;
 let configuredChatId: string | null = null;
@@ -38,10 +42,18 @@ export function initializeTelegramBot(
     pushLog: (module: any, level: any, msg: string) => void;
   }
 ) {
-  // Botu her halükarda başlatıyoruz ki kullanıcı Telegram üzerinden canlandırabilsin veya durdurabilsin.
-  // Ancak duraklatılmış durumdayken bildirimler gitmeyecektir.
+  // Eski bot nesnesi varsa çakışmayı (409 Conflict) önlemek için polling akışını temizliyoruz
+  if (bot) {
+    try {
+      bot.stopPolling().catch(() => {});
+    } catch (e) {}
+    bot = null;
+  }
+
+  // Kullanıcı Telegram'ı "durdur" talimatı ile kapattığı için bot veya polling katmanını başlatmıyoruz.
   if (isTelegramTemporarilyDisabled) {
-    console.log("[TELEGRAM] Telegram Bot şu anda geçici olarak DURDURULDU modunda başlatılıyor. Bildirimler sessize alındı.");
+    console.log("[TELEGRAM] Telegram Bot kullanıcı talimatı doğrultusunda TAMAMEN DURDURULDU. Polling ve bildirimler devre dışı.");
+    return;
   }
 
   const parsedToken = token ? token.replace(/['"]/g, '').trim() : "";

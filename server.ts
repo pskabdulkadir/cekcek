@@ -109,7 +109,7 @@ import { LogEntry, CoreStats, TransactionRecord, ReadyToSellItem } from "./src/t
 import { WebCrawler } from "./server/crawler.ts";
 import { MarketplaceManager } from "./server/marketplace.ts";
 import { LiquidationEngine } from "./server/liquidationEngine.ts";
-import { initializeTelegramBot, sendTelegramNotification } from "./server/telegram.ts";
+import { initializeTelegramBot, sendTelegramNotification, isTelegramTemporarilyDisabled, setTelegramTemporarilyDisabled } from "./server/telegram.ts";
 
 // --- GLOBAL SINGLETONS ---
 const app = express();
@@ -536,9 +536,10 @@ async function processPendingMintQueue() {
             return;
         }
 
-        // Zincir üstünde basılmamış ve basım miktarı bulunan ilk 3 varlığı bul
+        // Zincir üstünde basılmamış, kalıcı olarak başarısız işaretlenmemiş ve basım miktarı bulunan ilk 3 varlığı bul
         const pendingMints = await ReadyToSellModel.find({
             isMintedOnChain: { $ne: true },
+            isMintedOnChainFailed: { $ne: true },
             mintAmountKECO: { $exists: true, $ne: "0" }
         }).limit(3);
 
@@ -550,14 +551,30 @@ async function processPendingMintQueue() {
             const amount = item.mintAmountKECO || "0";
             if (amount === "0") continue;
 
-            pushLog('BLOCKCHAIN', 'INFO', `[RE-MINT_ATTEMPT] Varlık ${item.id} için ${amount} KECO basımı zincire iletiliyor...`);
+            const currentRetry = (item.mintRetryCount || 0) + 1;
+
+            pushLog('BLOCKCHAIN', 'INFO', `[RE-MINT_ATTEMPT] Varlık ${item.id} için ${amount} KECO basımı zincire iletiliyor... (Deneme: ${currentRetry}/3)`);
             const mintRes = await mainBlockchain.mintToken(greenToken, mainBlockchain.getWalletAddress(), amount);
             
             if (mintRes.success) {
-                await ReadyToSellModel.updateOne({ id: item.id }, { isMintedOnChain: true });
+                await ReadyToSellModel.updateOne({ id: item.id }, { 
+                    isMintedOnChain: true,
+                    mintRetryCount: currentRetry
+                });
                 pushLog('BLOCKCHAIN', 'SUCCESS', `[RE-MINT_OK] ${item.id} basımı başarıyla mühürlendi! Tx: ${mintRes.txHash}`);
             } else {
-                pushLog('BLOCKCHAIN', 'WARNING', `[RE-MINT_SKIP] ${item.id} basımı ertelendi (Yetki veya limit yetersiz): ${mintRes.error || "Ağ hatası"}`);
+                if (currentRetry >= 3) {
+                    await ReadyToSellModel.updateOne({ id: item.id }, { 
+                        isMintedOnChainFailed: true,
+                        mintRetryCount: currentRetry
+                    });
+                    pushLog('BLOCKCHAIN', 'ERROR', `[RE-MINT_PERMANENT_FAIL] ${item.id} varlığı 3 kez denendi ve başarısız oldu. Deadlock önleme amacıyla KUYRUKTAN KALICI OLARAK ÇIKARILDI.`);
+                } else {
+                    await ReadyToSellModel.updateOne({ id: item.id }, { 
+                        mintRetryCount: currentRetry
+                    });
+                    pushLog('BLOCKCHAIN', 'WARNING', `[RE-MINT_SKIP] ${item.id} basımı ertelendi (Yetki veya limit yetersiz): ${mintRes.error || "Ağ hatası"}`);
+                }
             }
         }
     } catch (err: any) {
@@ -682,6 +699,8 @@ const ReadyToSellSchema = new mongoose.Schema({
   isListedOnChain: { type: Boolean, default: false },
   listingTxHash: String,
   isMintedOnChain: { type: Boolean, default: false },
+  isMintedOnChainFailed: { type: Boolean, default: false },
+  mintRetryCount: { type: Number, default: 0 },
   mintAmountKECO: String
 });
 
@@ -2203,6 +2222,87 @@ app.get("/api/stream-logs", (req, res) => {
   });
 });
 
+/**
+ * Dynamic Telegram Bot initializer
+ */
+export function triggerTelegramBotInit() {
+  try {
+    const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+    const CHAT_ID = process.env.TELEGRAM_CHAT_ID;
+    if (TOKEN && CHAT_ID) {
+      initializeTelegramBot(TOKEN, CHAT_ID, {
+        startCrawler: async () => {
+          await startCrawlingEngine();
+        },
+        stopCrawler: async () => {
+          await stopCrawlingEngine();
+        },
+        getStatus: async () => {
+          const totalAssets = await ReadyToSellModel.countDocuments({});
+          const readyToSell = await ReadyToSellModel.countDocuments({ isSold: false, accessVoucherSignature: { $exists: true } });
+          const soldAssets = await ReadyToSellModel.countDocuments({ isSold: true });
+          const listedOnChain = await ReadyToSellModel.countDocuments({ isSold: false, isListedOnChain: true });
+
+          // Prefer cached blockchain data to keep bot extremely responsive
+          if (cachedBalanceData) {
+            return {
+              walletAddr: cachedBalanceData.address,
+              polBalance: parseFloat(cachedBalanceData.balanceMATIC) || 0,
+              usdtBalance: cachedBalanceData.payoutBalanceUSDT || "0.00",
+              greenBalance: cachedBalanceData.greenBalance || "0.00",
+              totalAssets,
+              readyToSell,
+              soldAssets,
+              listedOnChain,
+              isCrawling: serverState.isCrawling,
+              currentCrawlingUrl: serverState.currentCrawlingUrl || "Bekliyor...",
+              pagesProcessed: serverState.pagesProcessed,
+              totalKiloBytesSaved: serverState.totalKiloBytesSaved,
+              totalCo2SavedGrams: serverState.totalCo2SavedGrams,
+              selectedNetworkPath: serverState.selectedNetworkPath,
+              circuitBreakerStatus: serverState.circuitBreakerStatus
+            };
+          }
+
+          // Fallback query if cache is not yet loaded
+          const actualUsdtBalance = await mainBlockchain.getUSDTBalance(blockchainConfig.payoutWallet);
+          const polBalanceCheck = await mainBlockchain.checkGasBalance('polygon');
+          const polBalance = parseFloat(polBalanceCheck.balance) || 0;
+
+          const greenBalance = blockchainConfig.greenTokenAddress && !blockchainConfig.greenTokenAddress.includes('0x000')
+              ? await mainBlockchain.getTokenBalance(blockchainConfig.greenTokenAddress, mainBlockchain.getWalletAddress())
+              : "0.00";
+
+          return {
+            walletAddr: mainBlockchain.getWalletAddress() || "NaN",
+            polBalance,
+            usdtBalance: actualUsdtBalance,
+            greenBalance,
+            totalAssets,
+            readyToSell,
+            soldAssets,
+            listedOnChain,
+            isCrawling: serverState.isCrawling,
+            currentCrawlingUrl: serverState.currentCrawlingUrl || "Bekliyor...",
+            pagesProcessed: serverState.pagesProcessed,
+            totalKiloBytesSaved: serverState.totalKiloBytesSaved,
+            totalCo2SavedGrams: serverState.totalCo2SavedGrams,
+            selectedNetworkPath: serverState.selectedNetworkPath,
+            circuitBreakerStatus: serverState.circuitBreakerStatus
+          };
+        },
+        pushLog: (module, level, msg) => {
+          pushLog(module, level, msg);
+        }
+      });
+    } else {
+      console.log("[TELEGRAM] Credentials missing or incomplete in environment. Telegram bot skipped.");
+    }
+  } catch (tgErr: any) {
+    console.error("[WARNING] Telegram bot initialization failed gracefully:", tgErr.message);
+  }
+}
+
 async function startCrawlingEngine() {
   if (serverState.isCrawling) return;
   serverState.isCrawling = true;
@@ -2241,6 +2341,43 @@ app.post("/api/crawl/stop", async (req, res) => {
 
   await stopCrawlingEngine();
   res.json({ success: true, message: "Bağımsız tarama döngüsü durduruldu." });
+});
+
+/**
+ * Receive active Telegram status from current runtime configuration
+ */
+app.get("/api/telegram/status", (req, res) => {
+  res.json({
+    enabled: !isTelegramTemporarilyDisabled,
+    hasCredentials: !!(process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_CHAT_ID)
+  });
+});
+
+/**
+ * Enable or disable Telegram bot instance at runtime
+ */
+app.post("/api/telegram/toggle", (req, res) => {
+  const { enabled } = req.body;
+  if (typeof enabled !== "boolean") {
+    return res.status(400).json({ error: "Eksik veya geçersiz parametre: enabled (boolean)." });
+  }
+
+  const disabledMode = !enabled;
+  setTelegramTemporarilyDisabled(disabledMode);
+  
+  // Re-run the bot initializer under the new state!
+  triggerTelegramBotInit();
+
+  if (enabled) {
+    pushLog('SYSTEM', 'SUCCESS', "Telegram İki Yönlü Bildirim Botu kullanıcı arayüzünden AKTİFLEŞTİRİLDİ.");
+  } else {
+    pushLog('SYSTEM', 'WARNING', "Telegram İki Yönlü Bildirim Botu kullanıcı arayüzünden DURDURULDU.");
+  }
+
+  res.json({
+    success: true,
+    enabled: !isTelegramTemporarilyDisabled
+  });
 });
 
 /**
@@ -2402,81 +2539,7 @@ async function startServer() {
       refreshWalletBalances().catch(() => {});
 
       // Telegram İki Yönlü Kontrol & Bildirim Entegrasyonu
-      try {
-        const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-        const CHAT_ID = process.env.TELEGRAM_CHAT_ID;
-        if (TOKEN && CHAT_ID) {
-          initializeTelegramBot(TOKEN, CHAT_ID, {
-            startCrawler: async () => {
-              await startCrawlingEngine();
-            },
-            stopCrawler: async () => {
-              await stopCrawlingEngine();
-            },
-            getStatus: async () => {
-              const totalAssets = await ReadyToSellModel.countDocuments({});
-              const readyToSell = await ReadyToSellModel.countDocuments({ isSold: false, accessVoucherSignature: { $exists: true } });
-              const soldAssets = await ReadyToSellModel.countDocuments({ isSold: true });
-              const listedOnChain = await ReadyToSellModel.countDocuments({ isSold: false, isListedOnChain: true });
-
-              // Prefer cached blockchain data to keep bot extremely responsive
-              if (cachedBalanceData) {
-                return {
-                  walletAddr: cachedBalanceData.address,
-                  polBalance: parseFloat(cachedBalanceData.balanceMATIC) || 0,
-                  usdtBalance: cachedBalanceData.payoutBalanceUSDT || "0.00",
-                  greenBalance: cachedBalanceData.greenBalance || "0.00",
-                  totalAssets,
-                  readyToSell,
-                  soldAssets,
-                  listedOnChain,
-                  isCrawling: serverState.isCrawling,
-                  currentCrawlingUrl: serverState.currentCrawlingUrl || "Bekliyor...",
-                  pagesProcessed: serverState.pagesProcessed,
-                  totalKiloBytesSaved: serverState.totalKiloBytesSaved,
-                  totalCo2SavedGrams: serverState.totalCo2SavedGrams,
-                  selectedNetworkPath: serverState.selectedNetworkPath,
-                  circuitBreakerStatus: serverState.circuitBreakerStatus
-                };
-              }
-
-              // Fallback query if cache is not yet loaded
-              const actualUsdtBalance = await mainBlockchain.getUSDTBalance(blockchainConfig.payoutWallet);
-              const polBalanceCheck = await mainBlockchain.checkGasBalance('polygon');
-              const polBalance = parseFloat(polBalanceCheck.balance) || 0;
-
-              const greenBalance = blockchainConfig.greenTokenAddress && !blockchainConfig.greenTokenAddress.includes('0x000')
-                  ? await mainBlockchain.getTokenBalance(blockchainConfig.greenTokenAddress, mainBlockchain.getWalletAddress())
-                  : "0.00";
-
-              return {
-                walletAddr: mainBlockchain.getWalletAddress() || "NaN",
-                polBalance,
-                usdtBalance: actualUsdtBalance,
-                greenBalance,
-                totalAssets,
-                readyToSell,
-                soldAssets,
-                listedOnChain,
-                isCrawling: serverState.isCrawling,
-                currentCrawlingUrl: serverState.currentCrawlingUrl || "Bekliyor...",
-                pagesProcessed: serverState.pagesProcessed,
-                totalKiloBytesSaved: serverState.totalKiloBytesSaved,
-                totalCo2SavedGrams: serverState.totalCo2SavedGrams,
-                selectedNetworkPath: serverState.selectedNetworkPath,
-                circuitBreakerStatus: serverState.circuitBreakerStatus
-              };
-            },
-            pushLog: (module, level, msg) => {
-              pushLog(module, level, msg);
-            }
-          });
-        } else {
-          console.log("[TELEGRAM] Credentials missing or incomplete in environment. Telegram bot skipped.");
-        }
-      } catch (tgErr: any) {
-        console.error("[WARNING] Telegram bot initialization failed gracefully:", tgErr.message);
-      }
+      triggerTelegramBotInit();
     } catch (error: any) {
       pushLog('SYSTEM', 'ERROR', `[CRITICAL] Arka plan bağlantı hatası: ${error.message}`);
       console.error("[CRITICAL] Background initialization failed:", error.message);
