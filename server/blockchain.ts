@@ -825,14 +825,23 @@ export class BlockchainRouter {
       const spenderAddress = blockchainConfig.contractAddress && blockchainConfig.contractAddress !== ethers.constants.AddressZero
         ? blockchainConfig.contractAddress.toLowerCase()
         : routerAddr;
+
+      // --- CANLI PİYASA PROTOKOLÜ: RAPID GAS & SLIPPAGE ---
+      const txOverrides = await this.getSafeGasOverrides(provider);
+      txOverrides.gasLimit = 300000; // Stabil gaz limiti
+
       const currentAllowance = await tokenContract.allowance(wallet.address, spenderAddress);
       if (currentAllowance.lt(tokenAmountWei)) {
-        this.emitLog('BLOCKCHAIN', 'INFO', `[DEX_APPROVE] Borsa için harcama onayı veriliyor...`);
-        const approveTx = await tokenContract.approve(spenderAddress, ethers.constants.MaxUint256);
+        this.emitLog('BLOCKCHAIN', 'INFO', `[DEX_APPROVE] Borsa yetkisi alınıyor...`);
+        const approveTx = await tokenContract.approve(spenderAddress, ethers.constants.MaxUint256, {
+          maxPriorityFeePerGas: txOverrides.maxPriorityFeePerGas,
+          maxFeePerGas: txOverrides.maxFeePerGas,
+          gasLimit: 100000
+        });
         await approveTx.wait();
+        this.emitLog('BLOCKCHAIN', 'SUCCESS', `[APPROVE_SUCCESS] Borsa artık tokenları harcayabilir.`);
       }
 
-      // 2. TAKAS (Swap) PARAMETRELERİ
       // Güzergah: KECO -> WMATIC -> USDT (Daha fazla likidite şansı için standart yol)
       const path = [tokenAddr.toLowerCase(), WMATIC.toLowerCase(), POLYGON_USDT.toLowerCase()];
       const deadline = Math.floor(Date.now() / 1000) + 60 * 20; // 20 dakika
@@ -845,9 +854,6 @@ export class BlockchainRouter {
         return { success: false, txHash: '', error: errMsg };
       }
 
-      // --- CANLI PİYASA PROTOKOLÜ: RAPID GAS & SLIPPAGE ---
-      const feeData = await provider.getFeeData();
-      
       // 1. ADIM: Fiyat Sorgulama (0.1sn Gecikmeli Gerçek Fiyat)
       const amountsOut = await router.getAmountsOut(tokenAmountWei, path).catch((err: any) => {
         this.emitLog('BLOCKCHAIN', 'WARNING', `[LIQUIDITY_OFFLINE] QuickSwap'ta fiyat bulunamadı. Havuz kurulmamış olabilir.`);
@@ -862,9 +868,6 @@ export class BlockchainRouter {
       
       // %1 Slippage Tolerance (Kayma Toleransı)
       const amountOutMin = ethers.BigNumber.from(expectedUsdt).mul(99).div(100);
-
-      const txOverrides = await this.getSafeGasOverrides(provider);
-      txOverrides.gasLimit = 300000; // Stabil gaz limiti
 
       this.emitLog('BLOCKCHAIN', 'INFO', `[DEX_LIVE] Fiyat: $${ethers.utils.formatUnits(expectedUsdt, 6)} USDT | Tolerans: %1 | Emre çıkılıyor...`);
       

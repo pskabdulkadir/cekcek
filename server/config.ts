@@ -67,7 +67,7 @@ export const blockchainConfig = {
     batchMining: process.env.BATCH_MINING !== 'false', // Varsayılan olarak true, .env'den false gelirse false olur
     autoReinvest: process.env.AUTO_REINVEST === 'true',
     maxPriorityFee: process.env.MAX_PRIORITY_FEE || '45000000000', // 45 Gwei Taban Bahşiş (Savaş Modu Hızlandırma)
-    gasPriceLimit: process.env.GAS_PRICE_LIMIT || '350000000000', // 350 Gwei Üst Limit (Ağ Yoğunluğu Koruması)
+    gasPriceLimit: process.env.GAS_PRICE_LIMIT || '400000000000', // 400 Gwei Üst Limit (Ağ Yoğunluğu Koruması)
     minReinvestThreshold: parseFloat(process.env.MIN_REINVEST_THRESHOLD || '5'),
     marketplaceApiUrl: process.env.MARKETPLACE_API_URL || '', // Geçersiz domain temizlendi
     oceanProtocolUrl: 'https://subgraph.mainnet.oceanprotocol.com/subgraphs/name/oceanprotocol/ocean-subgraph', // GERÇEKLİK ZORUNLU
