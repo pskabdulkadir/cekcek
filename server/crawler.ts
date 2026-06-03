@@ -71,6 +71,11 @@ export class WebCrawler {
    */
   private checkLicenseCompliance(html: string, url: string): { isCompliant: boolean; license: string } {
     // Heuristic: Sayfa içerisinde lisans beyanı arar
+    // YENİ HALİ (Değiştirmen gereken): Wikipedia sayfalarını her zaman başarılı say
+    if (url.includes("wikipedia.org")) { 
+        return { isCompliant: true, license: "Wikipedia Content (Debug Override)" };
+    }
+
     const openDataKeywords = [/creative\s?commons/i, /cc-by/i, /public\s?domain/i, /open\s?government\s?licence/i, /data\.gov/i];
     const isCompliant = openDataKeywords.some(pattern => pattern.test(html)) || url.includes('.gov') || url.includes('.org');
     
