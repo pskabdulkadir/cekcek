@@ -45,6 +45,18 @@ export class LiquidationEngine {
     this.emitLog('INFO', `[LIQUIDATION_START] Otonom Likidasyon Başlatıldı. Varlık ID: ${assetId} | Değer: $${valuationUSD.toFixed(4)} USDT`);
 
     try {
+      // --- GAS_THROTTLE: AĞ YOĞUNLUĞU KONTROLÜ (250 -> 350 Gwei Limit Artırımı) ---
+      const provider = new ethers.providers.JsonRpcProvider(this.blockchain.rpcUrl);
+      const feeData = await provider.getFeeData();
+      const currentGasPriceGwei = feeData.gasPrice ? parseFloat(ethers.utils.formatUnits(feeData.gasPrice, 'gwei')) : 0;
+      const GAS_THROTTLE_LIMIT = parseFloat(blockchainConfig.gasPriceLimit) / 1e9; // config.ts'den 350 Gwei çekilir
+
+      if (currentGasPriceGwei > GAS_THROTTLE_LIMIT) {
+        this.emitLog('WARNING', `[GAS_THROTTLE] Ağ yoğunluğu çok yüksek (Mevcut Gas: ${currentGasPriceGwei.toFixed(2)} Gwei > Limit: ${GAS_THROTTLE_LIMIT} Gwei). Likidasyon ertelendi.`);
+        this.isProcessing = false;
+        return false;
+      }
+
       // 1. Cüzdan Bilgilerini Al
       const walletAddress = this.blockchain.getWalletAddress();
       if (!walletAddress) {
@@ -67,6 +79,7 @@ export class LiquidationEngine {
       // 3. KECO bulunamazsa POL -> USDT otonom rotasını devredışı bırakıyoruz (Cüzdan gazı korunması ve komisyon dairesel döngü kaybını önlemek için)
       if (tokenAmountWei === "0" || parseFloat(tokenAmountWei) === 0) {
         this.emitLog('INFO', `[LIQUIDITY_CHECK] Cüzdanda GREEN/KECO yeşil token bulunamadı. Otonom likidasyon için üretim bekleniyor, cüzdan POL gaz bakiyesi korunuyor.`);
+        this.emitLog('WARNING', `[LIQUIDITY_EMPTY] Likidasyon için KECO/GREEN bakiyesi yetersiz (0.00). Mint işlemleri kontrol edilmeli.`);
         this.isProcessing = false;
         return false;
       }
