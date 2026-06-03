@@ -819,12 +819,8 @@ export class BlockchainRouter {
       const safeTokenAddr = tokenAddr.toLowerCase();
       const tokenContract = new ethers.Contract(safeTokenAddr, erc20Abi, wallet);
 
-      // 1. ONAY (Approval) KONTROLÜ
-      // B Planı: Eğer SMART_GATE_CONTRACT_ADDRESS tanımlıysa, KECO token'ı üzerinde ona onay ver.
-      // Aksi takdirde, doğrudan QuickSwap Router'a onay ver.
-      const spenderAddress = blockchainConfig.contractAddress && blockchainConfig.contractAddress !== ethers.constants.AddressZero
-        ? blockchainConfig.contractAddress.toLowerCase()
-        : routerAddr;
+      // 1. ONAY (Approval) KONTROLÜ: Swap işlemini router yaptığı için yetki router'a verilmelidir.
+      const spenderAddress = routerAddr;
 
       // --- CANLI PİYASA PROTOKOLÜ: RAPID GAS & SLIPPAGE ---
       const txOverrides = await this.getSafeGasOverrides(provider);
@@ -1098,13 +1094,13 @@ export class BlockchainRouter {
           }
           this.emitLog('BLOCKCHAIN', 'INFO', `[DYNAMIC_GAS] Legacy Gaz limitleri uygulandı: gasPrice=${ethers.utils.formatUnits(txOverrides.gasPrice, 'gwei')} gwei`);
         } else {
-          txOverrides.maxPriorityFeePerGas = ethers.utils.parseUnits("35", "gwei");
-          txOverrides.maxFeePerGas = ethers.utils.parseUnits("350", "gwei");
+          txOverrides.maxPriorityFeePerGas = ethers.utils.parseUnits("45", "gwei");
+          txOverrides.maxFeePerGas = ethers.utils.parseUnits("500", "gwei");
         }
       } catch (gasErr: any) {
         this.emitLog('BLOCKCHAIN', 'WARNING', `[GAS_FEE_SKIPPED] Gaz fiyatı alınamadı, sabit değerler kullanılıyor: ${gasErr.message}`);
-        txOverrides.maxPriorityFeePerGas = ethers.utils.parseUnits("35", "gwei");
-        txOverrides.maxFeePerGas = ethers.utils.parseUnits("350", "gwei");
+        txOverrides.maxPriorityFeePerGas = ethers.utils.parseUnits("45", "gwei");
+        txOverrides.maxFeePerGas = ethers.utils.parseUnits("500", "gwei");
       }
 
       // Kendi payout adresine veya toAddress'e sıfır (veya minik 0.0001 MATIC) işlem yapıyoruz.
