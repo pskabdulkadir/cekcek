@@ -109,6 +109,24 @@ export function initializeTelegramBot(
       }
     });
 
+    // Command "/analiz" handler - On-demand özet rapor
+    bot.onText(/\/analiz/, async (msg) => {
+      const chatIdStr = String(msg.chat.id);
+      if (!isSenderAuthorized(msg)) return;
+
+      try {
+        const stats = await callbacks.getStatus();
+        const report = `📊 <b>SİSTEM ANALİZİ</b>\n\n` +
+                       `- <b>Durum:</b> ${stats.isCrawling ? "Aktif (Sonsuz Döngü)" : "Beklemede"}\n` +
+                       `- <b>Bakiye:</b> ${stats.polBalance.toFixed(4)} POL\n` +
+                       `- <b>Kasa:</b> ${stats.usdtBalance} USDT / ${stats.greenBalance} KECO\n` +
+                       `- <b>Mod:</b> Üretim/Otonom`;
+        await bot?.sendMessage(chatIdStr, report, { parse_mode: "HTML" });
+      } catch (err: any) {
+        await bot?.sendMessage(chatIdStr, `❌ <b>Analiz Hatası:</b> <code>${err.message}</code>`, { parse_mode: "HTML" });
+      }
+    });
+
     // Command "/status" handler
     bot.onText(/\/status/, async (msg) => {
       const chatIdStr = String(msg.chat.id);

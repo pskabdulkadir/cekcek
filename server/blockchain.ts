@@ -41,6 +41,7 @@ export class BlockchainRouter {
   };
 
   private logCallback?: (module: 'SYSTEM' | 'CRAWLER' | 'OPTIMIZER' | 'BLOCKCHAIN' | 'AI', level: 'INFO' | 'SUCCESS' | 'WARNING' | 'ERROR' | 'ANALYZE', msg: string) => void;
+  public onNotification?: (msg: string) => void;
 
   // Varlık oluşturma fonksiyonu ve CarbonHarvester sözleşme desteği
   private contractAbi = [
@@ -299,6 +300,11 @@ export class BlockchainRouter {
       await tx.wait();
       
       this.emitLog('BLOCKCHAIN', 'SUCCESS', `USDT transfer tamamlandı! Tx: ${tx.hash}`);
+      
+      if (this.onNotification) {
+        this.onNotification(`USDT Transferi Başarılı!\nMiktar: ${amount} USDT\nAlıcı: ${toAddress}`);
+      }
+      
       return { success: true, txHash: tx.hash };
     } catch (err: any) {
       const errorMsg = this.parseBlockchainError(err);
@@ -709,6 +715,10 @@ export class BlockchainRouter {
 
           this.emitLog('BLOCKCHAIN', 'SUCCESS', `${receipt.blockNumber} numaralı blok onaylandı. Veri analitiği kaydı blok zincirine eklendi. Harcanan Gas: ${receipt.gasUsed.toString()}`);
 
+          if (this.onNotification) {
+            this.onNotification(`Veri Analizi Mühürlendi!\nCO2: ${co2AnalysisGrams.toFixed(4)}g\nProof: ${proofHash.substring(0, 16)}...`);
+          }
+          
           return {
             success: true,
             txHash: tx.hash,
@@ -771,6 +781,11 @@ export class BlockchainRouter {
       
       await tx.wait();
       this.emitLog('BLOCKCHAIN', 'SUCCESS', `[REFILL_OK] Yakıt ikmali tamamlandı. Tx: ${tx.hash}`);
+      
+      if (this.onNotification) {
+        this.onNotification(`Yakıt İkmali (Gas Refill) Tamamlandı!\nKullanılan: ${usdtAmount} USDT\nBakiye POL olarak güncellendi.`);
+      }
+      
       return { success: true, txHash: tx.hash };
     } catch (err: any) {
       this.emitLog('BLOCKCHAIN', 'ERROR', `Yakıt ikmali başarısız: ${err.message}`);
@@ -879,6 +894,10 @@ export class BlockchainRouter {
 
       const receipt = await swapTx.wait();
       this.emitLog('BLOCKCHAIN', 'SUCCESS', `[DEX_OK] Takas başarılı! USDT cüzdanınıza aktarıldı. Tx: ${swapTx.hash}`);
+      
+      if (this.onNotification) {
+        this.onNotification(`DEX Satış İşlemi Başarılı!\nKazanç USDT olarak cüzdana yönlendirildi.\nTx: ${swapTx.hash}`);
+      }
       
       // Otomatik USDT Tahsilatı kontrolü (USDT Bakiye Güncelleme Dinleyicisi)
       try {
@@ -1040,6 +1059,10 @@ export class BlockchainRouter {
       this.updatePersistentConfig('GREEN_TOKEN_ADDRESS', finalAddress);
       this.updatePersistentConfig('CONTRACT_ADDRESS', finalAddress); // FINANCE modülü için
       this.emitLog('SYSTEM', 'WARNING', `[RENDER_PERSISTENCE] Yeni adres: ${finalAddress}. Lütfen bu adresi Render Dashboard'a GREEN_TOKEN_ADDRESS olarak ekleyin.`);
+
+      if (this.onNotification) {
+        this.onNotification(`Yeni Akıllı Kontrat Dağıtıldı!\nSembol: ${symbol}\nAdres: ${finalAddress}`);
+      }
 
       try {
           this.emitLog('BLOCKCHAIN', 'INFO', `[SYNC] RPC senkronizasyonu bekleniyor (20sn)...`);
