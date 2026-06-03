@@ -37,6 +37,10 @@ export function initializeTelegramBot(
   const parsedToken = token ? token.trim() : "";
   const parsedChatId = chatId ? chatId.trim() : "";
 
+  // Debug: Render/Local ortam değişkeni kontrolü
+  console.log("DEBUG: Telegram Token Uzunluğu:", parsedToken ? parsedToken.length : "YOK");
+  console.log("DEBUG: Telegram Chat ID Mevcut mu:", parsedChatId ? "EVET" : "HAYIR");
+
   // Check if token or chatId has placeholder patterns or are invalid
   const isPlaceholder = 
     parsedToken.includes("Senin_") || 
@@ -46,11 +50,9 @@ export function initializeTelegramBot(
     parsedToken === "" || 
     parsedChatId === "";
 
-  // Real Telegram bot token format: 123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ
-  const isFormatValid = /^\d+:[A-Za-z0-9_-]{35,}$/.test(parsedToken);
-
-  if (isPlaceholder || !isFormatValid) {
-    console.error("❌ HATA: TELEGRAM_BOT_TOKEN veya TELEGRAM_CHAT_ID bulunamadı veya geçersiz formatta!");
+  // Daha esnek kontrol: Token uzunluğu yeterli mi ve placeholder değil mi?
+  if (isPlaceholder || parsedToken.length < 20) {
+    console.error("!!! KRİTİK HATA: TELEGRAM_BOT_TOKEN veya TELEGRAM_CHAT_ID render değişkenlerinde yok veya hatalı!");
     return;
   }
 
