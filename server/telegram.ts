@@ -34,8 +34,8 @@ export function initializeTelegramBot(
     pushLog: (module: any, level: any, msg: string) => void;
   }
 ) {
-  const parsedToken = token ? token.trim() : "";
-  const parsedChatId = chatId ? chatId.trim() : "";
+  const parsedToken = token ? token.replace(/['"]/g, '').trim() : "";
+  const parsedChatId = chatId ? chatId.replace(/['"]/g, '').trim() : "";
 
   // Check if token or chatId has placeholder patterns or are invalid
   const isPlaceholder = 
@@ -74,6 +74,16 @@ export function initializeTelegramBot(
       const msgChatId = String(msg.chat.id).trim();
       return msgChatId === configuredChatId;
     };
+
+    // Command "/ping" handler (Zorunlu Telemetri Testi)
+    bot.onText(/\/ping/, async (msg) => {
+      const chatIdStr = String(msg.chat.id);
+      if (!isSenderAuthorized(msg)) {
+        await bot?.sendMessage(chatIdStr, `🛑 <b>YETKİSİZ ERİŞİM</b>\nBu bota komut gönderme yetkiniz yok. Sohbet ID'niz: <code>${chatIdStr}</code>`, { parse_mode: "HTML" });
+        return;
+      }
+      await bot?.sendMessage(chatIdStr, `🏓 <b>PONG!</b>\nMaster Satış Botu iletişim hattı aktif ve her şey kusursuz çalışıyor!\nZaman damgası: <code>${new Date().toLocaleString()}</code>`, { parse_mode: "HTML" });
+    });
 
     // Command "/start" handler
     bot.onText(/\/start/, async (msg) => {
@@ -156,6 +166,30 @@ export function initializeTelegramBot(
       }
     });
 
+    // Command "/analiz" handler
+    bot.onText(/\/analiz/, async (msg) => {
+      const chatIdStr = String(msg.chat.id);
+      if (!isSenderAuthorized(msg)) {
+        await bot?.sendMessage(chatIdStr, `🛑 <b>YETKİSİZ ERİŞİM</b>\nBu bota komut gönderme yetkiniz yok.`, { parse_mode: "HTML" });
+        return;
+      }
+      try {
+        const stats = await callbacks.getStatus();
+        const statusReport = `📊 <b>SİSTEM DURUM RAPORU</b>\n\n` +
+          `🔹 <b>Durum:</b> ${stats.isCrawling ? "🟢 Otonom Motor Aktif" : "🔴 Beklemede (IDLE)"}\n` +
+          `🔹 <b>Gas Cüzdanı:</b> <code>${stats.walletAddr}</code>\n` +
+          `🔹 <b>Gas Bakiye:</b> <code>${stats.polBalance.toFixed(4)} POL</code>\n` +
+          `🔹 <b>USDT Bakiye:</b> <code>$${stats.usdtBalance} USDT</code>\n` +
+          `🔹 <b>Toplam Varlık (NFT/Data):</b> <code>${stats.totalAssets} adet</code>\n` +
+          `🔹 <b>Satılan / Likidide Edilen:</b> <code>${stats.soldAssets} adet</code>\n` +
+          `🔹 <b>Son Güncelleme:</b> <code>${new Date().toLocaleTimeString()}</code>\n\n` +
+          `<i>Sistem şu an stabil çalışıyor.</i>`;
+        await bot?.sendMessage(chatIdStr, statusReport, { parse_mode: "HTML" });
+      } catch (err: any) {
+        await bot?.sendMessage(chatIdStr, `❌ <b>Analiz Hatası:</b> <code>${err.message}</code>`, { parse_mode: "HTML" });
+      }
+    });
+
     // Handle initial greeting or fallback text instructions
     bot.on("message", async (msg) => {
       // Avoid responding if unauthorized or if it's a command handled above
@@ -167,7 +201,9 @@ export function initializeTelegramBot(
         const helpText = `👋 <b>Protokol İletişim Hattı Aktif!</b>\n\nCekcek Botunuzu 7/24 telefonunuzdan kontrol edebilirsiniz. Kullanılabilir Komutlar:\n\n` +
           `🟩 <code>/start</code> - Otonom mod ve taramayı başlatır.\n` +
           `🟨 <code>/stop</code> - Sistemi bekleme (IDLE) moduna alır, döngüleri dondurur.\n` +
-          `📊 <code>/status</code> - Anlık cüzdan bakiye, gaz seviyesi ve varlık sayısını raporlar.`;
+          `📈 <code>/analiz</code> - Sistem durumunu analiz eder ve özetler.\n` +
+          `📊 <code>/status</code> - Detaylı cüzdan bakiye ve varlık stoklarını raporlar.\n` +
+          `🏓 <code>/ping</code> - Botun erişim bağlantısını anlık doğrular.`;
         await bot?.sendMessage(String(msg.chat.id), helpText, { parse_mode: "HTML" });
       }
     });
@@ -179,11 +215,36 @@ export function initializeTelegramBot(
 
 /**
  * Send an HTML-formatted system alert or success log to the user's Telegram chat.
- * This runs completely asynchronous to prevent blocking the Main loop.
+ * Filters out high-frequency crawling telemetry noise as requested by "Sessizlik Kuralı".
  */
-export async function sendTelegramNotification(message: string) {
+export async function sendTelegramNotification(message: string, isUrgent: boolean = false) {
   if (!bot || !configuredChatId) return;
   
+  const upperMsg = message.toUpperCase();
+  const isTargetMessage = isUrgent || 
+                          upperMsg.includes("BAŞARILI") || 
+                          upperMsg.includes("SUCCESS") || 
+                          upperMsg.includes("HEDEF VERİ ELDE EDİLDİ") ||
+                          upperMsg.includes("LİKİDASYON") ||
+                          upperMsg.includes("OTONOM LİKİDASYON") ||
+                          upperMsg.includes("PONG!") ||
+                          message.includes("✅") ||
+                          message.includes("🛑") ||
+                          message.includes("🟩") ||
+                          message.includes("🟨");
+
+  // Skip high-frequency crawling logs or skip nodes to conform to the noiseless design
+  if (!isTargetMessage && (
+    upperMsg.includes("ATLANDI") || 
+    upperMsg.includes("DÜĞÜM ATILDI") || 
+    upperMsg.includes("TARAMA GÜNLÜĞÜ") ||
+    upperMsg.includes("KRİTERİ UYUŞMADI") ||
+    upperMsg.includes("YETERSİZ KALİTE")
+  )) {
+    // Suppress telemetry spam to keep the bot professional and silent during bulk scans
+    return;
+  }
+
   try {
     await bot.sendMessage(configuredChatId, message, { parse_mode: "HTML", disable_web_page_preview: true });
   } catch (err: any) {

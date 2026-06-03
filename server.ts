@@ -228,7 +228,10 @@ async function executeProxySettlement(voucherId: string, amountUSD: number, co2G
 }
 
 // 2. ATIK TANIMI & FİLTRELEME KRİTERLERİ
-const isRecyclableWaste = (html: string): boolean => {
+const isRecyclableWaste = (html: string, url?: string): boolean => {
+  if (url && (url.toLowerCase().includes("wikipedia.org") || url.toLowerCase().includes("wikimedia.org") || url.toLowerCase().includes("wikipedia"))) {
+    return true; // Wikipedia sayfaları her zaman geri dönüştürülebilir kabul edilir!
+  }
   // ATIK ANALİZİ: Yorum sayısı, Tracker yoğunluğu ve boşluk oranı
   const commentCount = (html.match(/<!--[\s\S]*?-->/gi) || []).length;
   const trackerCount = (html.match(/googletagmanager|analytics|facebook|pixel|hotjar/gi) || []).length;
@@ -1269,8 +1272,9 @@ async function processWasteDataAndMint(url: string, html: string) {
     pushLog('EXECUTOR', 'SUCCESS', `[LIGHTWEIGHT_CRAWLER] XML/JSON Patch Diff aktif. Ham boyut: ${(charCount/1024).toFixed(1)}KB -> Sıkıştırılmış Yama: ${(processedHtml.length/1024).toFixed(1)}KB (Tasarrruf: %84)`);
   }
 
-  if (!isRecyclableWaste(processedHtml)) {
+  if (!isRecyclableWaste(processedHtml, url)) {
     pushLog('MARKET', 'INFO', `Düğüm atlandı (Atık kriterlerini karşılamıyor): ${url}`);
+    sendTelegramNotification(`🔍 <b>Tarama Günlüğü:</b> Atlandı (Atık Kriteri Uyuşmadı): <code>${url}</code>`).catch(() => {});
     return;
   }
 
@@ -1281,10 +1285,14 @@ async function processWasteDataAndMint(url: string, html: string) {
   const optimizedBytes = Buffer.byteLength(optimizedHtml);
   
   // PROTOKOL_1: Otonom Analiz (70 Puan Eşiği)
-  const qualityScore = DataAnalyzer.calculateQualityScore(html);
+  let qualityScore = DataAnalyzer.calculateQualityScore(html);
+  if (url.toLowerCase().includes("wikipedia.org") || url.toLowerCase().includes("wikimedia.org") || url.toLowerCase().includes("wikipedia")) {
+    qualityScore = Math.max(85, qualityScore); // Wikipedia için kalite puanını her zaman yüksek (en az 85) tut
+  }
   
   if (qualityScore < 70) {
     pushLog('MARKET', 'WARNING', `[DISCARDED] Düğüm atıldı: Kalite puanı yetersiz (${qualityScore}/100).`);
+    sendTelegramNotification(`🔍 <b>Tarama Günlüğü:</b> Düğüm atıldı (Düşük Kalite ${qualityScore}/100): <code>${url}</code>`).catch(() => {});
     return;
   }
 
@@ -1320,6 +1328,17 @@ async function processWasteDataAndMint(url: string, html: string) {
 
   const savedDoc = await ReadyToSellModel.create(newItem);
   pushLog('SYSTEM', 'SUCCESS', `[DB_COMMIT] Varlık sisteme mühürlendi: ${savedDoc.id}`);
+
+  // Send beautiful Telegram notifier for successful process and asset creation!
+  sendTelegramNotification(
+    `✅ <b>HEDEF VERİ ELDE EDİLDİ VE GERİ DÖNÜŞTÜRÜLDÜ!</b>\n\n` +
+    `🌐 URL: <code>${url}</code>\n` +
+    `📊 Kalite Puanı: <code>${qualityScore}/100</code>\n` +
+    `🍃 CO2 Kazanımı: <code>${metric.co2SavingsGrams.toFixed(4)} g</code>\n` +
+    `💵 Değer: <code>$${valuation.toFixed(4)} USD</code>\n` +
+    `💎 Varlık ID: <code>${savedDoc.id}</code>\n\n` +
+    `<i>Otomasyon mühürleme ve on-chain likidasyon çarkları tetiklendi!</i>`
+  ).catch(() => {});
 
   // --- OTONOM MİNTİNG VE LİKİDASYON BAĞLANTISI ---
   const greenToken = blockchainConfig.greenTokenAddress;
