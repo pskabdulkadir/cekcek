@@ -34,11 +34,9 @@ export const blockchainConfig = {
     payoutWallet: process.env.PAYOUT_WALLET || process.env.CHANNEL_ROUTING_WALLET || '', // Gelirlerin gideceği ana adres
     commissionWallet: process.env.COMMISSION_WALLET || '0x71C7656EC7ab88b098defB751B7401B5f6d8976F', // Aracı firma cüzdanı
     commissionRate: parseFloat(process.env.COMMISSION_RATE || '0.10'), // %10 Komisyon oranı
-    crawlMode: process.env.CRAWL_MODE || 'DATA_RECLAMATION', // Veri Geri Kazanımı Modu Sabitlendi
-    targetDomains: (process.env.TARGET_DOMAINS || 'wikipedia.org,data.gov,archive.org,github.com').split(','), // Genişletilmiş hammadde sahası
     rpcUrl: process.env.RPC_URL || 'https://polygon-mainnet.g.alchemy.com/v2/UVwOeS22SVrUka4yMOobQ', // Varsayılan olarak Polygon Mainnet RPC
     rpcTimeout: parseInt(process.env.RPC_TIMEOUT || '60000'), // Ağ zaman aşımı süresi (Varsayılan 60sn)
-    publishBatchSize: parseInt(process.env.PUBLISH_BATCH_SIZE || '1'), // Trafik kısıtlamaları için tekli mühürleme (seri işleme)
+    publishBatchSize: parseInt(process.env.PUBLISH_BATCH_SIZE || '10'), // Trafik kısıtlamaları için toplu işlem batching (gas tasarrufu)
     privateKey: process.env.PRIVATE_KEY || '',
     zeroGasActive: false,
     networkMode: 'mainnet', // %100 Canlı Mod Sabitlendi
@@ -64,11 +62,11 @@ export const blockchainConfig = {
     greenTokenAddress: process.env.GREEN_TOKEN_ADDRESS || '0x0000000000000000000000000000000000000000',
     gasRefillEnabled: process.env.GAS_REFILL_ENABLED !== 'false', // Otomatik yakıt doldurma aktif mi?
     gasRefillThreshold: parseFloat(process.env.GAS_REFILL_THRESHOLD || '0.5'), // 0.5 POL altına düşerse işlem yapma/doldur
-    gasRefillUsdtAmount: parseFloat(process.env.GAS_REFILL_USDT_AMOUNT || '5.0') // 5 USDT'lik yakıt al
+    gasRefillUsdtAmount: parseFloat(process.env.GAS_REFILL_USDT_AMOUNT || '5.0'), // 5 USDT'lik yakıt al
+    crawlMode: process.env.CRAWL_MODE || 'DATA_RECLAMATION' // DATA_RECLAMATION veya WEB_CRAWLER modu
 };
 
 export const dbConfig = {
     uri: mongoUri,
-    dbName: process.env.CRAWLER_DB_NAME || 'geridonizm', // Verinin bulunduğu asıl veritabanı
-    mainInventoryCollectionName: process.env.MAIN_INVENTORY_COLLECTION_NAME || 'main_inventory', // Koleksiyon adını .env'den eşleştirin
+    dbName: process.env.CRAWLER_DB_NAME || 'geridonüşüm',
 };

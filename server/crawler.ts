@@ -9,7 +9,6 @@
 import axios from 'axios';
 import * as cheerio from 'cheerio';
 import { URL } from 'url';
-import { blockchainConfig } from './config.ts';
 
 // CRAWLER GÜVENLİĞİ: Kimlik Rotasyonu
 const USER_AGENTS = [
@@ -18,8 +17,10 @@ const USER_AGENTS = [
   'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36'
 ];
 
-// CRAWLER GÜVENLİĞİ: Hammadde toplama sahaları config'den alınır
-const WHITELISTED_DOMAINS = blockchainConfig.targetDomains;
+// CRAWLER GÜVENLİĞİ: Sadece bu domainlerden veri çek
+const WHITELISTED_DOMAINS = [
+  'wikipedia.org',
+];
 
 export interface CrawlerOptions {
   delayMs?: number;
@@ -89,28 +90,18 @@ export class WebCrawler {
       
       // Beyaz liste kontrolü
       const hostname = parsedUrl.hostname;
-      const isPublicDomain = hostname.endsWith('.gov') || hostname.endsWith('.org') || hostname.endsWith('.edu');
       const isWhitelisted = WHITELISTED_DOMAINS.some(domain => hostname === domain || hostname.endsWith(`.${domain}`));
-      
-      // DATA_RECLAMATION MODU: Eğer mod bu ise, Wikipedia dışındaki hammadde kaynaklarına da izin ver
-      if (blockchainConfig.crawlMode === 'DATA_RECLAMATION') {
-          if (isPublicDomain && !isWhitelisted) {
-              this.emitLog('CRAWLER', 'INFO', `[AUTO_WHITELIST] Hammadde sahası onaylandı: ${hostname}`);
-          } else if (isWhitelisted) {
-              this.emitLog('CRAWLER', 'INFO', `[RECLAMATION_TARGET] Kaynak tespit edildi: ${hostname}`);
-          }
+      if (!isWhitelisted) {
+        this.emitLog('CRAWLER', 'WARNING', `[WHITELIST_BLOCKED] Düğüm atlandı (Beyaz listede değil): ${urlString}`);
+        return;
       }
-
-      // Karar: Eğer beyaz listede değilse VE kamu verisi değilse engelle
-      const canProceed = isWhitelisted || (blockchainConfig.crawlMode === 'DATA_RECLAMATION' && isPublicDomain);
-
-      if (!canProceed) {
-        this.emitLog('CRAWLER', 'WARNING', `[WHITELIST_BLOCKED] Erişim izni yok: ${urlString}`);
+      const cleanUrl = parsedUrl.origin + parsedUrl.pathname + parsedUrl.search;
+      
+      // Bellek Sızıntısı Koruması: Kuyruk boyutunu sınırla
+      if (this.queue.length >= 1000) {
         return;
       }
 
-      const cleanUrl = parsedUrl.origin + parsedUrl.pathname + parsedUrl.search;
-      
       if (!this.visitedUrls.has(cleanUrl) && !this.queue.includes(cleanUrl)) {
         this.queue.push(cleanUrl);
         // Performans Koruması: Alt düğümleri sadece konsola yaz, SSE kanalını boğma

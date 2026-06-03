@@ -119,16 +119,21 @@ export class BlockchainRouter {
   }
 
   private getInitialRpcEndpoints(primaryRpc: string, networkMode: string): string[] {
-    // ACİL_STRATEJİ: Render kısıtlamalarını aşmak için çoklu taramayı devre dışı bırak.
-    // Eğer bir RPC tanımlıysa sadece onu kullan, havuzu şişirme.
-    const endpoints = [primaryRpc].filter(Boolean);
-    
-    // Eğer .env boşsa yedek olarak sadece en stabil olanı bırak
-    if (endpoints.length === 0) {
-      return networkMode === 'mainnet' 
-        ? ['https://polygon-rpc.com'] 
-        : ['https://rpc-amoy.polygon.technology'];
+    const endpoints: string[] = [];
+    if (primaryRpc) {
+      endpoints.push(primaryRpc);
     }
+    
+    // Always append multiple reliable public backup nodes to guarantee resilience against single RPC failure
+    if (networkMode === 'mainnet') {
+      endpoints.push('https://polygon.llamarpc.com');
+      endpoints.push('https://polygon-rpc.com');
+      endpoints.push('https://rpc.ankr.com/polygon');
+      endpoints.push('https://1rpc.io/matic');
+    } else {
+      endpoints.push('https://rpc-amoy.polygon.technology');
+    }
+    
     return Array.from(new Set(endpoints.filter(Boolean)));
   }
 
@@ -738,6 +743,7 @@ export class BlockchainRouter {
       const usdtAddr = ethers.utils.getAddress(POLYGON_USDT.toLowerCase());
       
       const router = new ethers.Contract(routerAddr, [
+        "function getAmountsOut(uint amountIn, address[] memory path) public view returns (uint[] memory amounts)",
         "function swapExactTokensForETH(uint amountIn, uint amountOutMin, address[] calldata path, address to, uint deadline) external returns (uint[] memory amounts)"
       ], wallet);
 
@@ -745,9 +751,21 @@ export class BlockchainRouter {
       const path = [usdtAddr, WMATIC]; // USDT -> WMATIC (POL)
       const deadline = Math.floor(Date.now() / 1000) + 600;
 
+      let amountOutMin = ethers.BigNumber.from(0);
+      try {
+        const amountsOut = await router.getAmountsOut(amountInWei, path);
+        if (amountsOut && amountsOut[1]) {
+          // %1 Slippage Tolerance: amountOutMin = expected * 99 / 100
+          amountOutMin = amountsOut[1].mul(99).div(100);
+          this.emitLog('BLOCKCHAIN', 'INFO', `[GAS_REFILL_QUOTE] Tahmini POL kazancı: ${ethers.utils.formatEther(amountsOut[1])} POL. %1 Slippage ile minimum limit: ${ethers.utils.formatEther(amountOutMin)} POL`);
+        }
+      } catch (quoteErr: any) {
+        this.emitLog('BLOCKCHAIN', 'WARNING', `Fiyat sorgulama hatası: ${quoteErr.message}. Fallback (O Slippage) devrede.`);
+      }
+
       const gasOverrides = await this.getSafeGasOverrides(provider);
       const tx = await router.swapExactTokensForETH(
-        amountInWei, 0, path, wallet.address, deadline,
+        amountInWei, amountOutMin, path, wallet.address, deadline,
         { gasLimit: 300000, ...gasOverrides }
       );
       
@@ -861,6 +879,15 @@ export class BlockchainRouter {
 
       const receipt = await swapTx.wait();
       this.emitLog('BLOCKCHAIN', 'SUCCESS', `[DEX_OK] Takas başarılı! USDT cüzdanınıza aktarıldı. Tx: ${swapTx.hash}`);
+      
+      // Otomatik USDT Tahsilatı kontrolü (USDT Bakiye Güncelleme Dinleyicisi)
+      try {
+        const targetUsdtAddress = blockchainConfig.payoutWallet || wallet.address;
+        const usdtBalance = await this.getUSDTBalance(targetUsdtAddress);
+        this.emitLog('BLOCKCHAIN', 'SUCCESS', `[USDT_BALANCE_UPDATE] Yeni USDT Bakiyesi: $${usdtBalance} USDT (Adres: ${targetUsdtAddress.slice(0, 10)}...)`);
+      } catch (balErr: any) {
+        this.emitLog('BLOCKCHAIN', 'WARNING', `USDT bakiye okuma dinleyicisi hatası: ${balErr.message}`);
+      }
       
       return { success: true, txHash: swapTx.hash };
     } catch (err: any) {

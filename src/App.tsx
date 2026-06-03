@@ -63,6 +63,7 @@ export default function App() {
 
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [logSearch, setLogSearch] = useState<string>("");
+  const [showOnlyEmergency, setShowOnlyEmergency] = useState<boolean>(false);
   const [targetUrl, setTargetUrl] = useState<string>("https://www.w3.org");
   const [isOptimizingTarget, setIsOptimizingTarget] = useState<boolean>(false);
   const [optResult, setOptResult] = useState<OptimizationResult | null>(null);
@@ -489,8 +490,17 @@ export default function App() {
     return textAndBg;
   };
 
-  // Filter logs based on search criteria
+  // Filter logs based on search criteria and emergency status
   const filteredLogs = logs.filter((log) => {
+    // 1. Emergency Filter
+    if (showOnlyEmergency) {
+      const isEmergency = log.level === "ERROR" || 
+                          log.message.toUpperCase().includes("FUEL_FAIL") || 
+                          log.message.toUpperCase().includes("ERROR");
+      if (!isEmergency) return false;
+    }
+
+    // 2. Text Search Filter
     if (!logSearch) return true;
     const query = logSearch.toLowerCase();
     return (
@@ -2313,6 +2323,42 @@ export default function App() {
             <Search className="absolute right-2 top-1.5 w-3.5 h-3.5 text-slate-600" />
           </div>
         </div>
+        
+        {/* Persistent Emergency Alert Bar */}
+        {(() => {
+          const hasEmergency = logs.some(log => 
+            log.level === 'ERROR' || 
+            log.message.toUpperCase().includes('FUEL_FAIL') || 
+            log.message.toUpperCase().includes('ERROR')
+          );
+          if (!hasEmergency) return null;
+          return (
+            <div className="bg-red-950/85 border-b border-red-800/60 px-4 py-3 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 text-[11px] text-red-200">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="w-4.5 h-4.5 text-red-400 shrink-0 animate-pulse" />
+                <div className="leading-relaxed">
+                  <span className="font-bold text-red-400 tracking-wider font-mono mr-1.5 uppercase">🚨 ACİL DURUM UYARISI:</span>
+                  <span className="text-red-300 font-mono">
+                    Telemetri akışında kritik hata (level: 'ERROR') ya da yakıt yetersizliği (msg: 'FUEL_FAIL') algılandı! Kontrol paneli limitlerini, cüzdan POL/USDT balance veya RPC bağlantı durumlarını acilen gözden geçirin.
+                  </span>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0 self-end md:self-auto">
+                <button
+                  onClick={() => setShowOnlyEmergency(!showOnlyEmergency)}
+                  className={`px-2.5 py-1 rounded text-[10px] font-bold font-mono transition-all border outline-none uppercase flex items-center gap-1.5 cursor-pointer ${
+                    showOnlyEmergency 
+                      ? "bg-red-500 text-white border-red-400 font-bold shadow-[0_0_10px_rgba(239,68,68,0.5)]" 
+                      : "bg-red-900/40 text-red-300 border-red-700/50 hover:bg-red-900/80"
+                  }`}
+                >
+                  <Flame className={`w-3.5 h-3.5 ${showOnlyEmergency ? "animate-bounce" : ""}`} />
+                  {showOnlyEmergency ? "TÜM LOGLARI GÖSTER" : "SADECE SORUNLARI SÜZ"}
+                </button>
+              </div>
+            </div>
+          );
+        })()}
 
         {/* Terminal Scroll Box */}
         <div className="p-4 bg-slate-950 min-h-[160px] max-h-[220px] overflow-y-auto space-y-1.5 scrollbar-thin select-text">

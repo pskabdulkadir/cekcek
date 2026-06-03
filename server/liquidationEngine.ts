@@ -30,7 +30,12 @@ export class LiquidationEngine {
    * Otonom Ticaret Mimarisi (High-Frequency Liquidation)
    * Varlık değerini kontrol edip QuickSwap Router üzerinden anında swap (POL -> USDT veya GREEN -> USDT) emri verir.
    */
-  public async performInstantLiquidation(assetId: string, valuationUSD: number = 0, co2Grams: number = 0): Promise<boolean> {
+  public async performInstantLiquidation(assetId: string, valuationUSD: number = 0, co2Grams: number = 0, balanceType: string = 'token'): Promise<boolean> {
+    if (balanceType === 'NATIVE_POL') {
+      this.emitLog('WARNING', `[SAFETY_GUARD] NATIVE_POL likidasyonu engellendi! Cüzdan gas ücreti korunuyor.`);
+      return false;
+    }
+
     if (this.isProcessing) {
       this.emitLog('WARNING', `[WATCHDOG] Başka bir likidasyon işlemi devam ediyor. Varlık sıraya alındı: ${assetId}`);
       return false;

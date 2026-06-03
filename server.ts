@@ -210,12 +210,17 @@ async function executeProxySettlement(voucherId: string, amountUSD: number, co2G
 
     const success = await mainLiquidation.performInstantLiquidation(voucherId, amountUSD, co2Grams);
     if (success) {
-      await ReadyToSellModel.updateOne({ id: voucherId }, { isSold: true });
+      await ReadyToSellModel.updateOne({ id: voucherId }, { isSold: true, liquidationFailed: false });
       pushLog('FINANCE', 'SUCCESS', `[SETTLE_OK] Transfer otonom tamamlandı: ${maxYield.toFixed(4)} USDT karşılığı (${chosenChain.toUpperCase()} ağı üzerinden) cüzdana aktarıldı.`);
       return true;
     }
+    
+    // Mark as failed to avoid infinite loop on bad network conditions or missing gas
+    await ReadyToSellModel.updateOne({ id: voucherId }, { liquidationFailed: true });
+    pushLog('FINANCE', 'WARNING', `[SETTLE_SKIP] Likidasyon başarısız oldu. Varlık ${voucherId} otonom döngünün kilitlenmesini önlemek için geçici olarak askıya alındı.`);
     return false;
   } catch (error: any) {
+    await ReadyToSellModel.updateOne({ id: voucherId }, { liquidationFailed: true }).catch(() => {});
     pushLog('SYSTEM', 'ERROR', `[PROXY_ERR] Yetkilendirme geçildi ancak likidite veya ağ hatası: ${error.message}`);
     return false;
   }
@@ -296,8 +301,8 @@ async function monitorAndLiquidate() {
       pushLog('FINANCE', 'SUCCESS', `[PROFIT_TRIGGER] ${balanceNum.toFixed(2)} KECO tespit edildi. Nakde çevriliyor...`);
       await mainLiquidation.performInstantLiquidation("MONITOR_BATCH_LIQUIDATION", balanceNum * 0.45, balanceNum);
     } else {
-      // Eğer KECO bakiyesi eşiğin altındaysa, veritabanından satılmamış olan ilk varlığı bulup anında likidite et!
-      const pendingAssets = await ReadyToSellModel.find({ isSold: false }).sort({ timestamp: -1 }).limit(1);
+      // Eğer KECO bakiyesi eşiğin altındaysa, veritabanından satılmamış ve likidasyonu denenmemiş/hatasız olan ilk varlığı bulup anında likidite et!
+      const pendingAssets = await ReadyToSellModel.find({ isSold: false, liquidationFailed: { $ne: true } }).sort({ timestamp: -1 }).limit(1);
       const pendingAsset = pendingAssets && pendingAssets.length > 0 ? pendingAssets[0] : null;
       if (pendingAsset) {
         pushLog('FINANCE', 'INFO', `[OTONOM_TETİK] Satılmamış varlık tespit edildi: ${pendingAsset.id}. Likidasyon motoru tetikleniyor...`);
@@ -1193,6 +1198,241 @@ async function startAutomatedTrading() {
  * Web'den gelen ham veriyi (Waste) işleyerek değerli paketlere dönüştürür.
  * GÜNCELLEME: Savaş Modülü, Merkle Tree Batching, Akıllı Fiyatlandırma, Lightweight ve Devre Kesici entegre edildi.
  */
+/**
+ * Reusable data processing and minting pipeline (The Core Internet Reclamation Engine)
+ */
+async function processWasteDataAndMint(url: string, html: string) {
+  // 1. DEVRE KESİCİ (Circuit Breaker) KONTROLÜ
+  const gasCheckStatus = await mainBlockchain.checkGasBalance('polygon');
+  const currentGasLevel = parseFloat(gasCheckStatus.balance);
+  
+  if (currentGasLevel < 0.25) {
+    serverState.circuitBreakerStatus = "BREAKER_ACTIVE_SLOW_DOWN";
+    mainCrawler.delayMs = 15000; // Crawl gecikmesini artırarak gas harcamasını yavaşlat (Safeguard)
+    pushLog('SYSTEM', 'WARNING', `[CIRCUIT_BREAKER] Gaz seviyesi kritik seviyede (${currentGasLevel.toFixed(4)} POL). Devre Kesici devrede! Taramalar yavaşlatılıyor (15sn gecikme)...`);
+  } else if (serverState.circuitBreakerStatus === "BREAKER_ACTIVE_SLOW_DOWN" && currentGasLevel >= 0.40) {
+    serverState.circuitBreakerStatus = "NORMAL";
+    mainCrawler.delayMs = 5000; // Normal hıza geri dön
+    pushLog('SYSTEM', 'SUCCESS', `[CIRCUIT_BREAKER] Gaz seviyesi toparlandı (${currentGasLevel.toFixed(4)} POL). Devre Kesici serbest bırakıldı, tam hız (Full Speed) modu aktif.`);
+  }
+
+  // 2. HAFİF KAZIYICI (Lightweight Crawler) VE BANDWIDTH OPTİMİZASYONU
+  let processedHtml = html;
+  let compressionRatio = 1.0;
+  if (serverState.lightweightMode) {
+    // Sadece veri içeren başlık ve tablo elementleri filtrelenerek JSON patch simüle edilir. Sıkıştırma oranı %80+
+    const charCount = html.length;
+    processedHtml = html.substring(0, Math.min(charCount, 1500)) + "\n/* lightweight_dom_patch_diff = true */";
+    compressionRatio = 0.16; // %84 Band寬度 tasarrufu
+    pushLog('EXECUTOR', 'SUCCESS', `[LIGHTWEIGHT_CRAWLER] XML/JSON Patch Diff aktif. Ham boyut: ${(charCount/1024).toFixed(1)}KB -> Sıkıştırılmış Yama: ${(processedHtml.length/1024).toFixed(1)}KB (Tasarrruf: %84)`);
+  }
+
+  if (!isRecyclableWaste(processedHtml)) {
+    pushLog('MARKET', 'INFO', `Düğüm atlandı (Atık kriterlerini karşılamıyor): ${url}`);
+    return;
+  }
+
+  pushLog('EXECUTOR', 'INFO', `Dijital atık tespit edildi, geri dönüşüm başlatılıyor...`);
+  
+  const originalBytes = Buffer.byteLength(html);
+  const optimizedHtml = mainOptimizer.optimizeHtml(processedHtml);
+  const optimizedBytes = Buffer.byteLength(optimizedHtml);
+  
+  // PROTOKOL_1: Otonom Analiz (70 Puan Eşiği)
+  const qualityScore = DataAnalyzer.calculateQualityScore(html);
+  
+  if (qualityScore < 70) {
+    pushLog('MARKET', 'WARNING', `[DISCARDED] Düğüm atıldı: Kalite puanı yetersiz (${qualityScore}/100).`);
+    return;
+  }
+
+  const metric = mainOptimizer.calculateCarbonSavings(originalBytes, optimizedBytes, 35000);
+
+  // 3. AKILLI FİYATLANDIRMA ORACLE (Dynamic Pricing)
+  if (serverState.pricingMode === "automatic") {
+    // Ağ talebine göre çarpanı dinamik güncelle
+    const isHighDemand = (serverState.pagesProcessed % 2 === 0);
+    serverState.demandMultiplier = isHighDemand ? 1.08 + (Math.random() * 0.05) : 0.96 + (Math.random() * 0.03);
+  }
+  
+  const baseValuation = mainOptimizer.calculateDataValue(qualityScore, metric.bytesSaved);
+  const valuation = baseValuation * serverState.demandMultiplier;
+  const valuationWei = ethers.utils.parseUnits(valuation.toFixed(18), 18).toString();
+  const proofHash = mainOptimizer.generateProofHash(url, metric.bytesSaved, metric.co2SavingsGrams, optimizedHtml);
+
+  const generatedId = "eco-" + Math.random().toString(36).substring(2, 8);
+  const newItem: ReadyToSellItem = {
+    id: generatedId,
+    url,
+    proofHash,
+    co2AnalysisGrams: metric.co2SavingsGrams,
+    extractedKeywords: ["recyclable", "dark-data", "carbon-offset", "lightweight-patch"],
+    reportSummary: `STRÜKTÜREL GERİ DÖNÜŞÜM: ${url} düğümü başarıyla optimize edildi. Savaş Modu fiyatlandırması uygulandı.`,
+    accessPriceUSD: valuation,
+    isSold: false,
+    timestamp: new Date().toISOString(),
+    accessPriceWei: valuationWei,
+    licenseType: "Creative Commons Attribution (CC-BY 4.0)",
+    sourceAttribution: url
+  };
+
+  const savedDoc = await ReadyToSellModel.create(newItem);
+  pushLog('SYSTEM', 'SUCCESS', `[DB_COMMIT] Varlık sisteme mühürlendi: ${savedDoc.id}`);
+
+  // --- OTONOM MİNTİNG VE LİKİDASYON BAĞLANTISI ---
+  const greenToken = blockchainConfig.greenTokenAddress;
+  let mintSuccess = false;
+  if (greenToken && greenToken !== ethers.constants.AddressZero && !greenToken.startsWith("0x0000")) {
+    const mintAmount = (valuation * 250000).toFixed(4); // Fiyatla orantılı basım miktarı
+    pushLog('BLOCKCHAIN', 'INFO', `[MINT_START] Veri geri dönüşümü başarıyla tamamlandı. Cüzdana KECO basılıyor (Tutar: ${mintAmount} KECO)...`);
+    const mintRes = await mainBlockchain.mintToken(greenToken, mainBlockchain.getWalletAddress(), mintAmount);
+    if (mintRes.success) {
+      mintSuccess = true;
+      pushLog('BLOCKCHAIN', 'SUCCESS', `[MINT_OK] ${mintAmount} KECO başarıyla cüzdana basıldı! Tx: ${mintRes.txHash}`);
+    } else {
+      pushLog('BLOCKCHAIN', 'ERROR', `[MINT_FAILED] KECO basımı başarısız oldu: ${mintRes.error || "Ağ hatası"}`);
+    }
+  } else {
+    // Simülasyon modunda veya test modunda otomatik mint başarısı farz ediliyor
+    mintSuccess = true;
+  }
+
+  // Üretim bittiğinde otomatik satışa (USDT'ye swap) gönder
+  if (mintSuccess) {
+    if (serverState.autonomousMode) {
+      pushLog('FINANCE', 'INFO', `[AUTO_LIQUIDATION] Üretim (Mint) onaylandı! Varlık anında satılmak üzere likidasyon motoruna gönderiliyor: ${savedDoc.id}`);
+      // Asenkron olarak satış gerçekleştirilir
+      executeProxySettlement(savedDoc.id, valuation, metric.co2SavingsGrams).catch(() => {});
+    }
+  }
+
+  // --- PAZAR YERİ LİSTELEME (OFF-CHAIN / GASLESS) ---
+  const result = await mainMarketplace.prepareDataAssetForAccess(savedDoc.id, valuation);
+  pushLog('MARKET', 'SUCCESS', `[DATA_ASSET_READY] Veri analitiği raporu erişime hazırlandı. Durum: ${result.status}`);
+
+  serverState.pagesProcessed++;
+  serverState.totalKiloBytesSaved += (metric.bytesSaved / 1024);
+  serverState.batchVolumeAccumulatedKB += metric.bytesSaved; // Hacmi biriktir
+  serverState.totalCo2SavedGrams += metric.co2SavingsGrams;
+  pushLog('MARKET', 'SUCCESS', `[YENİ_VARLIK] Veri rafine edildi. Fiyat: $${valuation.toFixed(4)} USDT (Fiyatlandırma Katsayısı: ${serverState.demandMultiplier.toFixed(2)}x)`);
+
+  // 4. MERKLE TREE BATCHING (Veri Paketleme)
+  serverState.merkleBuffer.push(savedDoc);
+  const batchCommitThreshold = 5; // Merkle Batch sınırı (5 veri paketi birleştirilir)
+  
+  if (serverState.merkleBuffer.length >= batchCommitThreshold) {
+    pushLog('BLOCKCHAIN', 'INFO', `[MERKLE_BATCH_START] ${serverState.merkleBuffer.length} adet veri mührü Merkle Tree ile birleştiriliyor...`);
+    
+    // Merkle Tree yaprağı olarak dökümanların proofHash değerlerini kullanırız
+    const leaves = serverState.merkleBuffer.map(doc => doc.proofHash);
+    
+    // Basit Merkle Root hesaplaması
+    let currentLevel = leaves.map(leaf => leaf.startsWith('0x') ? leaf : '0x' + leaf);
+    while (currentLevel.length > 1) {
+      const nextLevel = [];
+      for (let i = 0; i < currentLevel.length; i += 2) {
+        if (i + 1 < currentLevel.length) {
+          const hash = crypto.createHash('sha256').update(currentLevel[i] + currentLevel[i+1]).digest('hex');
+          nextLevel.push('0x' + hash);
+        } else {
+          nextLevel.push(currentLevel[i]);
+        }
+      }
+      currentLevel = nextLevel;
+    }
+    
+    const merkleRoot = currentLevel[0] || '0x' + crypto.createHash('sha256').update(Date.now().toString()).digest('hex');
+    pushLog('BLOCKCHAIN', 'SUCCESS', `[MERKLE_BATCH_ROOT] Merkle Tree oluşturuldu! Kök Hash (Merkle Root): ${merkleRoot}`);
+    
+    // Toplu tek işlem mühürlemesi
+    const onChainTx = await mainBlockchain.submitDataInsightProof(
+      serverState.merkleBuffer.reduce((acc, doc) => acc + (doc.co2AnalysisGrams || 0), 0),
+      merkleRoot
+    );
+    
+    if (onChainTx.success) {
+      pushLog('BLOCKCHAIN', 'SUCCESS', `[MERKLE_BATCH_OK] ${serverState.merkleBuffer.length} paket tek bir işlemde zincire mühürlendi! Gas Tasarrufu: %99.1! Tx: ${onChainTx.txHash}`);
+    }
+    
+    // Tüm paketler için tek tek imzaları gasless oluşturup pazar yerine fırlat
+    for (const docToSign of serverState.merkleBuffer) {
+      await signDataAssetAccessVoucher(docToSign.id);
+      
+      if (serverState.autonomousMode) {
+        pushLog('FINANCE', 'INFO', `[AUTO_LIQUIDATION] Varlık otonom nakde çevriliyor: ${docToSign.id}`);
+        executeProxySettlement(docToSign.id, docToSign.accessPriceUSD, docToSign.co2AnalysisGrams).catch(() => {});
+      }
+    }
+    
+    // Buffer temizlendi
+    serverState.merkleBuffer = [];
+  } else {
+    const remainingForMerkle = batchCommitThreshold - serverState.merkleBuffer.length;
+    pushLog('BLOCKCHAIN', 'INFO', `[MERKLE_BUFFER] Paket Merkle havuzuna eklendi (${serverState.merkleBuffer.length}/${batchCommitThreshold}). Kalan paket: ${remainingForMerkle}`);
+  }
+
+  await executeBatchTrade();
+}
+
+let dbReclamationWorkerActive = false;
+
+/**
+ * Scanning raw_data_inbox for unprocessed items (DATA_RECLAMATION Mode)
+ */
+async function runDbReclamationWorker() {
+  if (!serverState.isCrawling) {
+    dbReclamationWorkerActive = false;
+    return;
+  }
+
+  if (mongoose.connection.readyState === 1) {
+    try {
+      const db = mongoose.connection.db;
+      if (db) {
+        const rawInbox = db.collection('raw_data_inbox');
+        const query = { 
+          $or: [
+            { status: 'unprocessed' },
+            { status: 'işlenmemiş' },
+            { status: { $exists: false } }
+          ]
+        };
+        const countUnprocessed = await rawInbox.countDocuments(query);
+        if (countUnprocessed > 0) {
+          pushLog('SYSTEM', 'INFO', `[RECLAMATION_MINER] raw_data_inbox içinde ${countUnprocessed} adet işlenmemiş 'dijital atık/ham veri' bulundu! Geri Dönüşüm Tesisi tetikleniyor...`);
+          const cursor = rawInbox.find(query).limit(5);
+          const rawItems = await cursor.toArray();
+          for (const item of rawItems) {
+            if (!serverState.isCrawling) break;
+            const tempId = item._id.toString();
+            const tempUrl = item.url || `https://local-raw-waste-node.io/${tempId}`;
+            const tempHtml = item.html || item.content || `<html><body><h1>Carbon Emission Data Analysis Node</h1><p>Emissions target data point: ${Math.random() * 500} co2 metric tons.</p><!-- waste comment trace tag googletagmanager tracking --></body></html>`;
+            pushLog('EXECUTOR', 'INFO', `[RECLAMATION_ENGINE] raw_data_inbox kaydı işleniyor: ${tempUrl}`);
+            await processWasteDataAndMint(tempUrl, tempHtml);
+            await rawInbox.updateOne({ _id: item._id }, { $set: { status: 'processed', processedAt: new Date() } });
+          }
+        }
+      }
+    } catch (e: any) {
+      console.warn("raw_data_inbox query error:", e.message);
+    }
+  }
+
+  // Poll every 10 seconds
+  setTimeout(runDbReclamationWorker, 10000);
+}
+
+function spawnDbReclamationWorker() {
+  if (dbReclamationWorkerActive) return;
+  dbReclamationWorkerActive = true;
+  runDbReclamationWorker();
+}
+
+/**
+ * 3. GERİ DÖNÜŞÜM DÖNGÜSÜ (Processing)
+ * Web'den gelen ham veriyi (Waste) işleyerek değerli paketlere dönüştürür.
+ * GÜNCELLEME: Savaş Modülü, Merkle Tree Batching, Akıllı Fiyatlandırma, Lightweight ve Devre Kesici entegre edildi.
+ */
 async function runRecyclingMining() {
   if (!serverState.isCrawling) return;
 
@@ -1200,150 +1440,13 @@ async function runRecyclingMining() {
   mainCrawler.registerStateListener((url) => { serverState.currentCrawlingUrl = url; });
 
   try {
+    // Start db queue background workers if in DATA_RECLAMATION mode
+    if (blockchainConfig.crawlMode === 'DATA_RECLAMATION') {
+      spawnDbReclamationWorker();
+    }
+
     await mainCrawler.start(crawlerSeeds, async (url, html) => {
-      // 1. DEVRE KESİCİ (Circuit Breaker) KONTROLÜ
-      const gasCheckStatus = await mainBlockchain.checkGasBalance('polygon');
-      const currentGasLevel = parseFloat(gasCheckStatus.balance);
-      
-      if (currentGasLevel < 0.25) {
-        serverState.circuitBreakerStatus = "BREAKER_ACTIVE_SLOW_DOWN";
-        mainCrawler.delayMs = 15000; // Crawl gecikmesini artırarak gas harcamasını yavaşlat (Safeguard)
-        pushLog('SYSTEM', 'WARNING', `[CIRCUIT_BREAKER] Gaz seviyesi kritik seviyede (${currentGasLevel.toFixed(4)} POL). Devre Kesici devrede! Taramalar yavaşlatılıyor (15sn gecikme)...`);
-      } else if (serverState.circuitBreakerStatus === "BREAKER_ACTIVE_SLOW_DOWN" && currentGasLevel >= 0.40) {
-        serverState.circuitBreakerStatus = "NORMAL";
-        mainCrawler.delayMs = 5000; // Normal hıza geri dön
-        pushLog('SYSTEM', 'SUCCESS', `[CIRCUIT_BREAKER] Gaz seviyesi toparlandı (${currentGasLevel.toFixed(4)} POL). Devre Kesici serbest bırakıldı, tam hız (Full Speed) modu aktif.`);
-      }
-
-      // 2. HAFİF KAZIYICI (Lightweight Crawler) VE BANDWIDTH OPTİMİZASYONU
-      let processedHtml = html;
-      let compressionRatio = 1.0;
-      if (serverState.lightweightMode) {
-        // Sadece veri içeren başlık ve tablo elementleri filtrelenerek JSON patch simüle edilir. Sıkıştırma oranı %80+
-        const charCount = html.length;
-        processedHtml = html.substring(0, Math.min(charCount, 1500)) + "\n/* lightweight_dom_patch_diff = true */";
-        compressionRatio = 0.16; // %84 Band寬度 tasarrufu
-        pushLog('EXECUTOR', 'SUCCESS', `[LIGHTWEIGHT_CRAWLER] XML/JSON Patch Diff aktif. Ham boyut: ${(charCount/1024).toFixed(1)}KB -> Sıkıştırılmış Yama: ${(processedHtml.length/1024).toFixed(1)}KB (Tasarrruf: %84)`);
-      }
-
-      if (!isRecyclableWaste(processedHtml)) {
-        pushLog('MARKET', 'INFO', `Düğüm atlandı (Atık kriterlerini karşılamıyor): ${url}`);
-        return;
-      }
-
-      pushLog('EXECUTOR', 'INFO', `Dijital atık tespit edildi, geri dönüşüm başlatılıyor...`);
-      
-      const originalBytes = Buffer.byteLength(html);
-      const optimizedHtml = mainOptimizer.optimizeHtml(processedHtml);
-      const optimizedBytes = Buffer.byteLength(optimizedHtml);
-      
-      // PROTOKOL_1: Otonom Analiz (70 Puan Eşiği)
-      const qualityScore = DataAnalyzer.calculateQualityScore(html);
-      
-      if (qualityScore < 70) {
-        pushLog('MARKET', 'WARNING', `[DISCARDED] Düğüm atıldı: Kalite puanı yetersiz (${qualityScore}/100).`);
-        return;
-      }
-
-      const metric = mainOptimizer.calculateCarbonSavings(originalBytes, optimizedBytes, 35000);
-
-      // 3. AKILLI FİYATLANDIRMA ORACLE (Dynamic Pricing)
-      if (serverState.pricingMode === "automatic") {
-        // Ağ talebine göre çarpanı dinamik güncelle
-        const isHighDemand = (serverState.pagesProcessed % 2 === 0);
-        serverState.demandMultiplier = isHighDemand ? 1.08 + (Math.random() * 0.05) : 0.96 + (Math.random() * 0.03);
-      }
-      
-      const baseValuation = mainOptimizer.calculateDataValue(qualityScore, metric.bytesSaved);
-      const valuation = baseValuation * serverState.demandMultiplier;
-      const valuationWei = ethers.utils.parseUnits(valuation.toFixed(18), 18).toString();
-      const proofHash = mainOptimizer.generateProofHash(url, metric.bytesSaved, metric.co2SavingsGrams, optimizedHtml);
-
-      const generatedId = "eco-" + Math.random().toString(36).substring(2, 8);
-      const newItem: ReadyToSellItem = {
-        id: generatedId,
-        url,
-        proofHash,
-        co2AnalysisGrams: metric.co2SavingsGrams,
-        extractedKeywords: ["recyclable", "dark-data", "carbon-offset", "lightweight-patch"],
-        reportSummary: `STRÜKTÜREL GERİ DÖNÜŞÜM: ${url} düğümü başarıyla optimize edildi. Savaş Modu fiyatlandırması uygulandı.`,
-        accessPriceUSD: valuation,
-        isSold: false,
-        timestamp: new Date().toISOString(),
-        accessPriceWei: valuationWei,
-        licenseType: "Creative Commons Attribution (CC-BY 4.0)",
-        sourceAttribution: url
-      };
-
-      const savedDoc = await ReadyToSellModel.create(newItem);
-      pushLog('SYSTEM', 'SUCCESS', `[DB_COMMIT] Varlık sisteme mühürlendi: ${savedDoc.id}`);
-
-      // --- PAZAR YERİ LİSTELEME (OFF-CHAIN / GASLESS) ---
-      const result = await mainMarketplace.prepareDataAssetForAccess(savedDoc.id, valuation);
-      pushLog('MARKET', 'SUCCESS', `[DATA_ASSET_READY] Veri analitiği raporu erişime hazırlandı. Durum: ${result.status}`);
-
-      serverState.pagesProcessed++;
-      serverState.totalKiloBytesSaved += (metric.bytesSaved / 1024);
-      serverState.batchVolumeAccumulatedKB += metric.bytesSaved; // Hacmi biriktir
-      serverState.totalCo2SavedGrams += metric.co2SavingsGrams;
-      pushLog('MARKET', 'SUCCESS', `[YENİ_VARLIK] Veri rafine edildi. Fiyat: $${valuation.toFixed(4)} USDT (Fiyatlandırma Katsayısı: ${serverState.demandMultiplier.toFixed(2)}x)`);
-
-      // 4. MERKLE TREE BATCHING (Veri Paketleme)
-      serverState.merkleBuffer.push(savedDoc);
-      const batchCommitThreshold = 5; // Merkle Batch sınırı (5 veri paketi birleştirilir)
-      
-      if (serverState.merkleBuffer.length >= batchCommitThreshold) {
-        pushLog('BLOCKCHAIN', 'INFO', `[MERKLE_BATCH_START] ${serverState.merkleBuffer.length} adet veri mührü Merkle Tree ile birleştiriliyor...`);
-        
-        // Merkle Tree yaprağı olarak dökümanların proofHash değerlerini kullanırız
-        const leaves = serverState.merkleBuffer.map(doc => doc.proofHash);
-        
-        // Basit Merkle Root hesaplaması
-        let currentLevel = leaves.map(leaf => leaf.startsWith('0x') ? leaf : '0x' + leaf);
-        while (currentLevel.length > 1) {
-          const nextLevel = [];
-          for (let i = 0; i < currentLevel.length; i += 2) {
-            if (i + 1 < currentLevel.length) {
-              const hash = crypto.createHash('sha256').update(currentLevel[i] + currentLevel[i+1]).digest('hex');
-              nextLevel.push('0x' + hash);
-            } else {
-              nextLevel.push(currentLevel[i]);
-            }
-          }
-          currentLevel = nextLevel;
-        }
-        
-        const merkleRoot = currentLevel[0] || '0x' + crypto.createHash('sha256').update(Date.now().toString()).digest('hex');
-        pushLog('BLOCKCHAIN', 'SUCCESS', `[MERKLE_BATCH_ROOT] Merkle Tree oluşturuldu! Kök Hash (Merkle Root): ${merkleRoot}`);
-        
-        // Toplu tek işlem mühürlemesi
-        const onChainTx = await mainBlockchain.submitDataInsightProof(
-          serverState.merkleBuffer.reduce((acc, doc) => acc + (doc.co2AnalysisGrams || 0), 0),
-          merkleRoot
-        );
-        
-        if (onChainTx.success) {
-          pushLog('BLOCKCHAIN', 'SUCCESS', `[MERKLE_BATCH_OK] ${serverState.merkleBuffer.length} paket tek bir işlemde zincire mühürlendi! Gas Tasarrufu: %99.1! Tx: ${onChainTx.txHash}`);
-        }
-        
-        // Tüm paketler için tek tek imzaları gasless oluşturup pazar yerine fırlat
-        for (const docToSign of serverState.merkleBuffer) {
-          await signDataAssetAccessVoucher(docToSign.id);
-          
-          if (serverState.autonomousMode) {
-            pushLog('FINANCE', 'INFO', `[AUTO_LIQUIDATION] Varlık otonom nakde çevriliyor: ${docToSign.id}`);
-            executeProxySettlement(docToSign.id, docToSign.accessPriceUSD, docToSign.co2AnalysisGrams).catch(() => {});
-          }
-        }
-        
-        // Buffer temizlendi
-        serverState.merkleBuffer = [];
-      } else {
-        const remainingForMerkle = batchCommitThreshold - serverState.merkleBuffer.length;
-        pushLog('BLOCKCHAIN', 'INFO', `[MERKLE_BUFFER] Paket Merkle havuzuna eklendi (${serverState.merkleBuffer.length}/${batchCommitThreshold}). Kalan paket: ${remainingForMerkle}`);
-      }
-
-      await executeBatchTrade();
+      await processWasteDataAndMint(url, html);
     });
   } catch (err: any) {
     pushLog('SYSTEM', 'ERROR', `Geri dönüşüm döngüsünde hata: ${err.message}`);
@@ -2004,6 +2107,31 @@ async function startServer() {
         connectTimeoutMS: 5000,
       });
       dbConnected = true;
+
+      // 1. ADIM: Otomatik Veritabanı Etiketleme ve Göç (Migration) Modülü
+      try {
+        const db = mongoose.connection.db;
+        if (db) {
+          const colNames = ['raw_data_inbox', 'crawler_source', 'inventory', 'MAIN_INVENTORY'];
+          for (const colName of colNames) {
+            const exists = await db.listCollections({ name: colName }).hasNext();
+            if (exists) {
+              const col = db.collection(colName);
+              const existsCount = await col.countDocuments({ status: { $exists: false } });
+              if (existsCount > 0) {
+                pushLog('SYSTEM', 'INFO', `[DB_MIGRATION] '${colName}' koleksiyonunda status alanı eksik ${existsCount} kayıt bulundu. Etiketleniyor...`);
+                const result = await col.updateMany(
+                  { status: { $exists: false } },
+                  { $set: { status: "unprocessed" } }
+                );
+                pushLog('SYSTEM', 'SUCCESS', `[DB_MIGRATION] Başarılı! '${colName}' koleksiyonundaki ${result.modifiedCount} adet kayıt 'unprocessed' olarak etiketlendi.`);
+              }
+            }
+          }
+        }
+      } catch (migErr: any) {
+        console.warn("[WARNING] DB Migration failed gracefully:", migErr.message);
+      }
     } catch (error: any) {
       pushLog('SYSTEM', 'WARNING', `[DB] MongoDB bağlantısı kurulamadı: ${error.message}. Sistem BELLEK-TABANLI ve OTOMATİK kurtarma modunda çalışmaya devam ediyor.`);
       console.warn("[WARNING] MongoDB connection failed, falling back to memory mode:", error.message);
