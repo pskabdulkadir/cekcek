@@ -1,8 +1,8 @@
 import TelegramBot from "node-telegram-bot-api";
 
 // GELİŞTİRME SÜRECİNDE BİLDİRİM VE BOT TELEMETRİSİNİ KESMEK İÇİN DURAKLATMA BAYRAĞI
-// Kullanıcı tekrar 'çalıştır' dediği için bu bayrak false olarak güncellenmiştir.
-const isTelegramTemporarilyDisabled = false;
+// Kullanıcı 'şimdi tegramı burada durdur' dediği için başlangıçta true olarak konfigüre edilmiştir.
+let isTelegramTemporarilyDisabled = true;
 
 let bot: TelegramBot | null = null;
 let configuredChatId: string | null = null;
@@ -38,9 +38,10 @@ export function initializeTelegramBot(
     pushLog: (module: any, level: any, msg: string) => void;
   }
 ) {
+  // Botu her halükarda başlatıyoruz ki kullanıcı Telegram üzerinden canlandırabilsin veya durdurabilsin.
+  // Ancak duraklatılmış durumdayken bildirimler gitmeyecektir.
   if (isTelegramTemporarilyDisabled) {
-    console.log("[TELEGRAM] Telegram Bot kullanıcı talebi doğrultusunda geçici olarak DEVRE DIŞI bırakıldı.");
-    return;
+    console.log("[TELEGRAM] Telegram Bot şu anda geçici olarak DURDURULDU modunda başlatılıyor. Bildirimler sessize alındı.");
   }
 
   const parsedToken = token ? token.replace(/['"]/g, '').trim() : "";
@@ -201,18 +202,44 @@ export function initializeTelegramBot(
 
     // Handle initial greeting or fallback text instructions
     bot.on("message", async (msg) => {
-      // Avoid responding if unauthorized or if it's a command handled above
+      // Avoid responding if unauthorized
       if (!isSenderAuthorized(msg)) return;
-      const text = msg.text;
+      const text = msg.text?.trim();
       if (!text) return;
       
+      const lowerText = text.toLowerCase();
+
+      // DİNAMİK BİLDİRİM KONTROLLERİ (Açma / Kapama mesajları ve komutları)
+      if (lowerText === "başlat" || lowerText === "baslat" || lowerText === "/telegram_on") {
+        isTelegramTemporarilyDisabled = false;
+        await bot?.sendMessage(
+          String(msg.chat.id),
+          `🟢 <b>TELEGRAM BİLDİRİMLERİ AÇILDI</b>\nSistem sessiz moddan çıkarıldı. Başarı ve likidasyon bildirimleri aktarılmaya devam edecektir.`,
+          { parse_mode: "HTML" }
+        );
+        return;
+      }
+
+      if (lowerText === "durdur" || lowerText === "dur" || lowerText === "/telegram_off") {
+        isTelegramTemporarilyDisabled = true;
+        await bot?.sendMessage(
+          String(msg.chat.id),
+          `🔴 <b>TELEGRAM BİLDİRİMLERİ SESSİZE ALINDI (DURDURULDU)</b>\nGeliştirme ortamı bildirim kirliliğini önlemek için otomatik akış durdurulmuştur. Canlandırmak için <code>başlat</code> yazabilirsiniz.`,
+          { parse_mode: "HTML" }
+        );
+        return;
+      }
+
       if (!text.startsWith("/")) {
         const helpText = `👋 <b>Protokol İletişim Hattı Aktif!</b>\n\nCekcek Botunuzu 7/24 telefonunuzdan kontrol edebilirsiniz. Kullanılabilir Komutlar:\n\n` +
           `🟩 <code>/start</code> - Otonom mod ve taramayı başlatır.\n` +
           `🟨 <code>/stop</code> - Sistemi bekleme (IDLE) moduna alır, döngüleri dondurur.\n` +
           `📈 <code>/analiz</code> - Sistem durumunu analiz eder ve özetler.\n` +
           `📊 <code>/status</code> - Detaylı cüzdan bakiye ve varlık stoklarını raporlar.\n` +
-          `🏓 <code>/ping</code> - Botun erişim bağlantısını anlık doğrular.`;
+          `🏓 <code>/ping</code> - Botun erişim bağlantısını anlık doğrular.\n\n` +
+          `<b>Telegram Bildirim Kontrolleri:</b>\n` +
+          `🔴 <code>durdur</code> - Bildirim iletimini tamamen askıya alır.\n` +
+          `🟢 <code>başlat</code> - Bildirim iletimini yeniden başlatır.`;
         await bot?.sendMessage(String(msg.chat.id), helpText, { parse_mode: "HTML" });
       }
     });

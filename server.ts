@@ -199,6 +199,28 @@ const commercialBridge = {
 // --- PROXY SETTLEMENT MODÜLÜ ---
 async function executeProxySettlement(voucherId: string, amountUSD: number, co2Grams: number = 0): Promise<boolean> {
   try {
+    // 0. ADIM: ZİNCİR ÜSTÜ BASIM KONTROLÜ (Onay Bekle & Retry Mantığı)
+    const asset = await ReadyToSellModel.findOne({ id: voucherId });
+    if (asset && asset.isMintedOnChain === false) {
+      pushLog('FINANCE', 'WARNING', `[MINT_AWAIT] Varlık ${voucherId} henüz zincir üstünde basılmadı (unconfirmed mint). Likidasyon ertelendi, onay bekleniyor...`);
+      return false; // liquidationFailed güncellenmediği için bir sonraki döngüde otomatik olarak tekrar denenecektir.
+    }
+
+    // 0.5. ADIM: GAZ KISITLAYICI (Gas Throttle Yardımıyla Aşırı Gaz Ücretlerinden Koruma)
+    try {
+      const provider = new ethers.providers.JsonRpcProvider(mainBlockchain.rpcUrl);
+      const gasPrice = await provider.getGasPrice();
+      const gasPriceGwei = parseFloat(ethers.utils.formatUnits(gasPrice, "gwei"));
+      const maxThresholdGwei = 250; // 250 Gwei Üst Limit
+      if (gasPriceGwei > maxThresholdGwei) {
+        pushLog('FINANCE', 'WARNING', `[GAS_THROTTLE] Ağ yoğunluğu çok yüksek (Mevcut Gas: ${gasPriceGwei.toFixed(2)} Gwei > Limit: ${maxThresholdGwei} Gwei). Likidasyon ertelendi.`);
+        return false;
+      }
+    } catch (gasErr: any) {
+      // Ebeveyn ağ geçidi internet/RPC yanıt gecikmesinde akışı kesmemek için tespiti bypass et ve logla
+      console.log(`[GAS_THROTTLE] Gas fiyatı kontrol edilirken hata oluştu, işleme doğrudan devam ediliyor: ${gasErr.message}`);
+    }
+
     // 1. OTONOM ROTA BULUCU (Pathfinder Cross-Chain Liquidity Routing)
     pushLog('FINANCE', 'INFO', `[PATH_FINDER] Cross-Chain Likidite Taraması Yapılıyor (Varlık ${voucherId})...`);
     
@@ -326,8 +348,8 @@ async function monitorAndLiquidate() {
       pushLog('FINANCE', 'SUCCESS', `[PROFIT_TRIGGER] ${balanceNum.toFixed(2)} KECO tespit edildi. Nakde çevriliyor...`);
       await mainLiquidation.performInstantLiquidation("MONITOR_BATCH_LIQUIDATION", balanceNum * 0.45, balanceNum);
     } else {
-      // Eğer KECO bakiyesi eşiğin altındaysa, veritabanından satılmamış ve likidasyonu denenmemiş/hatasız olan ilk varlığı bulup anında likidite et!
-      const pendingAssets = await ReadyToSellModel.find({ isSold: false, liquidationFailed: { $ne: true } }).sort({ timestamp: -1 }).limit(1);
+      // Eğer KECO bakiyesi eşiğin altındaysa, veritabanından satılmamış, likidasyonu hatasız ve zincir üstü basımı onaylanmış olan ilk varlığı bulup anında likidite et!
+      const pendingAssets = await ReadyToSellModel.find({ isSold: false, liquidationFailed: { $ne: true }, isMintedOnChain: { $ne: false } }).sort({ timestamp: -1 }).limit(1);
       const pendingAsset = pendingAssets && pendingAssets.length > 0 ? pendingAssets[0] : null;
       if (pendingAsset) {
         pushLog('FINANCE', 'INFO', `[OTONOM_TETİK] Satılmamış varlık tespit edildi: ${pendingAsset.id}. Likidasyon motoru tetikleniyor...`);
@@ -1025,6 +1047,10 @@ function pushLog(
   level: 'INFO' | 'SUCCESS' | 'WARNING' | 'ERROR' | 'ANALYZE',
   msg: string
 ) {
+  if (msg.includes('WHITELIST_BLOCKED')) {
+    return;
+  }
+
   const logEntry: LogEntry = {
     id: Math.random().toString(36).substring(2, 9),
     timestamp: new Date().toISOString(),
