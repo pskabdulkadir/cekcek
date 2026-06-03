@@ -34,6 +34,13 @@ export function initializeTelegramBot(
     pushLog: (module: any, level: any, msg: string) => void;
   }
 ) {
+  // PROXY TEMİZLİĞİ: Render ortamında "tunneling socket" hatalarını önlemek için
+  // sistemdeki olası proxy ayarlarını (HTTP_PROXY vb.) kod seviyesinde temizliyoruz.
+  delete process.env.HTTP_PROXY;
+  delete process.env.http_proxy;
+  delete process.env.HTTPS_PROXY;
+  delete process.env.https_proxy;
+
   const parsedToken = token ? token.trim() : "";
   const parsedChatId = chatId ? chatId.trim() : "";
 
