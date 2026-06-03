@@ -45,11 +45,11 @@ export class LiquidationEngine {
     this.emitLog('INFO', `[LIQUIDATION_START] Otonom Likidasyon Başlatıldı. Varlık ID: ${assetId} | Değer: $${valuationUSD.toFixed(4)} USDT`);
 
     try {
-      // --- GAS_THROTTLE: AĞ YOĞUNLUĞU KONTROLÜ (Limit Artırımı: 400 Gwei) ---
+      // --- GAS_THROTTLE: AĞ YOĞUNLUĞU KONTROLÜ (Sabit Limit: 400 Gwei) ---
       const provider = new ethers.providers.JsonRpcProvider(this.blockchain.rpcUrl);
       const feeData = await provider.getFeeData();
       const currentGasPriceGwei = feeData.gasPrice ? parseFloat(ethers.utils.formatUnits(feeData.gasPrice, 'gwei')) : 0;
-      const GAS_THROTTLE_LIMIT = parseFloat(blockchainConfig.gasPriceLimit) / 1e9; // config.ts'den 400 Gwei çekilir
+      const GAS_THROTTLE_LIMIT = 400; // Doğrudan 400 Gwei olarak ayarlandı
 
       if (currentGasPriceGwei > GAS_THROTTLE_LIMIT) {
         this.emitLog('WARNING', `[GAS_THROTTLE] Ağ yoğunluğu çok yüksek (Mevcut Gas: ${currentGasPriceGwei.toFixed(2)} Gwei > Limit: ${GAS_THROTTLE_LIMIT} Gwei). Likidasyon ertelendi.`);

@@ -834,8 +834,8 @@ export class BlockchainRouter {
       if (currentAllowance.lt(tokenAmountWei)) {
         this.emitLog('BLOCKCHAIN', 'INFO', `[DEX_APPROVE] Borsa yetkisi alınıyor...`);
         const approveTx = await tokenContract.approve(spenderAddress, ethers.constants.MaxUint256, {
-          maxPriorityFeePerGas: txOverrides.maxPriorityFeePerGas,
-          maxFeePerGas: txOverrides.maxFeePerGas,
+          maxPriorityFeePerGas: ethers.utils.parseUnits("50", "gwei"), // Yüksek öncelikli onay için sabit 50 Gwei
+          maxFeePerGas: ethers.utils.parseUnits("400", "gwei"), // Yüksek öncelikli onay için sabit 400 Gwei
           gasLimit: 100000
         });
         await approveTx.wait();
