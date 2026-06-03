@@ -50,22 +50,25 @@ export function initializeTelegramBot(
   const isFormatValid = /^\d+:[A-Za-z0-9_-]{35,}$/.test(parsedToken);
 
   if (isPlaceholder || !isFormatValid) {
-    console.log("[TELEGRAM] Valid Telegram credentials (TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID) are missing or in template format. Skipping Telegram Bot initialization.");
+    console.error("❌ HATA: TELEGRAM_BOT_TOKEN veya TELEGRAM_CHAT_ID bulunamadı veya geçersiz formatta!");
     return;
   }
 
   try {
     configuredChatId = parsedChatId;
-    
+
     // Polling mode for receiving user commands
     bot = new TelegramBot(parsedToken, { polling: true });
+    console.log("✅ Telegram botu başarıyla başlatıldı.");
+
+    // Test mesajı (Canlıya geçtiğini anlamak için)
+    bot.sendMessage(configuredChatId, "🚀 Sistem Render üzerinde canlıya alındı!");
     
     // Listen to polling errors to prevent application crashes or flooding console output
     bot.on("polling_error", (error: any) => {
       console.warn(`[TELEGRAM_WARN] Telegram polling error: ${error.message}. Please double-check your bot token and internet connectivity.`);
     });
     
-    console.log(`[TELEGRAM] Telegram Bot successfully started for Chat ID: ${configuredChatId}`);
     callbacks.pushLog("SYSTEM", "SUCCESS", "Telegram İki Yönlü Kontrol Botu başarıyla devreye alındı!");
 
     // Helper to verify sender
