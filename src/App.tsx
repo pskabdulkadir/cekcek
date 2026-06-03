@@ -253,7 +253,11 @@ export default function App() {
         setTelegramHasCredentials(data.hasCredentials);
       }
     } catch (err) {
-      console.error("Failed to fetch Telegram status:", err);
+      if (err instanceof TypeError) {
+        console.debug("[TELEGRAM] Connectivity lost. Retrying in next cycle...");
+      } else {
+        console.warn("Failed to fetch Telegram status:", err);
+      }
     }
   };
 
@@ -297,7 +301,11 @@ export default function App() {
         setWalletBalance(data);
       }
     } catch (err) {
-      console.error("Failed to fetch wallet balance:", err);
+      if (err instanceof TypeError) {
+        console.debug("[BALANCE] Connectivity lost. Retrying in next cycle...");
+      } else {
+        console.warn("Failed to fetch wallet balance:", err);
+      }
     } finally {
       setIsLoadingBalance(false);
     }

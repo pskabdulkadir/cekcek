@@ -1070,27 +1070,38 @@ export class BlockchainRouter {
       const memoBytes = ethers.utils.hexlify(ethers.utils.toUtf8Bytes(memoMessage));
 
       let txOverrides: any = {
-        gasLimit: 80000 // Safely configured gas limit for direct memo transfers
+        gasLimit: 300000 // Safely configured gas limit for direct memo transfers with absolute safety headroom
       };
       
       try {
         const feeData = await provider.getFeeData();
         if (feeData.maxPriorityFeePerGas && feeData.maxFeePerGas) {
-          // Akışı hızlandırmak adına ağın istediği Gas limitlerinin %50 fazlasını (1.5x) teklif et
-          txOverrides.maxPriorityFeePerGas = feeData.maxPriorityFeePerGas.mul(150).div(100);
-          txOverrides.maxFeePerGas = feeData.maxFeePerGas.mul(150).div(100);
-          this.emitLog('BLOCKCHAIN', 'INFO', `[DYNAMIC_GAS] EIP-1559 Gaz limitleri uygulandı: maxFee=${ethers.utils.formatUnits(txOverrides.maxFeePerGas, 'gwei')} gwei`);
+          // Polygon networks require at least a 30-35 Gwei priority fee to avoid the "transaction underpriced" error.
+          const minPriorityFee = ethers.utils.parseUnits("35", "gwei");
+          const proposedPriority = feeData.maxPriorityFeePerGas.mul(150).div(100);
+          txOverrides.maxPriorityFeePerGas = proposedPriority.gt(minPriorityFee) ? proposedPriority : minPriorityFee;
+          
+          // maxFeePerGas must be high enough above the priority fee to accommodate base fee fluctuations
+          const proposedMaxFee = feeData.maxFeePerGas.mul(150).div(100);
+          const minMaxFee = txOverrides.maxPriorityFeePerGas.add(ethers.utils.parseUnits("15", "gwei"));
+          txOverrides.maxFeePerGas = proposedMaxFee.gt(minMaxFee) ? proposedMaxFee : minMaxFee;
+          
+          this.emitLog('BLOCKCHAIN', 'INFO', `[DYNAMIC_GAS] EIP-1559 Gaz limitleri uygulandı: maxFee=${ethers.utils.formatUnits(txOverrides.maxFeePerGas, 'gwei')} gwei | priorityFee=${ethers.utils.formatUnits(txOverrides.maxPriorityFeePerGas, 'gwei')} gwei`);
         } else if (feeData.gasPrice) {
           txOverrides.gasPrice = feeData.gasPrice.mul(150).div(100);
+          const minLegacyGasPrice = ethers.utils.parseUnits("50", "gwei");
+          if (txOverrides.gasPrice.lt(minLegacyGasPrice)) {
+            txOverrides.gasPrice = minLegacyGasPrice;
+          }
           this.emitLog('BLOCKCHAIN', 'INFO', `[DYNAMIC_GAS] Legacy Gaz limitleri uygulandı: gasPrice=${ethers.utils.formatUnits(txOverrides.gasPrice, 'gwei')} gwei`);
         } else {
-          txOverrides.maxPriorityFeePerGas = ethers.utils.parseUnits("40", "gwei");
-          txOverrides.maxFeePerGas = ethers.utils.parseUnits("400", "gwei");
+          txOverrides.maxPriorityFeePerGas = ethers.utils.parseUnits("35", "gwei");
+          txOverrides.maxFeePerGas = ethers.utils.parseUnits("350", "gwei");
         }
       } catch (gasErr: any) {
         this.emitLog('BLOCKCHAIN', 'WARNING', `[GAS_FEE_SKIPPED] Gaz fiyatı alınamadı, sabit değerler kullanılıyor: ${gasErr.message}`);
-        txOverrides.maxPriorityFeePerGas = ethers.utils.parseUnits("40", "gwei");
-        txOverrides.maxFeePerGas = ethers.utils.parseUnits("400", "gwei");
+        txOverrides.maxPriorityFeePerGas = ethers.utils.parseUnits("35", "gwei");
+        txOverrides.maxFeePerGas = ethers.utils.parseUnits("350", "gwei");
       }
 
       // Kendi payout adresine veya toAddress'e sıfır (veya minik 0.0001 MATIC) işlem yapıyoruz.

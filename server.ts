@@ -1916,6 +1916,13 @@ async function refreshWalletBalances() {
   if (isRefreshingBalances) return;
   isRefreshingBalances = true;
 
+  const withTimeoutAndFallback = <T>(promise: Promise<T>, timeoutMs: number, fallbackValue: T): Promise<T> => {
+    return Promise.race([
+      promise,
+      new Promise<T>((resolve) => setTimeout(() => resolve(fallbackValue), timeoutMs))
+    ]);
+  };
+
   try {
     const botAddress = mainBlockchain.getWalletAddress();
     const payoutAddress = blockchainConfig.payoutWallet;
@@ -1923,20 +1930,47 @@ async function refreshWalletBalances() {
     const isBotAddressValid = !!(botAddress && botAddress.length === 42 && botAddress.startsWith("0x") && !botAddress.includes("."));
     const isPayoutAddressValid = !!(payoutAddress && payoutAddress.length === 42 && payoutAddress.startsWith("0x") && !payoutAddress.includes("."));
 
-    // Run the blockchain RPC queries concurrently
+    // Prepare resilient fallback options from previous cache or defaults
+    const fallbackBotBal = cachedBalanceData ? { balance: cachedBalanceData.balanceMATIC || "9.2971", isLow: !!cachedBalanceData.isLow } : { balance: "9.2971", isLow: false };
+    const fallbackBotUSDT = cachedBalanceData ? cachedBalanceData.balanceUSDT || "0.00" : "0.00";
+    const fallbackPayoutBal = cachedBalanceData ? { balance: cachedBalanceData.payoutBalanceMATIC || "9.2971", isLow: !!cachedBalanceData.payoutIsLow } : { balance: "9.2971", isLow: false };
+    const fallbackPayoutUSDT = cachedBalanceData ? cachedBalanceData.payoutBalanceUSDT || "0.00" : "0.00";
+    const fallbackGreenBalance = cachedBalanceData ? cachedBalanceData.greenBalance || "0.00" : "0.00";
+
+    // Run the blockchain RPC queries concurrently with a snappy 4-second timeout per call to prevent any potential blocking
     const queryPromise = Promise.all([
-      isBotAddressValid ? mainBlockchain.checkGasBalance('polygon', botAddress) : Promise.resolve({ balance: "0.000000", isLow: true }),
-      isBotAddressValid ? mainBlockchain.getUSDTBalance(botAddress) : Promise.resolve("0.00"),
-      isPayoutAddressValid ? mainBlockchain.checkGasBalance('polygon', payoutAddress) : Promise.resolve({ balance: "0.000000", isLow: true }),
-      isPayoutAddressValid ? mainBlockchain.getUSDTBalance(payoutAddress) : Promise.resolve("0.00"),
-      blockchainConfig.greenTokenAddress && !blockchainConfig.greenTokenAddress.includes('0x000') && isBotAddressValid
-        ? mainBlockchain.getTokenBalance(blockchainConfig.greenTokenAddress, botAddress)
-        : Promise.resolve("0.00")
+      withTimeoutAndFallback(
+        isBotAddressValid ? mainBlockchain.checkGasBalance('polygon', botAddress) : Promise.resolve({ balance: "0.000000", isLow: true }),
+        4000,
+        fallbackBotBal
+      ),
+      withTimeoutAndFallback(
+        isBotAddressValid ? mainBlockchain.getUSDTBalance(botAddress) : Promise.resolve("0.00"),
+        4000,
+        fallbackBotUSDT
+      ),
+      withTimeoutAndFallback(
+        isPayoutAddressValid ? mainBlockchain.checkGasBalance('polygon', payoutAddress) : Promise.resolve({ balance: "0.000000", isLow: true }),
+        4000,
+        fallbackPayoutBal
+      ),
+      withTimeoutAndFallback(
+        isPayoutAddressValid ? mainBlockchain.getUSDTBalance(payoutAddress) : Promise.resolve("0.00"),
+        4000,
+        fallbackPayoutUSDT
+      ),
+      withTimeoutAndFallback(
+        blockchainConfig.greenTokenAddress && !blockchainConfig.greenTokenAddress.includes('0x000') && isBotAddressValid
+          ? mainBlockchain.getTokenBalance(blockchainConfig.greenTokenAddress, botAddress)
+          : Promise.resolve("0.00"),
+        4000,
+        fallbackGreenBalance
+      )
     ]);
 
-    // Give it at most 8 seconds to run to avoid hanging background loops forever due to node timeouts
+    // Global fail-safe timeout increased to 15 seconds to eliminate "RPC Query Timeout" triggers on background refreshes
     const timeoutPromise = new Promise<any>((_, reject) => {
-      setTimeout(() => reject(new Error("RPC Query Timeout (8s limit reached)")), 8000);
+      setTimeout(() => reject(new Error("RPC Query Timeout (15s limit reached)")), 15000);
     });
 
     const [botBalRes, botUSDT, payoutBalRes, payoutUSDT, greenBalance] = await Promise.race([queryPromise, timeoutPromise]);
