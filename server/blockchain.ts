@@ -233,12 +233,12 @@ export class BlockchainRouter {
       } else if (feeData.gasPrice) {
         txOverrides.gasPrice = feeData.gasPrice.mul(150).div(100);
       } else {
-        txOverrides.gasPrice = ethers.utils.parseUnits("350", "gwei");
+        txOverrides.gasPrice = ethers.utils.parseUnits("500", "gwei"); // Fallback ceiling 500 Gwei
       }
     } catch (err: any) {
       this.emitLog('BLOCKCHAIN', 'WARNING', `Gas tahmini alınamadı: ${err.message}. Varsayılanlar uygulanıyor.`);
       txOverrides.maxPriorityFeePerGas = ethers.utils.parseUnits("45", "gwei");
-      txOverrides.maxFeePerGas = ethers.utils.parseUnits("350", "gwei");
+      txOverrides.maxFeePerGas = ethers.utils.parseUnits("500", "gwei");
     }
     return txOverrides;
   }
@@ -834,8 +834,8 @@ export class BlockchainRouter {
       if (currentAllowance.lt(tokenAmountWei)) {
         this.emitLog('BLOCKCHAIN', 'INFO', `[DEX_APPROVE] Borsa yetkisi alınıyor...`);
         const approveTx = await tokenContract.approve(spenderAddress, ethers.constants.MaxUint256, {
-          maxPriorityFeePerGas: ethers.utils.parseUnits("50", "gwei"), // Yüksek öncelikli onay için sabit 50 Gwei
-          maxFeePerGas: ethers.utils.parseUnits("400", "gwei"), // Yüksek öncelikli onay için sabit 400 Gwei
+          maxPriorityFeePerGas: ethers.utils.parseUnits("60", "gwei"), // Agresif onay için 60 Gwei bahşiş
+          maxFeePerGas: ethers.utils.parseUnits("500", "gwei"), // 500 Gwei tavan
           gasLimit: 100000
         });
         await approveTx.wait();
