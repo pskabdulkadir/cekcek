@@ -27,6 +27,27 @@ import { blockchainConfig, dbConfig } from "./server/config.ts";
 // Load environment variables
 dotenv.config();
 
+// Geliştirici ve Render Ortamı Proxy Temizleyici
+const cleanServerProxyEnvs = () => {
+  const proxyKeys = ['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy'];
+  for (const k of proxyKeys) {
+    const val = process.env[k];
+    if (val) {
+      if (
+        val.includes("proxy.server.com") || 
+        val.includes("your-proxy") || 
+        val.includes("example.com") || 
+        val.includes(":port") || 
+        val.trim() === ""
+      ) {
+        console.log(`[PROXY_CLEANUP_SERVER] Geçersiz/Taslak proxy ortam değişkeni temizlendi: ${k}=${val}`);
+        delete process.env[k];
+      }
+    }
+  }
+};
+cleanServerProxyEnvs();
+
 // DNS Workaround: IPv6 önceliği nedeniyle oluşan ENOTFOUND hatalarını engelle
 dns.setDefaultResultOrder("ipv4first");
 

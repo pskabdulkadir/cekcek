@@ -7,6 +7,28 @@ import * as dotenv from "dotenv";
 
 // .env dosyasını açıkça yükle
 const envResult = dotenv.config();
+
+// Geliştirici ve Render Ortamı Proxy Temizleyici
+const cleanProxyEnvs = () => {
+  const proxyKeys = ['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy'];
+  for (const k of proxyKeys) {
+    const val = process.env[k];
+    if (val) {
+      if (
+        val.includes("proxy.server.com") || 
+        val.includes("your-proxy") || 
+        val.includes("example.com") || 
+        val.includes(":port") || 
+        val.trim() === ""
+      ) {
+        console.log(`[PROXY_CLEANUP] Geçersiz/Taslak proxy ortam değişkeni temizlendi: ${k}=${val}`);
+        delete process.env[k];
+      }
+    }
+  }
+};
+cleanProxyEnvs();
+
 if (envResult.error && !process.env.PRIVATE_KEY) {
   console.warn("⚠️  .env dosyası bulunamadı, varsayılan değerler kullanılıyor.");
 }
