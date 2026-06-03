@@ -824,15 +824,19 @@ export class BlockchainRouter {
 
       // --- CANLI PİYASA PROTOKOLÜ: RAPID GAS & SLIPPAGE ---
       const txOverrides = await this.getSafeGasOverrides(provider);
-      txOverrides.gasLimit = 300000; // Stabil gaz limiti
+      // DEX işlemleri için daha güvenli bir gas limiti (L2 dalgalanmaları için %60 marj)
+      txOverrides.gasLimit = 500000; 
 
+      // 1. ADIM: YETKİ (APPROVE) KONTROLÜ - Fallback hatalarını önlemek için proaktif kontrol
       const currentAllowance = await tokenContract.allowance(wallet.address, spenderAddress);
       if (currentAllowance.lt(tokenAmountWei)) {
-        this.emitLog('BLOCKCHAIN', 'INFO', `[DEX_APPROVE] Borsa yetkisi alınıyor...`);
+        this.emitLog('BLOCKCHAIN', 'INFO', `[DEX_APPROVE] Borsa yetkisi eksik veya yetersiz. 500 Gwei tavanla onay veriliyor...`);
+        
+        // Agresif onay işlemi: MaxUint256 ile bir sonraki satışlarda gas tasarrufu sağlanır
         const approveTx = await tokenContract.approve(spenderAddress, ethers.constants.MaxUint256, {
-          maxPriorityFeePerGas: ethers.utils.parseUnits("60", "gwei"), // Agresif onay için 60 Gwei bahşiş
-          maxFeePerGas: ethers.utils.parseUnits("500", "gwei"), // 500 Gwei tavan
-          gasLimit: 100000
+          maxPriorityFeePerGas: ethers.utils.parseUnits("60", "gwei"),
+          maxFeePerGas: ethers.utils.parseUnits("500", "gwei"),
+          gasLimit: 120000
         });
         await approveTx.wait();
         this.emitLog('BLOCKCHAIN', 'SUCCESS', `[APPROVE_SUCCESS] Borsa artık tokenları harcayabilir.`);
