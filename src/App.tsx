@@ -1991,19 +1991,89 @@ export default function App() {
               </div>
 
               {/* Otonom Komut Paneli */}
-              <div className="lg:col-span-12 mt-6">
+              <div className="lg:col-span-12 mt-6" id="autonomous-command-panel">
                 <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-5">
-                    <h4 className="text-xs font-mono text-cyan-400 mb-3 uppercase tracking-widest">Master Protokol Komut Girişi</h4>
+                    <div className="flex justify-between items-center mb-3">
+                      <h4 className="text-xs font-mono text-cyan-400 uppercase tracking-widest">Master Protokol Komut Girişi</h4>
+                      <span className="text-[10px] font-mono text-cyan-500/60 font-bold bg-cyan-950/40 px-2 py-0.5 rounded border border-cyan-800/20">ÇOKLU ZİNCİR OTONOM SÜRÜM v4.2</span>
+                    </div>
+                    
                     <form onSubmit={handleSendCommand} className="flex gap-3">
                         <input 
+                            id="master-command-input"
                             type="text" 
                             value={adminCommand}
                             onChange={(e) => setAdminCommand(e.target.value)}
-                            placeholder="Komutu buraya girin... (Örn: SET_AUTONOMOUS_DEPLOYMENT_TRUE...)"
-                            className="flex-grow bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-xs font-mono text-cyan-300 outline-none focus:border-cyan-500/50"
+                            placeholder="Komut dizisini buraya girin (Çoklu komutlar için araya ; koyun)..."
+                            className="flex-grow bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-xs font-mono text-cyan-300 outline-none focus:border-cyan-500/50"
                         />
-                        <button type="submit" className="bg-cyan-600 hover:bg-cyan-500 text-slate-950 px-6 py-2 rounded-xl font-mono text-xs font-bold transition-all cursor-pointer">UYGULA</button>
+                        <button type="submit" id="execute-command-btn" className="bg-cyan-600 hover:bg-cyan-500 text-slate-950 px-6 py-2.5 rounded-xl font-mono text-xs font-bold transition-all cursor-pointer shadow-lg shadow-cyan-950/30">UYGULA</button>
                     </form>
+
+                    {/* Hızlı Erişim Komut Tuşları */}
+                    <div className="mt-4 pt-4 border-t border-slate-800/50">
+                        <span className="text-[10px] font-mono font-bold text-slate-400 block mb-2 uppercase tracking-wide">Hızlı Protokol Komut Seti:</span>
+                        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-2">
+                            <button
+                                type="button"
+                                id="cmd-btn-sync"
+                                onClick={() => setAdminCommand("ZORLA_SENKRONİZASYON_DENGE_YENİLEME")}
+                                className="bg-slate-950 hover:bg-slate-900 border border-slate-800 hover:border-cyan-500/30 px-2 py-1.5 rounded-xl font-mono text-[10px] text-left text-slate-300 transition-all flex flex-col gap-0.5 group"
+                            >
+                                <span className="text-cyan-400 font-bold group-hover:text-cyan-300">ZORLA_SENKRONİZASYON</span>
+                                <span className="text-slate-500 text-[9px] truncate">RPC Bakiyesini Yenile</span>
+                            </button>
+                            <button
+                                type="button"
+                                id="cmd-btn-settle"
+                                onClick={() => setAdminCommand("BEKLEYEN ÖDEMELERİ YÜRÜT")}
+                                className="bg-slate-950 hover:bg-slate-900 border border-slate-800 hover:border-emerald-500/30 px-2 py-1.5 rounded-xl font-mono text-[10px] text-left text-slate-300 transition-all flex flex-col gap-0.5 group"
+                            >
+                                <span className="text-emerald-400 font-bold group-hover:text-emerald-300">BEKLEYEN ÖDEMELERİ YÜRÜT</span>
+                                <span className="text-slate-500 text-[9px] truncate">DEX Nakit Sıkıştırıcı</span>
+                            </button>
+                            <button
+                                type="button"
+                                id="cmd-btn-route"
+                                onClick={() => setAdminCommand("POLİGON'A YERLEŞİMİ ZORLA")}
+                                className="bg-slate-950 hover:bg-slate-900 border border-slate-800 hover:border-purple-500/30 px-2 py-1.5 rounded-xl font-mono text-[10px] text-left text-slate-300 transition-all flex flex-col gap-0.5 group"
+                            >
+                                <span className="text-purple-400 font-bold group-hover:text-purple-300">POLİGON'A YERLEŞİMİ ZORLA</span>
+                                <span className="text-slate-500 text-[9px] truncate">Rotayı Polygon'a Sabitle</span>
+                            </button>
+                            <button
+                                type="button"
+                                id="cmd-btn-reset"
+                                onClick={() => setAdminCommand("BORU HATTI SIFIRLA")}
+                                className="bg-slate-950 hover:bg-slate-900 border border-slate-800 hover:border-red-500/30 px-2 py-1.5 rounded-xl font-mono text-[10px] text-left text-slate-300 transition-all flex flex-col gap-0.5 group"
+                            >
+                                <span className="text-red-400 font-bold group-hover:text-red-300">BORU HATTI SIFIRLA</span>
+                                <span className="text-slate-500 text-[9px] truncate">Hata Akışını Arındır</span>
+                            </button>
+                            <button
+                                type="button"
+                                id="cmd-btn-resume"
+                                onClick={() => setAdminCommand("DEVAM ET_İŞLEMİ")}
+                                className="bg-slate-950 hover:bg-slate-900 border border-slate-800 hover:border-amber-500/30 px-2 py-1.5 rounded-xl font-mono text-[10px] text-left text-slate-300 transition-all flex flex-col gap-0.5 group"
+                            >
+                                <span className="text-amber-400 font-bold group-hover:text-amber-300">DEVAM ET_İŞLEMİ</span>
+                                <span className="text-slate-500 text-[9px] truncate">Asıdaki Varlıkları Çıkar</span>
+                            </button>
+                            <button
+                                type="button"
+                                id="cmd-btn-delay"
+                                onClick={() => setAdminCommand("SET_LIQUIDATION_TRIGGER_DELAY 25000")}
+                                className="bg-slate-950 hover:bg-slate-900 border border-slate-800 hover:border-cyan-500/30 px-2 py-1.5 rounded-xl font-mono text-[10px] text-left text-slate-300 transition-all flex flex-col gap-0.5 group"
+                            >
+                                <span className="text-cyan-500 font-bold group-hover:text-cyan-400">SET_LIQUIDATION_DELAY</span>
+                                <span className="text-slate-500 text-[9px] truncate">Tampon_Süre: 25000 ms</span>
+                            </button>
+                        </div>
+                        <div className="mt-3 text-[10px] font-mono text-slate-500 leading-relaxed bg-slate-950/40 p-3 rounded-lg border border-slate-800/30">
+                            💡 <strong className="text-cyan-500">Zincirleme Komut Çalıştırma İpucu:</strong> Komutları sırayla tek seferde uygulamak için aralarına noktalı virgül (;) koyarak yazabilirsiniz.<br/>
+                            Örn: <code className="text-slate-300 bg-slate-950 px-1 py-0.5 rounded border border-slate-800/50">SET_LIQUIDATION_TRIGGER_DELAY 25000; DEVAM ET_İŞLEMİ; ZORLA_SENKRONİZASYON_DENGE_YENİLEME; BEKLEYEN ÖDEMELERİ YÜRÜT</code>
+                        </div>
+                    </div>
                 </div>
               </div>
 

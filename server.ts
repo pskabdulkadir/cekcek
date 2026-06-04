@@ -1806,33 +1806,86 @@ app.post("/api/admin/command", async (req, res) => {
 
   for (const line of lines) {
     const cmd = line.trim();
-    let upperCmd = cmd.toUpperCase();
+    
+    // Low-level cleaning of Turkish lowercase characters to avoid weird toUpperCase behavior
+    let normalized = cmd
+      .replace(/ç/g, "c")
+      .replace(/ğ/g, "g")
+      .replace(/ı/g, "i")
+      .replace(/i/g, "i")
+      .replace(/ö/g, "o")
+      .replace(/ş/g, "s")
+      .replace(/ü/g, "u")
+      .toLowerCase();
 
-    // Map Turkish characters to standard Latin uppercase to avoid encoding normalization issues
+    let upperCmd = normalized.toUpperCase();
+
+    // Map Turkish uppercase characters to standard uppercase English characters
     upperCmd = upperCmd
-      .replace(/İ/g, "I")
+      .replace(/Ç/g, "C")
       .replace(/Ğ/g, "G")
-      .replace(/Ü/g, "U")
-      .replace(/Ş/g, "S")
+      .replace(/İ/g, "I")
+      .replace(/I/g, "I")
       .replace(/Ö/g, "O")
-      .replace(/Ç/g, "C");
+      .replace(/Ş/g, "S")
+      .replace(/Ü/g, "U")
+      .replace(/’/g, "")
+      .replace(/'/g, ""); // strip quotes, e.g. POLIGON'A -> POLIGONA
+
+    // Strip multiple consecutive spaces to a single space
+    upperCmd = upperCmd.replace(/\s+/g, " ").trim();
 
     // Comprehensive Command Aliases & Translations
-    if (upperCmd === "BEKLEYEN ODEMELERI YURUT" || upperCmd === "FORCED_SETTLE" || upperCmd === "LIQUIDATION_START") {
-      upperCmd = "EXECUTE_PENDING_SETTLEMENTS";
-    }
-    if (upperCmd === "FORCE_SYNC") {
+    
+    // 1. FORCE_SYNC_BALANCE_REFRESH Aliases
+    if (upperCmd === "ZORLA_SENKRONIZASYON_DENGE_YENILEME" || 
+        upperCmd === "ZORLA_SENKRONIZASYON" || 
+        upperCmd === "ZORLA SENKRONIZASYON" || 
+        upperCmd === "ZORLA SENKRONIZASYON DENGE YENILEME" || 
+        upperCmd === "FORCE_SYNC") {
       upperCmd = "FORCE_SYNC_BALANCE_REFRESH";
     }
-    if (upperCmd === "ROUTE_FORCE") {
+
+    // 2. EXECUTE_PENDING_SETTLEMENTS Aliases
+    if (upperCmd === "BEKLEYEN ODEMELERI YURUT" || 
+        upperCmd === "ZORUNLU YERLESIM" || 
+        upperCmd === "TASFIYE_BASLANGICI" || 
+        upperCmd === "TASFIYE BASLANGICI" || 
+        upperCmd === "TASFIYE_BASLANGIC" || 
+        upperCmd === "TASFIYE BASLANGIC" || 
+        upperCmd === "FORCED_SETTLE" || 
+        upperCmd === "LIQUIDATION_START") {
+      upperCmd = "EXECUTE_PENDING_SETTLEMENTS";
+    }
+
+    // 3. FORCE_SETTLEMENT_TO_POLYGON Aliases
+    if (upperCmd === "ROTA_GUCU" || 
+        upperCmd === "POLIGONA YERLESIMI ZORLA" || 
+        upperCmd === "POLIGON A YERLESIMI ZORLA" ||
+        upperCmd === "POLIGONA YERLESIM ZORLA" ||
+        upperCmd === "ROUTE_FORCE") {
       upperCmd = "FORCE_SETTLEMENT_TO_POLYGON";
     }
-    if (upperCmd === "RESET_PIPELINE") {
+
+    // 4. RESET_LIQUIDATION_PIPELINE Aliases
+    if (upperCmd === "BORU HATTI SIFIRLA" || 
+        upperCmd === "TASFIYE ISLEMLERINI SIFIRLA" || 
+        upperCmd === "TASFIYE ISLEMLERI SIFIRLA" || 
+        upperCmd === "RESET_PIPELINE") {
       upperCmd = "RESET_LIQUIDATION_PIPELINE";
     }
-    if (upperCmd === "RESUME_PIPELINE" || upperCmd === "RESUME_LIQUIDATION_PIPELINE") {
+
+    // 5. RESTART_LIQUIDATION_ENGINE_SYNC Aliases
+    if (upperCmd === "DEVAM ET_ISLEMI" || 
+        upperCmd === "DEVAM ET ISLEMI" || 
+        upperCmd === "TASFIYE ISLEMLERINE DEVAM ETTIR" || 
+        upperCmd === "TASFIYE MOTORU SENKRONIZASYONUNU YENIDEN BASLAT" || 
+        upperCmd === "RESUME_PIPELINE" || 
+        upperCmd === "RESUME_LIQUIDATION_PIPELINE") {
       upperCmd = "RESTART_LIQUIDATION_ENGINE_SYNC";
     }
+
+    // 6. ADJUST_CONFIRMATION_DELAY / SET_LIQUIDATION_TRIGGER_DELAY parameter mapping
     if (upperCmd.startsWith("SET_LIQUIDATION_TRIGGER_DELAY")) {
       const parts = upperCmd.split(/\s+/);
       const val = parts[1] || "10000";
