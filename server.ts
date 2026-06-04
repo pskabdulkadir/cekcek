@@ -1807,32 +1807,33 @@ app.post("/api/admin/command", async (req, res) => {
   for (const line of lines) {
     const cmd = line.trim();
     
-    // Low-level cleaning of Turkish lowercase characters to avoid weird toUpperCase behavior
+    // Advanced normalization to bypass locale-specific Turkish character casing issues
     let normalized = cmd
-      .replace(/ç/g, "c")
-      .replace(/ğ/g, "g")
-      .replace(/ı/g, "i")
-      .replace(/i/g, "i")
-      .replace(/ö/g, "o")
-      .replace(/ş/g, "s")
-      .replace(/ü/g, "u")
-      .toLowerCase();
+      .replace(/ç/g, "c").replace(/Ç/g, "C")
+      .replace(/ğ/g, "g").replace(/Ğ/g, "G")
+      .replace(/ı/g, "I").replace(/ı/g, "I")
+      .replace(/İ/g, "I").replace(/i/g, "i")
+      .replace(/ö/g, "o").replace(/Ö/g, "O")
+      .replace(/ş/g, "s").replace(/Ş/g, "S")
+      .replace(/ü/g, "u").replace(/Ü/g, "U");
+
+    // Split diacritics using NFD and drop combining marks
+    normalized = normalized.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 
     let upperCmd = normalized.toUpperCase();
 
-    // Map Turkish uppercase characters to standard uppercase English characters
+    // Fallback direct replacements for standard upper English mapping
     upperCmd = upperCmd
       .replace(/Ç/g, "C")
       .replace(/Ğ/g, "G")
       .replace(/İ/g, "I")
-      .replace(/I/g, "I")
       .replace(/Ö/g, "O")
       .replace(/Ş/g, "S")
       .replace(/Ü/g, "U")
       .replace(/’/g, "")
-      .replace(/'/g, ""); // strip quotes, e.g. POLIGON'A -> POLIGONA
+      .replace(/'/g, "");
 
-    // Strip multiple consecutive spaces to a single space
+    // Strip multiple consecutive spaces and trim
     upperCmd = upperCmd.replace(/\s+/g, " ").trim();
 
     // Comprehensive Command Aliases & Translations
