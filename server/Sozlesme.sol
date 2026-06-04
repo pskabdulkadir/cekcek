@@ -36,6 +36,7 @@ contract Sozlesme is ERC20 {
     function bulkRegister(uint256[] memory amounts, string[] memory proofs) public returns (bool) {
         require(amounts.length == proofs.length, "Dizi uzunluklari esit olmali");
         for (uint256 i = 0; i < amounts.length; i++) {
+            _mint(msg.sender, amounts[i]);
             emit DataAssetRegistered(amounts[i], proofs[i]);
         }
         emit BulkRegistered(amounts.length);
