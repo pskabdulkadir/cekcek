@@ -680,7 +680,7 @@ export class BlockchainRouter {
             }
 
             this.emitLog('BLOCKCHAIN', 'INFO', `Deneme 1: registerDataAsset çağrılıyor...`);
-            const txResponse = await contract.registerDataAsset(amountWei, proofHash, {
+            tx = await contract.registerDataAsset(amountWei, proofHash, {
               gasLimit: 150000, // Kontrat çağrısı için daha yüksek gasLimit
               ...txOverrides // Dinamik gas fiyatlarını uygula
             });
@@ -702,8 +702,6 @@ export class BlockchainRouter {
               gasLimit: 150000, // Kontrat çağrısı için daha yüksek gasLimit
               ...txOverrides // Dinamik gas fiyatlarını uygula
             });
-          } else {
-            tx = txResponse;
           }
 
           this.emitLog('BLOCKCHAIN', 'INFO', `Ağa başarıyla iletildi. Blok onayı bekleniyor... İşlem Kodu: ${tx.hash}`);
