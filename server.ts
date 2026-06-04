@@ -211,9 +211,9 @@ async function executeProxySettlement(voucherId: string, amountUSD: number, co2G
       const provider = new ethers.providers.JsonRpcProvider(mainBlockchain.rpcUrl);
       const gasPrice = await provider.getGasPrice();
       const gasPriceGwei = parseFloat(ethers.utils.formatUnits(gasPrice, "gwei"));
-      const maxThresholdGwei = 250; // 250 Gwei Üst Limit
+      const maxThresholdGwei = 400; // 400 Gwei Üst Limit
       if (gasPriceGwei > maxThresholdGwei) {
-        pushLog('FINANCE', 'WARNING', `[GAS_THROTTLE] Ağ yoğunluğu çok yüksek (Mevcut Gas: ${gasPriceGwei.toFixed(2)} Gwei > Limit: ${maxThresholdGwei} Gwei). Likidasyon ertelendi.`);
+        pushLog('FINANCE', 'WARNING', `[GAS_THROTTLE] Ağ çok yoğun (${gasPriceGwei.toFixed(2)} Gwei > ${maxThresholdGwei}). Likidasyon ertelendi.`);
         return false;
       }
     } catch (gasErr: any) {
