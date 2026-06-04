@@ -240,13 +240,19 @@ async function executeProxySettlement(voucherId: string, amountUSD: number, co2G
     let chosenChain = "polygon";
     let maxYield = polyYield;
     
-    if (arbYield > maxYield) {
-      chosenChain = "arbitrum";
-      maxYield = arbYield;
-    }
-    if (baseYield > maxYield) {
-      chosenChain = "base";
-      maxYield = baseYield;
+    if (serverState.forcePolygonSettlement) {
+      chosenChain = "polygon";
+      maxYield = polyYield;
+      pushLog('FINANCE', 'INFO', `[ROUTE_DECISION] Otonom Rota Bulucu yolu POLYGON MAINNET olarak sabitledi (Zorunlu Mod).`);
+    } else {
+      if (arbYield > maxYield) {
+        chosenChain = "arbitrum";
+        maxYield = arbYield;
+      }
+      if (baseYield > maxYield) {
+        chosenChain = "base";
+        maxYield = baseYield;
+      }
     }
     
     serverState.selectedNetworkPath = chosenChain as any;
@@ -310,6 +316,7 @@ const serverState = {
   lightweightMode: true,
   circuitBreakerStatus: "NORMAL" as "NORMAL" | "BREAKER_ACTIVE_SLOW_DOWN",
   selectedNetworkPath: "polygon" as "polygon" | "arbitrum" | "base",
+  forcePolygonSettlement: false,
   merkleBuffer: [] as any[]
 };
 
@@ -1865,6 +1872,59 @@ app.post("/api/admin/command", async (req, res) => {
     mainLiquidation.resetProcessingState();
     pushLog('FINANCE', 'SUCCESS', `[LIQUIDATION_SYNC] Likidasyon motoru sıfırlandı ve yeniden senkronize edildi. Cüzdan bakiyeleri taranıyor.`);
     return res.json({ success: true, message: "Liquidation engine restarted and synced" });
+  }
+
+  if (command === "FORCE_SYNC_BALANCE_REFRESH") {
+    mainLiquidation.resetProcessingState();
+    const walletAddress = mainBlockchain.getWalletAddress();
+    const greenTokenAddr = blockchainConfig.greenTokenAddress;
+    (async () => {
+      const balance = await mainBlockchain.getTokenBalance(greenTokenAddr, walletAddress);
+      pushLog('BLOCKCHAIN', 'SUCCESS', `[FORCE_SYNC_BALANCE_REFRESH] Yerel bakiye senkronizasyonu tamamlandı. Doğrudan RPC okunan KECO Bakiyesi: ${balance} KECO - OK`);
+    })();
+    return res.json({ success: true, message: "Balance forced sync triggered successfully." });
+  }
+
+  if (command === "RESET_LIQUIDATION_PIPELINE") {
+    mainLiquidation.resetProcessingState();
+    (async () => {
+      const result = await ReadyToSellModel.updateMany(
+        { liquidationFailed: true },
+        { liquidationFailed: false }
+      );
+      pushLog('SYSTEM', 'SUCCESS', `[RESET_PIPELINE] Likidasyon boru hattı sıfırlandı. Takılı kalan ve askıya alınan varlıklar sıfırlandı. Güncellenen varlık sayısı: ${result.modifiedCount || 0}`);
+    })();
+    return res.json({ success: true, message: "Liquidation pipeline resetted." });
+  }
+
+  if (command === "FORCE_SETTLEMENT_TO_POLYGON") {
+    serverState.forcePolygonSettlement = true;
+    serverState.selectedNetworkPath = "polygon";
+    pushLog('BLOCKCHAIN', 'SUCCESS', `[ROUTE_FORCE] Likidasyon rotası kalıcı olarak POLYGON MAINNET'e sabitlendi. L2 çapraz zincir araması durduruldu.`);
+    return res.json({ success: true, message: "Settlement route forced to Polygon." });
+  }
+
+  if (command === "RESTART_MINT_LIQUIDITY_SYNC") {
+    mainLiquidation.resetProcessingState();
+    const walletAddress = mainBlockchain.getWalletAddress();
+    const greenTokenAddr = blockchainConfig.greenTokenAddress;
+    (async () => {
+      const balance = await mainBlockchain.getTokenBalance(greenTokenAddr, walletAddress);
+      const pendingMintsCount = await ReadyToSellModel.countDocuments({
+        isSold: false,
+        isMintedOnChain: false
+      });
+      pushLog('SYSTEM', 'SUCCESS', `[SYNC_RESTART] Üretim ve Likidite motoru başarıyla senkronize edildi. Güncel KECO Bakiyesi: ${balance} KECO. Bekleyen basım: ${pendingMintsCount || 0} adet.`);
+    })();
+    return res.json({ success: true, message: "Mint and liquidity sync restarted." });
+  }
+
+  if (command.startsWith("ADJUST_CONFIRMATION_DELAY")) {
+    const parts = command.split(" ");
+    const msValue = parseInt(parts[1]) || 8000;
+    mainLiquidation.setConfirmationDelay(msValue);
+    pushLog('SYSTEM', 'SUCCESS', `[CONFIRMATION_DELAY] Blok onay bekleme süresi ${msValue} milisaniye (${(msValue / 1000).toFixed(1)} saniye) olarak güncellendi.`);
+    return res.json({ success: true, message: `Confirmation delay set to ${msValue}ms.` });
   }
 
   res.status(400).json({ error: "Geçersiz komut dizisi." });

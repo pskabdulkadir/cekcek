@@ -11,6 +11,7 @@ export class LiquidationEngine {
   private blockchain: BlockchainRouter;
   private logCallback?: (module: 'SYSTEM' | 'MARKET' | 'EXECUTOR' | 'BLOCKCHAIN' | 'AI' | 'FINANCE', level: 'INFO' | 'SUCCESS' | 'WARNING' | 'ERROR' | 'ANALYZE', msg: string) => void;
   private isProcessing: boolean = false;
+  private confirmationDelayMs: number = 8000; // Varsayılanı 8 saniyeye çektik (ADJUST_CONFIRMATION_DELAY talimatına uyumlu)
 
   constructor(blockchain: BlockchainRouter) {
     this.blockchain = blockchain;
@@ -18,6 +19,14 @@ export class LiquidationEngine {
 
   public registerLogger(cb: typeof this.logCallback) {
     this.logCallback = cb;
+  }
+
+  public setConfirmationDelay(ms: number) {
+    this.confirmationDelayMs = ms;
+  }
+
+  public getConfirmationDelay(): number {
+    return this.confirmationDelayMs;
   }
 
   private emitLog(level: 'INFO' | 'SUCCESS' | 'WARNING' | 'ERROR' | 'ANALYZE', msg: string) {
@@ -60,16 +69,17 @@ export class LiquidationEngine {
         let balanceNum = parseFloat(balance);
         
         // --- BLOK ONAYI BEKLEME (Confirmation Delay) ---
-        // Eğer ilk okumada bakiye 0.01 veya daha az ise, ağın (örneğin az önce yapılan basımı) onaylaması için 5.5 saniye bekleyip tekrar okuyoruz.
+        // Eğer ilk okumada bakiye 0.01 veya daha az ise, ağın (örneğin az önce yapılan basımı) onaylaması için bekliyoruz.
         if (balanceNum <= 0.01) {
-          this.emitLog('INFO', `[LIQUIDITY_CHECK] Başlangıç KECO bakiye okuması düşük (${balanceNum.toFixed(4)} KECO). Blok onayı bekleniyor (5.5 saniye)...`);
-          await new Promise(resolve => setTimeout(resolve, 5500));
+          this.emitLog('INFO', `[LIQUIDITY_CHECK] Başlangıç KECO bakiye okuması düşük (${balanceNum.toFixed(4)} KECO). Blok onayı bekleniyor (${(this.confirmationDelayMs / 1000).toFixed(1)} saniye)...`);
+          await new Promise(resolve => setTimeout(resolve, this.confirmationDelayMs));
           balance = await this.blockchain.getTokenBalance(greenTokenAddr, walletAddress);
           balanceNum = parseFloat(balance);
           this.emitLog('INFO', `[LIQUIDITY_CHECK] Bekleme sonrası KECO bakiye okuması: ${balanceNum.toFixed(4)} KECO`);
         }
 
         if (balanceNum > 0.01) {
+          this.emitLog('SUCCESS', `[LIQUIDITY_CHECK] Bakiye okundu: ${balanceNum.toFixed(4)} KECO - OK`);
           tokenAmountWei = ethers.utils.parseUnits(balanceNum.toFixed(18), 18).toString();
           this.emitLog('INFO', `[WATCHDOG] Cüzdanda ${balanceNum.toFixed(4)} KECO/GREEN token tespit edildi. QuickSwap üzerinden USDT ye dönüştürülüyor...`);
         }
