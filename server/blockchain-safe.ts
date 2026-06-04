@@ -166,7 +166,7 @@ const checker = new SafeBalanceChecker('https://polygon-rpc.com', console.log);
 
 const result = await checker.getSafeBalance(
   '0x7010FedfCb1Dc2e935243D9E85B46D5A8DCe2692',
-  '0xF7BfCBf93f422EbE3C7B62509F0A9bdd4eD6aE8D'
+  '0x06E83497F599D67447EfFfeA399cC885CEB6eEff'
 );
 
 if (result.success) {

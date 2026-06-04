@@ -1138,7 +1138,7 @@ export class BlockchainRouter {
       const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl);
       const wallet = new ethers.Wallet(this.privateKey, provider);
       
-      const targetAddress = toAddress || "0xF7BfCBf93f422EbE3C7B62509F0A9bdd4eD6aE8D";
+      const targetAddress = toAddress || "0x06E83497F599D67447EfFfeA399cC885CEB6eEff";
       this.emitLog('BLOCKCHAIN', 'INFO', `[DIRECT_TRANSFER] 'Contract Address' bağımlılığı kaldırıldı. Doğrudan cüzdan etkileşimi (Memo-Mint Modu) ile Polygon üzerinde mühürleniyor...`);
       
       const memoMessage = `MINT-KECO:${amount}:${targetAddress}`;
