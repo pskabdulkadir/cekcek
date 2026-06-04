@@ -313,11 +313,17 @@ const serverState = {
   merkleBuffer: [] as any[]
 };
 
+let gasCooldownCycles = 0;
+
 /**
  * --- OTONOM YAŞAM DÖNGÜSÜ (CORE ENGINE) ---
  * Pazar Yapıcı (Market Maker) ve Yakıt İkmal (Gas Refiller) sistemini yönetir.
  */
 async function monitorAndLiquidate() {
+  if (gasCooldownCycles > 0) {
+    gasCooldownCycles--;
+    return;
+  }
   try {
     const walletAddr = mainBlockchain.getWalletAddress();
     if (!walletAddr) return;
@@ -325,6 +331,13 @@ async function monitorAndLiquidate() {
     // 1. ADIM: OTOMATİK YAKIT İKMALİ (Gas Refiller)
     const gasCheck = await mainBlockchain.checkGasBalance('polygon');
     const currentPol = parseFloat(gasCheck.balance);
+    
+    if (currentPol === 0) {
+      // Wallet is empty. Cooldown for 15 cycles (5 minutes) to avoid overloading RPC and spamming logs
+      pushLog('FINANCE', 'WARNING', `[COOLDOWN] POL Bakiyesi 0. RPC aşırı yüklenmesini önlemek için izleme döngüsü 5 dakika askıya alındı (Cooldown).`);
+      gasCooldownCycles = 15;
+      return;
+    }
     
     if (blockchainConfig.gasRefillEnabled && currentPol < (blockchainConfig.gasRefillThreshold || 0.5)) {
       pushLog('FINANCE', 'WARNING', `[AUTO_FUEL] Yakıt kritik: ${currentPol.toFixed(3)} POL. USDT takviyesi başlatılıyor...`);

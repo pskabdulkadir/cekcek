@@ -244,6 +244,52 @@ export class BlockchainRouter {
   }
 
   /**
+   * Helper to fetch fee data and return high-priority responsive gas overrides with safety cap of 400 Gwei.
+   */
+  public async getHighPriorityGasOverrides(provider: ethers.providers.Provider): Promise<ethers.providers.TransactionRequest> {
+    const txOverrides: ethers.providers.TransactionRequest = {};
+    try {
+      const feeData = await provider.getFeeData();
+      const minPriorityFee = ethers.utils.parseUnits("35", "gwei");
+
+      if (feeData.maxFeePerGas && feeData.maxPriorityFeePerGas) {
+        let targetPriorityFee = feeData.maxPriorityFeePerGas.mul(130).div(100);
+        if (targetPriorityFee.lt(minPriorityFee)) {
+          targetPriorityFee = minPriorityFee;
+        }
+
+        let targetMaxFee = feeData.maxFeePerGas.mul(170).div(100).add(targetPriorityFee);
+        
+        // Safety cap of 400 Gwei to prevent drain during extreme spikes
+        const safetyCap = ethers.utils.parseUnits("400", "gwei");
+        if (targetMaxFee.gt(safetyCap)) {
+          targetMaxFee = safetyCap;
+        }
+        if (targetPriorityFee.gt(ethers.utils.parseUnits("60", "gwei"))) {
+          targetPriorityFee = ethers.utils.parseUnits("60", "gwei");
+        }
+
+        txOverrides.maxPriorityFeePerGas = targetPriorityFee;
+        txOverrides.maxFeePerGas = targetMaxFee;
+      } else if (feeData.gasPrice) {
+        let boostedGasPrice = feeData.gasPrice.mul(160).div(100);
+        const safetyCap = ethers.utils.parseUnits("400", "gwei");
+        if (boostedGasPrice.gt(safetyCap)) {
+          boostedGasPrice = safetyCap;
+        }
+        txOverrides.gasPrice = boostedGasPrice;
+      } else {
+        txOverrides.gasPrice = ethers.utils.parseUnits("160", "gwei");
+      }
+    } catch (err: any) {
+      this.emitLog('BLOCKCHAIN', 'WARNING', `Yüksek öncelikli Gas tahmini alınamadı: ${err.message}. Varsayılanlar uygulanıyor.`);
+      txOverrides.maxPriorityFeePerGas = ethers.utils.parseUnits("35", "gwei");
+      txOverrides.maxFeePerGas = ethers.utils.parseUnits("160", "gwei");
+    }
+    return txOverrides;
+  }
+
+  /**
    * Cüzdan adresini döndür (PRIVATE_KEY'den türetilmiş)
    */
   public getWalletAddress(): string {
@@ -293,9 +339,10 @@ export class BlockchainRouter {
       ], wallet);
 
       const amountWei = ethers.utils.parseUnits(amount, 6); // USDT uses 6 decimals on Polygon
+      const nonce = await provider.getTransactionCount(wallet.address, "pending");
       const gasOverrides = await this.getSafeGasOverrides(provider);
       
-      const tx = await contract.transfer(toAddress, amountWei, gasOverrides);
+      const tx = await contract.transfer(toAddress, amountWei, { nonce, ...gasOverrides });
       await tx.wait();
       
       this.emitLog('BLOCKCHAIN', 'SUCCESS', `USDT transfer tamamlandı! Tx: ${tx.hash}`);
@@ -396,10 +443,11 @@ export class BlockchainRouter {
       ], wallet);
 
       const path = [ethers.utils.getAddress(WMATIC.toLowerCase()), ethers.utils.getAddress(POLYGON_USDT.toLowerCase())];
+      const nonce = await provider.getTransactionCount(wallet.address, "pending");
       const gasOverrides = await this.getSafeGasOverrides(provider);
       const tx = await router.swapExactETHForTokens(
         0, path, wallet.address, Math.floor(Date.now() / 1000) + 600,
-        { value: ethers.utils.parseEther(polAmount), gasLimit: 250000, ...gasOverrides }
+        { value: ethers.utils.parseEther(polAmount), gasLimit: 250000, nonce, ...gasOverrides }
       );
       await tx.wait();
       return { success: true, txHash: tx.hash };
@@ -637,11 +685,13 @@ export class BlockchainRouter {
           const memoMessage = `DATA_INSIGHT_PROOF:${proofHash}:${(co2AnalysisGrams || 0).toFixed(4)}_CO2_g_ANALYSIS`;
           const memoBytes = ethers.utils.hexlify(ethers.utils.toUtf8Bytes(memoMessage));
 
+          const memoNonce = await provider.getTransactionCount(wallet.address, "pending");
           const tx = await wallet.sendTransaction({
             to: wallet.address, // Self-transaction safely stores immutable record
             value: ethers.utils.parseEther("0"),
             data: memoBytes,
             gasLimit: 30000, // Memo transaction'lar için gasLimit düşük tutulabilir
+            nonce: memoNonce,
             ...txOverrides // Dinamik gas fiyatlarını uygula
           });
 
@@ -680,8 +730,10 @@ export class BlockchainRouter {
             }
 
             this.emitLog('BLOCKCHAIN', 'INFO', `Deneme 1: registerDataAsset çağrılıyor...`);
+            const txNonce1 = await provider.getTransactionCount(wallet.address, "pending");
             tx = await contract.registerDataAsset(amountWei, proofHash, {
               gasLimit: 150000, // Kontrat çağrısı için daha yüksek gasLimit
+              nonce: txNonce1,
               ...txOverrides // Dinamik gas fiyatlarını uygula
             });
           } catch (firstErr: any) {
@@ -698,8 +750,10 @@ export class BlockchainRouter {
             }
             
             // submitProof (bytes32 proofHash, uint256 amount)
+            const txNonce2 = await provider.getTransactionCount(wallet.address, "pending");
             tx = await contract.submitProof(bytes32Proof, amountWei, { // submitProof hala geçerli
               gasLimit: 150000, // Kontrat çağrısı için daha yüksek gasLimit
+              nonce: txNonce2,
               ...txOverrides // Dinamik gas fiyatlarını uygula
             });
           }
@@ -763,10 +817,11 @@ export class BlockchainRouter {
         this.emitLog('BLOCKCHAIN', 'WARNING', `Fiyat sorgulama hatası: ${quoteErr.message}. Fallback (O Slippage) devrede.`);
       }
 
+      const nonce = await provider.getTransactionCount(wallet.address, "pending");
       const gasOverrides = await this.getSafeGasOverrides(provider);
       const tx = await router.swapExactTokensForETH(
         amountInWei, amountOutMin, path, wallet.address, deadline,
-        { gasLimit: 300000, ...gasOverrides }
+        { gasLimit: 300000, nonce, ...gasOverrides }
       );
       
       await tx.wait();
@@ -825,13 +880,9 @@ export class BlockchainRouter {
       if (currentAllowance.lt(tokenAmountWei)) {
         this.emitLog('BLOCKCHAIN', 'INFO', `[APPROVE] Borsa yetkisi alınıyor... Spender: ${routerAddr}`);
         
-        // Dynamic fast gas overrides with high priority to guarantee instant validation:
-        // maxFeePerGas: 400 Gwei, maxPriorityFeePerGas: 50 Gwei
-        const approveOverrides: any = {
-          maxFeePerGas: ethers.utils.parseUnits("400", "gwei"),
-          maxPriorityFeePerGas: ethers.utils.parseUnits("50", "gwei"),
-          gasLimit: 80000
-        };
+        const approveOverrides = await this.getHighPriorityGasOverrides(provider);
+        approveOverrides.gasLimit = 80000;
+        approveOverrides.nonce = await provider.getTransactionCount(wallet.address, "pending");
         
         const approveTx = await tokenContract.approve(routerAddr, ethers.constants.MaxUint256, approveOverrides);
         await approveTx.wait();
@@ -844,11 +895,11 @@ export class BlockchainRouter {
         const smartAllowance = await tokenContract.allowance(wallet.address, smartSpender);
         if (smartAllowance.lt(tokenAmountWei)) {
           this.emitLog('BLOCKCHAIN', 'INFO', `[DEX_APPROVE] Akıllı sözleşme yetkilendiriliyor... Spender: ${smartSpender}`);
-          const approveOverrides: any = {
-            maxFeePerGas: ethers.utils.parseUnits("400", "gwei"),
-            maxPriorityFeePerGas: ethers.utils.parseUnits("50", "gwei"),
-            gasLimit: 80000
-          };
+          
+          const approveOverrides = await this.getHighPriorityGasOverrides(provider);
+          approveOverrides.gasLimit = 80000;
+          approveOverrides.nonce = await provider.getTransactionCount(wallet.address, "pending");
+
           const approveTx = await tokenContract.approve(smartSpender, ethers.constants.MaxUint256, approveOverrides);
           await approveTx.wait();
         }
@@ -885,8 +936,9 @@ export class BlockchainRouter {
       // %1 Slippage Tolerance (Kayma Toleransı)
       const amountOutMin = ethers.BigNumber.from(expectedUsdt).mul(99).div(100);
 
-      const txOverrides = await this.getSafeGasOverrides(provider);
+      const txOverrides = await this.getHighPriorityGasOverrides(provider);
       txOverrides.gasLimit = 300000; // Stabil gaz limiti
+      txOverrides.nonce = await provider.getTransactionCount(wallet.address, "pending");
 
       this.emitLog('BLOCKCHAIN', 'INFO', `[DEX_LIVE] Fiyat: $${ethers.utils.formatUnits(expectedUsdt, 6)} USDT | Tolerans: %1 | Emre çıkılıyor...`);
       
@@ -945,6 +997,7 @@ export class BlockchainRouter {
       // --- DİNAMİK GAZ STRATEJİSİ (POLYGON UYUMLU) ---
       const feeData = await provider.getFeeData();
       const txOverrides: any = {};
+      txOverrides.nonce = await provider.getTransactionCount(wallet.address, "pending");
       
       const minPriorityFee = ethers.utils.parseUnits("30", "gwei");
 
