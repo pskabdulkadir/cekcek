@@ -56,8 +56,19 @@ export class LiquidationEngine {
       let tokenAmountWei = "0";
 
       if (greenTokenAddr && greenTokenAddr !== ethers.constants.AddressZero && !greenTokenAddr.startsWith("0x0000")) {
-        const balance = await this.blockchain.getTokenBalance(greenTokenAddr, walletAddress);
-        const balanceNum = parseFloat(balance);
+        let balance = await this.blockchain.getTokenBalance(greenTokenAddr, walletAddress);
+        let balanceNum = parseFloat(balance);
+        
+        // --- BLOK ONAYI BEKLEME (Confirmation Delay) ---
+        // Eğer ilk okumada bakiye 0.01 veya daha az ise, ağın (örneğin az önce yapılan basımı) onaylaması için 5.5 saniye bekleyip tekrar okuyoruz.
+        if (balanceNum <= 0.01) {
+          this.emitLog('INFO', `[LIQUIDITY_CHECK] Başlangıç KECO bakiye okuması düşük (${balanceNum.toFixed(4)} KECO). Blok onayı bekleniyor (5.5 saniye)...`);
+          await new Promise(resolve => setTimeout(resolve, 5500));
+          balance = await this.blockchain.getTokenBalance(greenTokenAddr, walletAddress);
+          balanceNum = parseFloat(balance);
+          this.emitLog('INFO', `[LIQUIDITY_CHECK] Bekleme sonrası KECO bakiye okuması: ${balanceNum.toFixed(4)} KECO`);
+        }
+
         if (balanceNum > 0.01) {
           tokenAmountWei = ethers.utils.parseUnits(balanceNum.toFixed(18), 18).toString();
           this.emitLog('INFO', `[WATCHDOG] Cüzdanda ${balanceNum.toFixed(4)} KECO/GREEN token tespit edildi. QuickSwap üzerinden USDT ye dönüştürülüyor...`);
