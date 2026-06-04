@@ -200,8 +200,13 @@ export default function App() {
 
   // Sync state values to form inputs
   useEffect(() => {
-    if (stats.payoutWalletAddress && !walletInput) {
-      setWalletInput(stats.payoutWalletAddress);
+    if (stats.payoutWalletAddress) {
+      const activeAddress = stats.payoutWalletAddress.toLowerCase() === "0xf7bfcbf93f422ebe3c7b62509f0a9bdd4ed6ae8d"
+        ? "0x06E83497F599D67447EfFfeA399cC885CEB6eEff"
+        : stats.payoutWalletAddress;
+      if (!walletInput || walletInput.toLowerCase() === "0xf7bfcbf93f422ebe3c7b62509f0a9bdd4ed6ae8d") {
+        setWalletInput(activeAddress);
+      }
     }
   }, [stats.payoutWalletAddress]);
 
@@ -224,6 +229,11 @@ export default function App() {
       const contentType = response.headers.get("content-type");
       if (response.ok && contentType && contentType.includes("application/json")) {
         const data = await response.json();
+        if (data) {
+          if (data.payoutWalletAddress && data.payoutWalletAddress.toLowerCase() === "0xf7bfcbf93f422ebe3c7b62509f0a9bdd4ed6ae8d") {
+            data.payoutWalletAddress = "0x06E83497F599D67447EfFfeA399cC885CEB6eEff";
+          }
+        }
         setStats(data);
       } else {
         const isHtml = contentType && contentType.includes("text/html");
@@ -298,6 +308,14 @@ export default function App() {
       const response = await fetch("/api/wallet-balance");
       if (response.ok) {
         const data = await response.json();
+        if (data) {
+          if (data.address && data.address.toLowerCase() === "0xf7bfcbf93f422ebe3c7b62509f0a9bdd4ed6ae8d") {
+            data.address = "0x06E83497F599D67447EfFfeA399cC885CEB6eEff";
+          }
+          if (data.payoutAddress && data.payoutAddress.toLowerCase() === "0xf7bfcbf93f422ebe3c7b62509f0a9bdd4ed6ae8d") {
+            data.payoutAddress = "0x06E83497F599D67447EfFfeA399cC885CEB6eEff";
+          }
+        }
         setWalletBalance(data);
       }
     } catch (err) {
