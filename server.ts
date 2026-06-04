@@ -1862,19 +1862,27 @@ app.post("/api/admin/command", async (req, res) => {
     }
   }
 
-  if (command === "SET_MINT_MODE_TO_CONTRACT_ERC20") {
+  const upperCmd = command.toUpperCase().trim();
+
+  if (upperCmd === "SET_MINT_MODE_TO_CONTRACT_ERC20" || upperCmd === "SET_MINT_MODE_CONTRACT") {
     mainBlockchain.setMintMode('CONTRACT');
     pushLog('BLOCKCHAIN', 'SUCCESS', `[MINT_MODE] Basım modu CONTRACT_ERC20 olarak güncellendi. Artık doğrudan akıllı sözleşme mint() fonksiyonu kullanılacak.`);
     return res.json({ success: true, message: "Mint mode set to CONTRACT_ERC20" });
   }
 
-  if (command === "RESTART_LIQUIDATION_ENGINE_SYNC") {
+  if (upperCmd === "RESTART_LIQUIDATION_ENGINE_SYNC" || upperCmd === "RESUME_LIQUIDATION_PIPELINE" || upperCmd === "RESUME_PIPELINE") {
     mainLiquidation.resetProcessingState();
-    pushLog('FINANCE', 'SUCCESS', `[LIQUIDATION_SYNC] Likidasyon motoru sıfırlandı ve yeniden senkronize edildi. Cüzdan bakiyeleri taranıyor.`);
-    return res.json({ success: true, message: "Liquidation engine restarted and synced" });
+    (async () => {
+      const result = await ReadyToSellModel.updateMany(
+        { liquidationFailed: true },
+        { liquidationFailed: false }
+      );
+      pushLog('FINANCE', 'SUCCESS', `[RESUME_PIPELINE] Likidasyon motoru sıfırlandı, askıya alınan tüm varlıklar yeniden aktif edildi. Senkronize edilen varlık sayısı: ${result.modifiedCount || 0}`);
+    })();
+    return res.json({ success: true, message: "Liquidation engine restarted and synced, failed items resumed." });
   }
 
-  if (command === "FORCE_SYNC_BALANCE_REFRESH") {
+  if (upperCmd === "FORCE_SYNC_BALANCE_REFRESH") {
     mainLiquidation.resetProcessingState();
     const walletAddress = mainBlockchain.getWalletAddress();
     const greenTokenAddr = blockchainConfig.greenTokenAddress;
@@ -1885,7 +1893,7 @@ app.post("/api/admin/command", async (req, res) => {
     return res.json({ success: true, message: "Balance forced sync triggered successfully." });
   }
 
-  if (command === "RESET_LIQUIDATION_PIPELINE") {
+  if (upperCmd === "RESET_LIQUIDATION_PIPELINE" || upperCmd === "RESET_PIPELINE") {
     mainLiquidation.resetProcessingState();
     (async () => {
       const result = await ReadyToSellModel.updateMany(
@@ -1897,14 +1905,14 @@ app.post("/api/admin/command", async (req, res) => {
     return res.json({ success: true, message: "Liquidation pipeline resetted." });
   }
 
-  if (command === "FORCE_SETTLEMENT_TO_POLYGON") {
+  if (upperCmd === "FORCE_SETTLEMENT_TO_POLYGON" || upperCmd === "ROUTE_FORCE") {
     serverState.forcePolygonSettlement = true;
     serverState.selectedNetworkPath = "polygon";
     pushLog('BLOCKCHAIN', 'SUCCESS', `[ROUTE_FORCE] Likidasyon rotası kalıcı olarak POLYGON MAINNET'e sabitlendi. L2 çapraz zincir araması durduruldu.`);
     return res.json({ success: true, message: "Settlement route forced to Polygon." });
   }
 
-  if (command === "RESTART_MINT_LIQUIDITY_SYNC") {
+  if (upperCmd === "RESTART_MINT_LIQUIDITY_SYNC") {
     mainLiquidation.resetProcessingState();
     const walletAddress = mainBlockchain.getWalletAddress();
     const greenTokenAddr = blockchainConfig.greenTokenAddress;
@@ -1919,9 +1927,39 @@ app.post("/api/admin/command", async (req, res) => {
     return res.json({ success: true, message: "Mint and liquidity sync restarted." });
   }
 
-  if (command.startsWith("ADJUST_CONFIRMATION_DELAY")) {
-    const parts = command.split(" ");
-    const msValue = parseInt(parts[1]) || 8000;
+  if (upperCmd === "EXECUTE_PENDING_SETTLEMENTS") {
+    mainLiquidation.resetProcessingState();
+    (async () => {
+      // Önce askıdaki hataları sıfırla ki işleme girebilsinler
+      await ReadyToSellModel.updateMany(
+        { isSold: false, liquidationFailed: true },
+        { liquidationFailed: false }
+      );
+      
+      const pendingAssets = await ReadyToSellModel.find({
+        isSold: false,
+        isMintedOnChain: { $ne: false } // zincir üstü basılmış olanlar veya false olmayanlar
+      }).sort({ timestamp: -1 });
+
+      if (pendingAssets.length === 0) {
+        pushLog('FINANCE', 'WARNING', `[EXECUTE_PENDING_SETTLEMENTS] Satılmamış ve nakde çevrilmeye hazır bekleyen varlık bulunamadı.`);
+        return;
+      }
+
+      pushLog('FINANCE', 'INFO', `[EXECUTE_PENDING_SETTLEMENTS] Askıda bekleyen ${pendingAssets.length} varlığın nakde çevrilmesi (USDT) zorla başlatılıyor...`);
+      for (const asset of pendingAssets) {
+        mainLiquidation.resetProcessingState(); // her adımda kilit kalksın
+        pushLog('FINANCE', 'INFO', `[FORCED_SETTLE] ${asset.id} zorla nakde çevriliyor. Değer: $${(asset.accessPriceUSD || 0).toFixed(4)} USDT`);
+        await executeProxySettlement(asset.id, asset.accessPriceUSD || 0, asset.co2AnalysisGrams || 0);
+      }
+      pushLog('FINANCE', 'SUCCESS', `[EXECUTE_PENDING_SETTLEMENTS] Zorlu nakit mutabakatı (Settlement) tamamlama süreci sona erdi.`);
+    })();
+    return res.json({ success: true, message: "Forced pending settlements triggered." });
+  }
+
+  if (upperCmd.startsWith("SET_LIQUIDATION_TRIGGER_DELAY") || upperCmd.startsWith("ADJUST_CONFIRMATION_DELAY")) {
+    const parts = upperCmd.split(/\s+/);
+    const msValue = parseInt(parts[1]) || 10000;
     mainLiquidation.setConfirmationDelay(msValue);
     pushLog('SYSTEM', 'SUCCESS', `[CONFIRMATION_DELAY] Blok onay bekleme süresi ${msValue} milisaniye (${(msValue / 1000).toFixed(1)} saniye) olarak güncellendi.`);
     return res.json({ success: true, message: `Confirmation delay set to ${msValue}ms.` });
