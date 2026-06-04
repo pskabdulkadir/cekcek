@@ -1501,9 +1501,13 @@ async function processWasteDataAndMint(url: string, html: string) {
   // Üretim bittiğinde otomatik satışa (USDT'ye swap) gönder
   if (mintSuccess) {
     if (serverState.autonomousMode) {
-      pushLog('FINANCE', 'INFO', `[AUTO_LIQUIDATION] Üretim (Mint / fallback=${fallbackVirtualActive}) onaylandı! Varlık anında satılmak üzere likidasyon motoruna gönderiliyor: ${savedDoc.id}`);
-      // Asenkron olarak satış gerçekleştirilir
-      executeProxySettlement(savedDoc.id, valuation, metric.co2SavingsGrams).catch(() => {});
+      pushLog('FINANCE', 'INFO', `[AUTO_LIQUIDATION] Üretim (Mint / fallback=${fallbackVirtualActive}) onaylandı! Blokzincir onay gecikmesi (Confirmation Delay) kapsamında 5 saniye bekleniyor...`);
+      
+      // Asenkron olarak 5 saniye bekleyip satışı gerçekleştir
+      setTimeout(() => {
+        pushLog('FINANCE', 'INFO', `[AUTO_LIQUIDATION_EXEC] Varlık şimdi satılmak üzere likidasyon motoruna gönderildi: ${savedDoc.id}`);
+        executeProxySettlement(savedDoc.id, valuation, metric.co2SavingsGrams).catch(() => {});
+      }, 5000);
     }
   }
 
@@ -1849,6 +1853,18 @@ app.post("/api/admin/command", async (req, res) => {
       pushLog('SYSTEM', 'INFO', `Onay eşiği ${val} olarak güncellendi.`);
       return res.json({ success: true });
     }
+  }
+
+  if (command === "SET_MINT_MODE_TO_CONTRACT_ERC20") {
+    mainBlockchain.setMintMode('CONTRACT');
+    pushLog('BLOCKCHAIN', 'SUCCESS', `[MINT_MODE] Basım modu CONTRACT_ERC20 olarak güncellendi. Artık doğrudan akıllı sözleşme mint() fonksiyonu kullanılacak.`);
+    return res.json({ success: true, message: "Mint mode set to CONTRACT_ERC20" });
+  }
+
+  if (command === "RESTART_LIQUIDATION_ENGINE_SYNC") {
+    mainLiquidation.resetProcessingState();
+    pushLog('FINANCE', 'SUCCESS', `[LIQUIDATION_SYNC] Likidasyon motoru sıfırlandı ve yeniden senkronize edildi. Cüzdan bakiyeleri taranıyor.`);
+    return res.json({ success: true, message: "Liquidation engine restarted and synced" });
   }
 
   res.status(400).json({ error: "Geçersiz komut dizisi." });
@@ -2236,6 +2252,36 @@ app.post("/api/hft-config", (req, res) => {
     circuitBreakerStatus: serverState.circuitBreakerStatus,
     selectedNetworkPath: serverState.selectedNetworkPath
   });
+});
+
+/**
+ * TELEMETRİ KONSOL ALTYAPISI: Canlı panelden gelen yönetici komutlarını işler.
+ */
+app.post("/api/command", async (req, res) => {
+  const { command } = req.body;
+  if (!command) {
+    return res.status(400).json({ error: "No command provided" });
+  }
+
+  const cmd = command.trim();
+  pushLog('SYSTEM', 'INFO', `[KONSOL_KOMUTU] Komut alındı: ${cmd}`);
+
+  if (cmd === "SET_MINT_MODE_TO_CONTRACT_ERC20") {
+    mainBlockchain.setMintMode('CONTRACT');
+    pushLog('BLOCKCHAIN', 'SUCCESS', `[MINT_MODE] Basım modu CONTRACT_ERC20 olarak güncellendi. Artık doğrudan akıllı sözleşme mint() fonksiyonu kullanılacak.`);
+    return res.json({ success: true, message: "Mint mode set to CONTRACT_ERC20" });
+  } else if (cmd === "RESTART_LIQUIDATION_ENGINE_SYNC") {
+    mainLiquidation.resetProcessingState();
+    pushLog('FINANCE', 'SUCCESS', `[LIQUIDATION_SYNC] Likidasyon motoru sıfırlandı ve yeniden senkronize edildi. Cüzdan bakiyeleri taranıyor.`);
+    return res.json({ success: true, message: "Liquidation engine restarted and synced" });
+  } else if (cmd === "GET_MINT_MODE") {
+    const currentMode = mainBlockchain.getMintMode();
+    pushLog('SYSTEM', 'INFO', `[MINT_MODE_STATUS] Mevcut Basım Modu: ${currentMode}`);
+    return res.json({ success: true, mode: currentMode });
+  } else {
+    pushLog('SYSTEM', 'WARNING', `[BİLİNMEYEN_KOMUT] "${cmd}" komutu tanınmadı.`);
+    return res.status(400).json({ error: "Unknown command" });
+  }
 });
 
 /**

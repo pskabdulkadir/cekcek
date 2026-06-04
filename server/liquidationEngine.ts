@@ -98,4 +98,8 @@ export class LiquidationEngine {
       return false;
     }
   }
+
+  public resetProcessingState() {
+    this.isProcessing = false;
+  }
 }

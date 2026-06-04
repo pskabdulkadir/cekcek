@@ -34,6 +34,7 @@ export class BlockchainRouter {
   public currentExplorerUrl: string = "https://polygonscan.com";
   public currentNetworkName: string = "Polygon Mainnet";
   private isRealMode: boolean = false;
+  private mintMode: 'CONTRACT' | 'MEMO' = 'CONTRACT';
 
   private gasThresholds = {
     polygon: "0.5", // MATIC/POL (Daha gerçekçi bir eşik)
@@ -91,6 +92,15 @@ export class BlockchainRouter {
       this.emitLog('BLOCKCHAIN', 'ERROR', "KRITIK: PRIVATE_KEY eksik veya geçersiz! Sistem gerçek işlem yapamaz. Lütfen .env dosyasını kontrol edin.");
       this.isRealMode = false;
     }
+  }
+
+  public setMintMode(mode: 'CONTRACT' | 'MEMO') {
+    this.mintMode = mode;
+    this.emitLog('BLOCKCHAIN', 'SUCCESS', `[MINT_MODE_UPDATED] Basım modu başarıyla güncellendi: ${mode}`);
+  }
+
+  public getMintMode(): 'CONTRACT' | 'MEMO' {
+    return this.mintMode;
   }
 
   /**
@@ -1141,8 +1151,52 @@ export class BlockchainRouter {
     try {
       const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl);
       const wallet = new ethers.Wallet(this.privateKey, provider);
-      
       const targetAddress = toAddress || "0x06E83497F599D67447EfFfeA399cC885CEB6eEff";
+
+      // 1. STANDART ERC-20 KONTRAT MINT MODU
+      if (this.mintMode === 'CONTRACT') {
+        try {
+          const safeTokenAddr = tokenAddress.toLowerCase();
+          this.validateContract(safeTokenAddr);
+          
+          this.emitLog('BLOCKCHAIN', 'INFO', `[CONTRACT_MINT] Standart ERC-20 kontratı üzerinden basım deneniyor... Kontrat: ${safeTokenAddr}`);
+          
+          const contract = new ethers.Contract(safeTokenAddr, [
+            "function mint(address to, uint256 amount) public",
+            "function decimals() view returns (uint8)"
+          ], wallet);
+          
+          const decimals = await contract.decimals().catch(() => 18);
+          const amountWei = ethers.utils.parseUnits(parseFloat(amount).toFixed(decimals < 18 ? decimals : 4), decimals);
+          
+          let contractOverrides: any = {
+            gasLimit: 150000
+          };
+          
+          try {
+            const feeData = await provider.getFeeData();
+            if (feeData.maxPriorityFeePerGas && feeData.maxFeePerGas) {
+              const minPriorityFee = ethers.utils.parseUnits("35", "gwei");
+              const proposedPriority = feeData.maxPriorityFeePerGas.mul(150).div(100);
+              contractOverrides.maxPriorityFeePerGas = proposedPriority.gt(minPriorityFee) ? proposedPriority : minPriorityFee;
+              const proposedMaxFee = feeData.maxFeePerGas.mul(150).div(100);
+              const minMaxFee = contractOverrides.maxPriorityFeePerGas.add(ethers.utils.parseUnits("15", "gwei"));
+              contractOverrides.maxFeePerGas = proposedMaxFee.gt(minMaxFee) ? proposedMaxFee : minMaxFee;
+            } else if (feeData.gasPrice) {
+              contractOverrides.gasPrice = feeData.gasPrice.mul(150).div(100);
+            }
+          } catch (e) {}
+
+          const tx = await contract.mint(targetAddress, amountWei, contractOverrides);
+          this.emitLog('BLOCKCHAIN', 'SUCCESS', `[CONTRACT_MINT_SENT] Standart basım işlemi Polygon ağına iletildi, onay bekleniyor... Tx: ${tx.hash}`);
+          await tx.wait();
+          return { success: true, txHash: tx.hash };
+        } catch (err: any) {
+          this.emitLog('BLOCKCHAIN', 'WARNING', `[VERSION_MISMATCH] Hedef adreste standart fonksiyon bulunamadı ya da yetki hatası. Fallback aktif: Memo-Mint moduna geçiliyor...`);
+        }
+      }
+
+      // 2. MEMO-MINT MODU (FALLBACK OR DIRECT CHOSEN MODE)
       this.emitLog('BLOCKCHAIN', 'INFO', `[DIRECT_TRANSFER] 'Contract Address' bağımlılığı kaldırıldı. Doğrudan cüzdan etkileşimi (Memo-Mint Modu) ile Polygon üzerinde mühürleniyor...`);
       
       const memoMessage = `MINT-KECO:${amount}:${targetAddress}`;
