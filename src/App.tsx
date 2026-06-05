@@ -2013,7 +2013,7 @@ export default function App() {
                     {/* Hızlı Erişim Komut Tuşları */}
                     <div className="mt-4 pt-4 border-t border-slate-800/50">
                         <span className="text-[10px] font-mono font-bold text-slate-400 block mb-2 uppercase tracking-wide">Hızlı Protokol Komut Seti:</span>
-                        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-2">
+                        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-2">
                             <button
                                 type="button"
                                 id="cmd-btn-sync"
@@ -2068,10 +2068,169 @@ export default function App() {
                                 <span className="text-cyan-500 font-bold group-hover:text-cyan-400">SET_LIQUIDATION_DELAY</span>
                                 <span className="text-slate-500 text-[9px] truncate">Tampon_Süre: 25000 ms</span>
                             </button>
+                            <button
+                                type="button"
+                                id="cmd-btn-start-liq"
+                                onClick={() => setAdminCommand("LİKİDASYON_MOTORUNU_BAŞLAT")}
+                                className="bg-slate-950 hover:bg-slate-900 border border-slate-800 hover:border-teal-500/30 px-2 py-1.5 rounded-xl font-mono text-[10px] text-left text-slate-300 transition-all flex flex-col gap-0.5 group"
+                            >
+                                <span className="text-teal-400 font-bold group-hover:text-teal-300">LİKİDASYON_MOTORUNU_BAŞLAT</span>
+                                <span className="text-slate-500 text-[9px] truncate">Otonom Tasfiyeyi Aktif Et</span>
+                            </button>
+                            <button
+                                type="button"
+                                id="cmd-btn-stop-liq"
+                                onClick={() => setAdminCommand("LİKİDASYON_MOTORUNU_DURDUR")}
+                                className="bg-slate-950 hover:bg-slate-900 border border-slate-800 hover:border-rose-500/30 px-2 py-1.5 rounded-xl font-mono text-[10px] text-left text-slate-300 transition-all flex flex-col gap-0.5 group"
+                            >
+                                <span className="text-rose-400 font-bold group-hover:text-rose-300">LİKİDASYON_MOTORUNU_DURDUR</span>
+                                <span className="text-slate-500 text-[9px] truncate">Otonom Tasfiyeyi Duraklat</span>
+                            </button>
+                            <button
+                                type="button"
+                                id="cmd-btn-approve-cnt"
+                                onClick={() => setAdminCommand("KONTRAT_YETKİ_VER 0x4c304a6a923c3fb92a87583dbabccbe1ddeb6886")}
+                                className="bg-slate-950 hover:bg-slate-900 border border-slate-800 hover:border-orange-500/30 px-2 py-1.5 rounded-xl font-mono text-[10px] text-left text-slate-300 transition-all flex flex-col gap-0.5 group"
+                            >
+                                <span className="text-orange-400 font-bold group-hover:text-orange-300">KONTRAT_YETKİ_VER</span>
+                                <span className="text-slate-500 text-[9px] truncate">Kontrat Harcama İzni Onayla</span>
+                            </button>
+                            <button
+                                type="button"
+                                id="cmd-btn-remint"
+                                onClick={() => setAdminCommand("YENİDEN_BASIM_EMRİ 280")}
+                                className="bg-slate-950 hover:bg-slate-900 border border-slate-800 hover:border-indigo-500/30 px-2 py-1.5 rounded-xl font-mono text-[10px] text-left text-slate-300 transition-all flex flex-col gap-0.5 group"
+                            >
+                                <span className="text-indigo-400 font-bold group-hover:text-indigo-300">YENİDEN_BASIM_EMRİ</span>
+                                <span className="text-slate-500 text-[9px] truncate">280 Varlığı Yeniden Üret</span>
+                            </button>
+                            <button
+                                type="button"
+                                id="cmd-btn-status-report"
+                                onClick={() => setAdminCommand("GET_STATUS_REPORT")}
+                                className="bg-slate-950 hover:bg-slate-900 border border-slate-800 hover:border-lime-500/30 px-2 py-1.5 rounded-xl font-mono text-[10px] text-left text-slate-300 transition-all flex flex-col gap-0.5 group"
+                            >
+                                <span className="text-lime-400 font-bold group-hover:text-lime-300">SİSTEM RAUND RAPORU</span>
+                                <span className="text-slate-500 text-[9px] truncate">Güncel Durum Özeti Çıkar</span>
+                            </button>
+                            <button
+                                type="button"
+                                id="cmd-btn-mint-mode"
+                                onClick={() => setAdminCommand("SET_MINT_MODE_TO_CONTRACT_ERC20")}
+                                className="bg-slate-950 hover:bg-slate-900 border border-slate-800 hover:border-fuchsia-500/30 px-2 py-1.5 rounded-xl font-mono text-[10px] text-left text-slate-300 transition-all flex flex-col gap-0.5 group"
+                            >
+                                <span className="text-fuchsia-400 font-bold group-hover:text-fuchsia-300">SÖZLEŞME BASIM AKTİF</span>
+                                <span className="text-slate-500 text-[9px] truncate">Doğrudan ERC20 Modu</span>
+                            </button>
                         </div>
-                        <div className="mt-3 text-[10px] font-mono text-slate-500 leading-relaxed bg-slate-950/40 p-3 rounded-lg border border-slate-800/30">
-                            💡 <strong className="text-cyan-500">Zincirleme Komut Çalıştırma İpucu:</strong> Komutları sırayla tek seferde uygulamak için aralarına noktalı virgül (;) koyarak yazabilirsiniz.<br/>
-                            Örn: <code className="text-slate-300 bg-slate-950 px-1 py-0.5 rounded border border-slate-800/50">SET_LIQUIDATION_TRIGGER_DELAY 25000; DEVAM ET_İŞLEMİ; ZORLA_SENKRONİZASYON_DENGE_YENİLEME; BEKLEYEN ÖDEMELERİ YÜRÜT</code>
+                        
+                        {/* Master Protokol Referans Tablosu */}
+                        <div className="mt-4 pt-4 border-t border-slate-800/50">
+                            <span className="text-[10px] font-mono font-bold text-slate-400 block mb-2 uppercase tracking-wide">Master Protokol Referans Tablosu:</span>
+                            <div className="overflow-x-auto bg-slate-950/60 rounded-xl border border-slate-800/60 mb-3">
+                                <table className="w-full text-left font-mono text-[10px] text-slate-300">
+                                    <thead>
+                                        <tr className="bg-slate-950 border-b border-slate-800/80 text-cyan-500 text-[9px] uppercase tracking-wider">
+                                            <th className="px-3 py-2 font-bold">Komut Kodu (Key)</th>
+                                            <th className="px-3 py-2 font-bold">İşlev</th>
+                                            <th className="px-3 py-2 font-bold">Geliştirici Notu</th>
+                                            <th className="px-3 py-2 text-right">Eylem</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-800/40 font-mono">
+                                        <tr className="hover:bg-slate-900/40 transition-colors">
+                                            <td className="px-3 py-2 font-bold text-cyan-400 select-all cursor-pointer" onClick={() => setAdminCommand("PIPELINE_RESET")}>PIPELINE_RESET</td>
+                                            <td className="px-3 py-2 text-slate-400">
+                                                <span className="text-[8px] bg-cyan-950/40 text-cyan-400 px-1 py-0.5 rounded border border-cyan-500/20 mr-1 uppercase">Sistem</span>
+                                                Sıfırlama
+                                            </td>
+                                            <td className="px-3 py-2 text-slate-500">BORU HATTI SIFIRLA yerine otonom sıfırlama yapar.</td>
+                                            <td className="px-3 py-2 text-right">
+                                                <button type="button" onClick={() => setAdminCommand("PIPELINE_RESET")} className="bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 px-2 py-0.5 rounded border border-cyan-500/20 text-[9px] transition-all">SEÇ</button>
+                                            </td>
+                                        </tr>
+                                        <tr className="hover:bg-slate-900/40 transition-colors">
+                                            <td className="px-3 py-2 font-bold text-orange-400 select-all cursor-pointer" onClick={() => setAdminCommand("APPROVE_ERC20 0x4c304a6a923c3fb92a87583dbabccbe1ddeb6886")}>APPROVE_ERC20</td>
+                                            <td className="px-3 py-2 text-slate-400">
+                                                <span className="text-[8px] bg-orange-950/40 text-orange-400 px-1 py-0.5 rounded border border-orange-500/20 mr-1 uppercase">Yetki</span>
+                                                Sözleşme Onayı
+                                            </td>
+                                            <td className="px-3 py-2 text-slate-500">SÖZLEŞMEYİ ONAYLA yerine doğrudan yetki verir.</td>
+                                            <td className="px-3 py-2 text-right">
+                                                <button type="button" onClick={() => setAdminCommand("APPROVE_ERC20 0x4c304a6a923c3fb92a87583dbabccbe1ddeb6886")} className="bg-orange-500/10 hover:bg-orange-500/20 text-orange-400 px-2 py-0.5 rounded border border-orange-500/20 text-[9px] transition-all">SEÇ</button>
+                                            </td>
+                                        </tr>
+                                        <tr className="hover:bg-slate-900/40 transition-colors">
+                                            <td className="px-3 py-2 font-bold text-indigo-400 select-all cursor-pointer" onClick={() => setAdminCommand("MINT_BATCH_ASSETS 280")}>MINT_BATCH_ASSETS</td>
+                                            <td className="px-3 py-2 text-slate-400">
+                                                <span className="text-[8px] bg-indigo-950/40 text-indigo-400 px-1 py-0.5 rounded border border-indigo-500/20 mr-1 uppercase">Üretim</span>
+                                                Toplu Varlık
+                                            </td>
+                                            <td className="px-3 py-2 text-slate-500">YÜRÜT_MINT yerine toplu varlık basım emri çıkarır.</td>
+                                            <td className="px-3 py-2 text-right">
+                                                <button type="button" onClick={() => setAdminCommand("MINT_BATCH_ASSETS 280")} className="bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 px-2 py-0.5 rounded border border-indigo-500/20 text-[9px] transition-all">SEÇ</button>
+                                            </td>
+                                        </tr>
+                                        <tr className="hover:bg-slate-900/40 transition-colors">
+                                            <td className="px-3 py-2 font-bold text-sky-400 select-all cursor-pointer" onClick={() => setAdminCommand("FORCE_RPC_SYNC")}>FORCE_RPC_SYNC</td>
+                                            <td className="px-3 py-2 text-slate-400">
+                                                <span className="text-[8px] bg-sky-950/40 text-sky-400 px-1 py-0.5 rounded border border-sky-500/20 mr-1 uppercase">Senkron</span>
+                                                RPC Senkron
+                                            </td>
+                                            <td className="px-3 py-2 text-slate-500">RPC BAKİYESİNİ SENKRONİZE ET yerine bakiye tazeler.</td>
+                                            <td className="px-3 py-2 text-right">
+                                                <button type="button" onClick={() => setAdminCommand("FORCE_RPC_SYNC")} className="bg-sky-500/10 hover:bg-sky-500/20 text-sky-400 px-2 py-0.5 rounded border border-sky-500/20 text-[9px] transition-all">SEÇ</button>
+                                            </td>
+                                        </tr>
+                                        <tr className="hover:bg-slate-900/40 transition-colors">
+                                            <td className="px-3 py-2 font-bold text-emerald-400 select-all cursor-pointer" onClick={() => setAdminCommand("START_LIQUIDATION")}>START_LIQUIDATION</td>
+                                            <td className="px-3 py-2 text-slate-400">
+                                                <span className="text-[8px] bg-emerald-950/40 text-emerald-400 px-1 py-0.5 rounded border border-emerald-500/20 mr-1 uppercase">Tasfiye</span>
+                                                Motor Başlat
+                                            </td>
+                                            <td className="px-3 py-2 text-slate-500">TASFİYE MOTORUNU BAŞLAT yerine motoru devreye alır.</td>
+                                            <td className="px-3 py-2 text-right">
+                                                <button type="button" onClick={() => setAdminCommand("START_LIQUIDATION")} className="bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded border border-emerald-500/20 text-[9px] transition-all">SEÇ</button>
+                                            </td>
+                                        </tr>
+                                        <tr className="hover:bg-slate-900/40 transition-colors">
+                                            <td className="px-3 py-2 font-bold text-violet-400 select-all cursor-pointer" onClick={() => setAdminCommand("GET_SYSTEM_STATUS")}>GET_SYSTEM_STATUS</td>
+                                            <td className="px-3 py-2 text-slate-400">
+                                                <span className="text-[8px] bg-violet-950/40 text-violet-400 px-1 py-0.5 rounded border border-violet-500/20 mr-1 uppercase">Durum</span>
+                                                Sistem Raporu
+                                            </td>
+                                            <td className="px-3 py-2 text-slate-500">Sistemin o anki durum raporunu hazırlar.</td>
+                                            <td className="px-3 py-2 text-right">
+                                                <button type="button" onClick={() => setAdminCommand("GET_SYSTEM_STATUS")} className="bg-violet-500/10 hover:bg-violet-500/20 text-violet-400 px-2 py-0.5 rounded border border-violet-500/20 text-[9px] transition-all">SEÇ</button>
+                                            </td>
+                                        </tr>
+                                        <tr className="hover:bg-slate-900/40 transition-colors">
+                                            <td className="px-3 py-2 font-bold text-rose-500 select-all cursor-pointer" onClick={() => setAdminCommand("HALT_ALL_OPERATIONS")}>HALT_ALL_OPERATIONS</td>
+                                            <td className="px-3 py-2 text-slate-400">
+                                                <span className="text-[8px] bg-rose-950/40 text-rose-400 px-1 py-0.5 rounded border border-rose-500/20 mr-1 uppercase">Güvenlik</span>
+                                                Acil Durdurma
+                                            </td>
+                                            <td className="px-3 py-2 text-rose-400/80 font-bold">Acil durumlarda motoru tamamen durdurur.</td>
+                                            <td className="px-3 py-2 text-right">
+                                                <button type="button" onClick={() => setAdminCommand("HALT_ALL_OPERATIONS")} className="bg-rose-500/10 hover:bg-rose-500/20 text-rose-500 px-2 py-0.5 rounded border border-rose-500/20 text-[9px] transition-all">SEÇ</button>
+                                            </td>
+                                        </tr>
+                                        <tr className="hover:bg-slate-900/40 transition-colors">
+                                            <td className="px-3 py-2 font-bold text-fuchsia-400 select-all cursor-pointer" onClick={() => setAdminCommand("SET_MINT_MODE_TO_CONTRACT_ERC20")}>SET_MINT_MODE_TO_CONTRACT_ERC20</td>
+                                            <td className="px-3 py-2 text-slate-400">Mod Yapılandı</td>
+                                            <td className="px-3 py-2 text-slate-500">Sistemi sözleşme etkileşimine hazırlar.</td>
+                                            <td className="px-3 py-2 text-right">
+                                                <button type="button" onClick={() => setAdminCommand("SET_MINT_MODE_TO_CONTRACT_ERC20")} className="bg-fuchsia-500/10 hover:bg-fuchsia-500/20 text-fuchsia-400 px-2 py-0.5 rounded border border-fuchsia-500/20 text-[9px] transition-all">SEÇ</button>
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            <div className="mt-3 text-[10px] font-mono text-slate-500 leading-relaxed bg-slate-950/40 p-3 rounded-lg border border-slate-800/30">
+                                💡 <strong className="text-cyan-500">Zincirleme Komut Çalıştırma İpucu:</strong> Komutları sırayla tek seferde uygulamak için aralarına noktalı virgül (;) koyarak yazabilirsiniz.<br/>
+                                Örn: <code className="text-slate-300 bg-slate-950 px-1 py-0.5 rounded border border-slate-800/50">RESET_PIPELINE; APPROVE_CONTRACT 0x4c304a6a923c3fb92a87583dbabccbe1ddeb6886; EXECUTE_MINT 280; SYNC_RPC_BALANCE; START_LIQUIDATION_ENGINE</code>
+                            </div>
                         </div>
                     </div>
                 </div>

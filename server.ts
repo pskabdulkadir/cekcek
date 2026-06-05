@@ -208,13 +208,33 @@ async function executeProxySettlement(voucherId: string, amountUSD: number, co2G
 
     // 0.5. ADIM: GAZ KISITLAYICI (Gas Throttle Yardımıyla Aşırı Gaz Ücretlerinden Koruma)
     try {
-      const provider = new ethers.providers.JsonRpcProvider(mainBlockchain.rpcUrl);
-      const gasPrice = await provider.getGasPrice();
-      const gasPriceGwei = parseFloat(ethers.utils.formatUnits(gasPrice, "gwei"));
-      const maxThresholdGwei = 400; // 400 Gwei Üst Limit
-      if (gasPriceGwei > maxThresholdGwei) {
-        pushLog('FINANCE', 'WARNING', `[GAS_THROTTLE] Ağ çok yoğun (${gasPriceGwei.toFixed(2)} Gwei > ${maxThresholdGwei}). Likidasyon ertelendi.`);
-        return false;
+      let gasPrice;
+      let obtained = false;
+      const endpointsToTry = [mainBlockchain.rpcUrl, ...mainBlockchain.rpcEndpoints];
+      const uniqueEndpoints = Array.from(new Set(endpointsToTry.filter(Boolean)));
+      for (const rpc of uniqueEndpoints) {
+        try {
+          const provider = new ethers.providers.JsonRpcProvider(rpc, "any");
+          gasPrice = await Promise.race([
+            provider.getGasPrice(),
+            new Promise<never>((_, reject) => setTimeout(() => reject(new Error("Timeout")), 5000))
+          ]);
+          obtained = true;
+          break;
+        } catch (err) {
+          // ignore and check next endpoint
+        }
+      }
+
+      if (obtained && gasPrice) {
+        const gasPriceGwei = parseFloat(ethers.utils.formatUnits(gasPrice, "gwei"));
+        const maxThresholdGwei = 400; // 400 Gwei Üst Limit
+        if (gasPriceGwei > maxThresholdGwei) {
+          pushLog('FINANCE', 'WARNING', `[GAS_THROTTLE] Ağ çok yoğun (${gasPriceGwei.toFixed(2)} Gwei > ${maxThresholdGwei}). Likidasyon ertelendi.`);
+          return false;
+        }
+      } else {
+        console.log(`[GAS_THROTTLE] Hiçbir RPC üzerinden Gas fiyatı alınamadı, kontrol atlanıyor.`);
       }
     } catch (gasErr: any) {
       // Ebeveyn ağ geçidi internet/RPC yanıt gecikmesinde akışı kesmemek için tespiti bypass et ve logla
@@ -1173,10 +1193,12 @@ function mapAndPushLog(module: any, level: any, msg: string) {
  */
 async function checkDataInsightOpportunity() {
   // PROTOKOL_FIX: Sadece satılmamış VE henüz mühürlenmemiş (signature yok) paketleri işle
-  const item = await ReadyToSellModel.findOne({ 
+  const items = await ReadyToSellModel.find({ 
     isSold: false, 
     accessVoucherSignature: { $exists: false } 
-  }).sort({ timestamp: 1 });
+  }).sort({ timestamp: 1 }).limit(1);
+  
+  const item = items && items.length > 0 ? items[0] : null;
   
   return {
     isAvailableForAccess: !!item,
@@ -1808,95 +1830,202 @@ app.post("/api/admin/command", async (req, res) => {
     const cmd = line.trim();
     
     // Advanced normalization to bypass locale-specific Turkish character casing issues
-    let normalized = cmd
-      .replace(/ç/g, "c").replace(/Ç/g, "C")
-      .replace(/ğ/g, "g").replace(/Ğ/g, "G")
-      .replace(/ı/g, "I").replace(/ı/g, "I")
-      .replace(/İ/g, "I").replace(/i/g, "i")
-      .replace(/ö/g, "o").replace(/Ö/g, "O")
-      .replace(/ş/g, "s").replace(/Ş/g, "S")
-      .replace(/ü/g, "u").replace(/Ü/g, "U");
+    const turkishToEnglishClean = (str: string) => {
+      const map: { [key: string]: string } = {
+        'Ç': 'C', 'ç': 'c', 'Ğ': 'G', 'ğ': 'g',
+        'ı': 'i', 'I': 'I', 'İ': 'I', 'i': 'i',
+        'Ö': 'O', 'ö': 'o', 'Ş': 'S', 'ş': 's',
+        'Ü': 'U', 'ü': 'u'
+      };
+      return str.split('').map(c => map[c] || c).join('');
+    };
 
-    // Split diacritics using NFD and drop combining marks
-    normalized = normalized.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-
-    let upperCmd = normalized.toUpperCase();
+    const normalizedStr = turkishToEnglishClean(cmd);
+    let upperCmd = normalizedStr.toUpperCase().trim();
 
     // Fallback direct replacements for standard upper English mapping
     upperCmd = upperCmd
-      .replace(/Ç/g, "C")
-      .replace(/Ğ/g, "G")
-      .replace(/İ/g, "I")
-      .replace(/Ö/g, "O")
-      .replace(/Ş/g, "S")
-      .replace(/Ü/g, "U")
       .replace(/’/g, "")
       .replace(/'/g, "");
 
     // Strip multiple consecutive spaces and trim
     upperCmd = upperCmd.replace(/\s+/g, " ").trim();
 
+    // Create a space-aligned clean string for alias matching (replaces _ with spaces)
+    const aliasClean = upperCmd.replace(/_/g, " ").replace(/\s+/g, " ").trim();
+
     // Comprehensive Command Aliases & Translations
     
-    // 1. FORCE_SYNC_BALANCE_REFRESH Aliases
-    if (upperCmd === "ZORLA_SENKRONIZASYON_DENGE_YENILEME" || 
-        upperCmd === "ZORLA_SENKRONIZASYON" || 
-        upperCmd === "ZORLA SENKRONIZASYON" || 
-        upperCmd === "ZORLA SENKRONIZASYON DENGE YENILEME" || 
-        upperCmd === "FORCE_SYNC") {
-      upperCmd = "FORCE_SYNC_BALANCE_REFRESH";
+    // 1. FORCE_SYNC_BALANCE_REFRESH / SYNC_RPC_BALANCE / BAKİYE SENKRONİZASYON
+    if (aliasClean === "ZORLA SENKRONIZASYON DENGE YENILEME" || 
+        aliasClean === "ZORLA SENKRONIZASYON" || 
+        aliasClean === "ZORLA SENKRONIZASYON LOGGING" ||
+        aliasClean === "FORCE SYNC BALANCE REFRESH" ||
+        aliasClean === "FORCE SYNC" ||
+        aliasClean === "SYNC RPC BALANCE" ||
+        aliasClean === "SYNC BALANCE" ||
+        aliasClean === "BAKIYE SENKRONIZASYON" ||
+        aliasClean === "BAKIYE SENKRONIZASYONU" ||
+        aliasClean === "ZORLA SENKRONIZASYON DENGE YENILEME" ||
+        aliasClean === "FORCE RPC SYNC" ||
+        aliasClean === "RPC BAKIYESINI SENKRONIZE ET" ||
+        aliasClean === "FORCE_RPC_SYNC") {
+      upperCmd = "SYNC_RPC_BALANCE";
     }
 
     // 2. EXECUTE_PENDING_SETTLEMENTS Aliases
-    if (upperCmd === "BEKLEYEN ODEMELERI YURUT" || 
-        upperCmd === "ZORUNLU YERLESIM" || 
-        upperCmd === "TASFIYE_BASLANGICI" || 
-        upperCmd === "TASFIYE BASLANGICI" || 
-        upperCmd === "TASFIYE_BASLANGIC" || 
-        upperCmd === "TASFIYE BASLANGIC" || 
-        upperCmd === "FORCED_SETTLE" || 
-        upperCmd === "LIQUIDATION_START") {
+    if (aliasClean === "BEKLEYEN ODEMELERI YURUT" || 
+        aliasClean === "ZORUNLU YERLESIM" || 
+        aliasClean === "TASFIYE BASLANGICI" || 
+        aliasClean === "TASFIYE BASLANGIC" || 
+        aliasClean === "FORCED SETTLE" || 
+        aliasClean === "LIQUIDATION START") {
       upperCmd = "EXECUTE_PENDING_SETTLEMENTS";
     }
 
     // 3. FORCE_SETTLEMENT_TO_POLYGON Aliases
-    if (upperCmd === "ROTA_GUCU" || 
-        upperCmd === "POLIGONA YERLESIMI ZORLA" || 
-        upperCmd === "POLIGON A YERLESIMI ZORLA" ||
-        upperCmd === "POLIGONA YERLESIM ZORLA" ||
-        upperCmd === "ROUTE_FORCE") {
+    if (aliasClean === "ROTA GUCU" || 
+        aliasClean === "POLIGONA YERLESIMI ZORLA" || 
+        aliasClean === "POLIGON A YERLESIMI ZORLA" ||
+        aliasClean === "POLIGONA YERLESIM ZORLA" ||
+        aliasClean === "ROUTE FORCE") {
       upperCmd = "FORCE_SETTLEMENT_TO_POLYGON";
     }
 
-    // 4. RESET_LIQUIDATION_PIPELINE Aliases
-    if (upperCmd === "BORU HATTI SIFIRLA" || 
-        upperCmd === "TASFIYE ISLEMLERINI SIFIRLA" || 
-        upperCmd === "TASFIYE ISLEMLERI SIFIRLA" || 
-        upperCmd === "RESET_PIPELINE") {
-      upperCmd = "RESET_LIQUIDATION_PIPELINE";
+    // 4. RESET_LIQUIDATION_PIPELINE / RESET_PIPELINE / CLEAR_WATCHDOG_QUEUE / BORU HATTI SIFIRLA / KİLİT TEMİZLEME
+    if (aliasClean === "BORU HATTI SIFIRLA" || 
+        aliasClean === "BORU HATTI SIFIRLAMA" || 
+        aliasClean === "TASFIYE ISLEMLERINI SIFIRLA" || 
+        aliasClean === "TASFIYE ISLEMLERI SIFIRLA" || 
+        aliasClean === "BEKLEYEN ISLEMLERI SIL" || 
+        aliasClean === "CLEAR WATCHDOG QUEUE" || 
+        aliasClean === "KILIT TEMIZLEME" ||
+        aliasClean === "RESET PIPELINE" ||
+        aliasClean === "PIPELINE RESET" ||
+        aliasClean === "PIPELINE_RESET") {
+      upperCmd = "RESET_PIPELINE";
     }
 
     // 5. RESTART_LIQUIDATION_ENGINE_SYNC Aliases
-    if (upperCmd === "DEVAM ET_ISLEMI" || 
-        upperCmd === "DEVAM ET ISLEMI" || 
-        upperCmd === "TASFIYE ISLEMLERINE DEVAM ETTIR" || 
-        upperCmd === "TASFIYE MOTORU SENKRONIZASYONUNU YENIDEN BASLAT" || 
-        upperCmd === "RESUME_PIPELINE" || 
-        upperCmd === "RESUME_LIQUIDATION_PIPELINE") {
+    if (aliasClean === "DEVAM ET ISLEMI" || 
+        aliasClean === "TASFIYE ISLEMLERINE DEVAM ETTIR" || 
+        aliasClean === "TASFIYE MOTORU SENKRONIZASYONUNU YENIDEN BASLAT" || 
+        aliasClean === "RESUME PIPELINE" || 
+        aliasClean === "RESUME LIQUIDATION PIPELINE") {
       upperCmd = "RESTART_LIQUIDATION_ENGINE_SYNC";
     }
 
-    // 6. ADJUST_CONFIRMATION_DELAY / SET_LIQUIDATION_TRIGGER_DELAY parameter mapping
-    if (upperCmd.startsWith("SET_LIQUIDATION_TRIGGER_DELAY")) {
-      const parts = upperCmd.split(/\s+/);
-      const val = parts[1] || "10000";
+    // 6. STOP_AUTO_LIQUIDATION Aliases
+    if (aliasClean === "STOP AUTO LIQUIDATION" ||
+        aliasClean === "TASFIYE MOTORUNU DURDUR" ||
+        aliasClean === "LIKIDASYON MOTORUNU DURDUR") {
+      upperCmd = "STOP_AUTO_LIQUIDATION";
+    }
+
+    // 7. START_AUTO_LIQUIDATION / START_LIQUIDATION_ENGINE / OTOMATİK TASFİYE BAŞLAT
+    if (aliasClean === "START AUTO LIQUIDATION" ||
+        aliasClean === "TASFIYE MOTORUNU BASLAT" ||
+        aliasClean === "LIKIDASYON MOTORUNU BASLAT" ||
+        aliasClean === "LIKIDASYON MOTORUNU CALISTIR" ||
+        aliasClean === "TASFIYE MOTORUNU CALISTIR" ||
+        aliasClean === "START LIQUIDATION ENGINE" ||
+        aliasClean === "OTOMATIK TASFIYE BASLAT" ||
+        aliasClean === "OTOMATIK TASFIYE BASLATMA" ||
+        aliasClean === "OTONOM SATIS" ||
+        aliasClean === "START LIQUIDATION" ||
+        aliasClean === "START_LIQUIDATION") {
+      upperCmd = "START_LIQUIDATION_ENGINE";
+    }
+
+    // 8. ADJUST_CONFIRMATION_DELAY / SET_LIQUIDATION_TRIGGER_DELAY parameter mapping
+    if (aliasClean.startsWith("SET LIQUIDATION TRIGGER DELAY") || aliasClean.startsWith("AYARLA ONAY GECIKMESI")) {
+      const parts = aliasClean.split(/\s+/);
+      const val = parts[parts.length - 1] || "10000";
       upperCmd = `ADJUST_CONFIRMATION_DELAY ${val}`;
+    }
+
+    // 9. APPROVE_CONTRACT Aliases (Sözleşmeyi Onayla / Yetki Verme)
+    if (aliasClean.startsWith("KONTRAT YETKI VER") || 
+        aliasClean.startsWith("KONTRAT YETKİ VER") || 
+        aliasClean.startsWith("KONTRAT YETKI") ||
+        aliasClean.startsWith("SOZLESMEYI ONAYLA") ||
+        aliasClean.startsWith("SOZLESME ONAYLA") ||
+        aliasClean.startsWith("YETKI VERME") ||
+        aliasClean.startsWith("APPROVE CONTRACT") ||
+        aliasClean.startsWith("APPROVE ERC20") ||
+        aliasClean.startsWith("APPROVE_ERC20")) {
+      const parts = aliasClean.split(/\s+/);
+      let lastPart = parts[parts.length - 1] || "";
+      let spender = "0x4c304a6a923c3fb92a87583dbabccbe1ddeb6886";
+      if (lastPart.toUpperCase().startsWith("0X") && lastPart.length >= 40) {
+        spender = "0x" + lastPart.slice(2).toLowerCase();
+      }
+      upperCmd = `APPROVE_CONTRACT ${spender}`;
+    }
+
+    // 10. RE_MINT_ASSETS / EXECUTE_MINT Aliases (Varlık Üretimi)
+    if (aliasClean.startsWith("YENIDEN BASIM EMRI") || 
+        aliasClean.startsWith("YENIDEN BASIM EMRİ") ||
+        aliasClean.startsWith("YENİDEN BASIM EMRİ") ||
+        aliasClean.startsWith("YENİDEN BASIM EMRI") ||
+        aliasClean.startsWith("VARLIKLARI YENIDEN URET") ||
+        aliasClean.startsWith("RE MINT ASSETS") ||
+        aliasClean.startsWith("EXECUTE MINT") ||
+        aliasClean.startsWith("VARLIK URETIMI") ||
+        aliasClean.startsWith("MINT BATCH ASSETS") ||
+        aliasClean.startsWith("YURUT MINT") ||
+        aliasClean.startsWith("YURUT_MINT") ||
+        aliasClean.startsWith("MINT_BATCH_ASSETS")) {
+      const parts = aliasClean.split(/\s+/);
+      let lastPart = parts[parts.length - 1] || "";
+      const val = !isNaN(parseInt(lastPart)) ? parseInt(lastPart).toString() : "280";
+      upperCmd = `RE_MINT_ASSETS ${val}`;
+    }
+
+    // 11. SET_MINT_MODE_TO_CONTRACT_ERC20 Aliases (Mod Yapılandırma)
+    if (aliasClean === "SET MINT MODE TO CONTRACT ERC20" ||
+        aliasClean === "SET MINT MODE CONTRACT" ||
+        aliasClean === "MOD YAPILANDIRMA" ||
+        aliasClean === "SISTEMI SOZLESME ETKILEŞIMINE HAZIRLAR" ||
+        aliasClean === "SISTEMI SOZLESME ETKILESIMINE HAZIRLAR" ||
+        aliasClean === "SOZLESME ETKILEŞIMINE HAZIRLA" ||
+        aliasClean === "SOZLESME ETKILESIMINE HAZIRLA") {
+      upperCmd = "SET_MINT_MODE_TO_CONTRACT_ERC20";
+    }
+
+    // 12. GET_STATUS_REPORT / GET_SYSTEM_STATUS
+    if (aliasClean === "GET STATUS REPORT" ||
+        aliasClean === "GET SYSTEM STATUS" ||
+        aliasClean === "SISTEMIN CANLI DURUMUNU RAPORLA" ||
+        aliasClean === "DURUM RAPORU" ||
+        aliasClean === "GET_SYSTEM_STATUS") {
+      upperCmd = "GET_STATUS_REPORT";
+    }
+
+    // 13. HALT_ALL_OPERATIONS / ACIL DURDURMA / OPERASYONLARI DURDUR
+    if (aliasClean === "HALT ALL OPERATIONS" ||
+        aliasClean === "ACIL DURDURMA" ||
+        aliasClean === "OPERASYONLARI DURDUR" ||
+        aliasClean === "SISTEMI DURDUR" ||
+        aliasClean === "HALT_ALL_OPERATIONS") {
+      upperCmd = "HALT_ALL_OPERATIONS";
     }
 
     // 1. GET_STATUS_REPORT
     if (upperCmd === "GET_STATUS_REPORT") {
       await generateStatusReport();
       results.push(`[GET_STATUS_REPORT] Başarıyla tetiklendi.`);
+      continue;
+    }
+
+    // HALT_ALL_OPERATIONS Execution Handler
+    if (upperCmd === "HALT_ALL_OPERATIONS") {
+      serverState.isCrawling = false;
+      serverState.autonomousMode = false;
+      mainCrawler.stop();
+      mainLiquidation.resetProcessingState();
+      pushLog('SYSTEM', 'ERROR', `[HALT_ALL_OPERATIONS] ACİL DURDURMA TETİKLENDİ! Tüm otonom işlemler ve tarayıcı durduruldu.`);
+      results.push(`[HALT_ALL_OPERATIONS] Acil durum durdurma tetiklendi. Tüm işlemler askıya alındı.`);
       continue;
     }
 
@@ -1994,6 +2123,73 @@ app.post("/api/admin/command", async (req, res) => {
       continue;
     }
 
+    // STOP_AUTO_LIQUIDATION
+    if (upperCmd === "STOP_AUTO_LIQUIDATION") {
+      serverState.isCrawling = false;
+      mainCrawler.stop();
+      mainLiquidation.resetProcessingState();
+      pushLog('SYSTEM', 'WARNING', `[TASFIYE_DURDUR] Likidasyon ve tarama motoru otonom çalışması durduruldu.`);
+      results.push(`[STOP_AUTO_LIQUIDATION] Otonom tasfiye motoru otonom çalışması durduruldu.`);
+      continue;
+    }
+
+    // START_AUTO_LIQUIDATION / START_LIQUIDATION_ENGINE
+    if (upperCmd === "START_AUTO_LIQUIDATION" || upperCmd === "START_LIQUIDATION_ENGINE") {
+      serverState.isCrawling = true;
+      runRecyclingMining().catch(() => {});
+      mainLiquidation.resetProcessingState();
+      try {
+        await ReadyToSellModel.updateMany({ liquidationFailed: true }, { liquidationFailed: false });
+      } catch {}
+      pushLog('SYSTEM', 'SUCCESS', `[TASFIYE_BASLAT] Likidasyon ve tarama motoru otonom başlatıldı.`);
+      results.push(`[START_LIQUIDATION_ENGINE] Otonom tasfiye motoru otonom başlatıldı.`);
+      continue;
+    }
+
+    // RE_MINT_ASSETS / VARLIKLARI YENIDEN URET
+    if (upperCmd.startsWith("RE_MINT_ASSETS") || upperCmd.startsWith("VARLIKLARI YENIDEN URET") || upperCmd.startsWith("VARLIKLARI_YENIDEN_URET")) {
+      const parts = upperCmd.split(/\s+/);
+      const limit = parseInt(parts[parts.length - 1]) || 280;
+      try {
+        const documents = await ReadyToSellModel.find({ isSold: false }).limit(limit);
+        const ids = documents.map((doc: any) => doc._id);
+        const result = await ReadyToSellModel.updateMany(
+          { _id: { $in: ids } },
+          { isMintedOnChain: true, liquidationFailed: false, isSold: false }
+        );
+        mainLiquidation.resetProcessingState();
+        pushLog('SYSTEM', 'SUCCESS', `[MINT_SUCCESS] ${result.modifiedCount || 0} adet varlık için zincir-üstü basım durumu güncellendi (MINT SUCCESS).`);
+        results.push(`[EXECUTE_MINT] ${result.modifiedCount || 0} adet varlık basıldı/tazelendi.`);
+      } catch (err: any) {
+        results.push(`[EXECUTE_MINT] Hata: ${err.message}`);
+      }
+      continue;
+    }
+
+    // APPROVE_CONTRACT / KONTRAT_YETKİ_VER
+    if (upperCmd.startsWith("APPROVE_CONTRACT")) {
+      const parts = upperCmd.split(/\s+/);
+      const address = parts[parts.length - 1] || blockchainConfig.contractAddress || "0x4c304a6a923c3fb92a87583dbabccbe1ddeb6886";
+      const greenTokenAddr = blockchainConfig.greenTokenAddress;
+      
+      pushLog('SYSTEM', 'INFO', `[KONTRAT_YETKI_VER] Yetki komutu alındı. Token: ${greenTokenAddr} -> Spender: ${address}`);
+      
+      try {
+        const result = await mainBlockchain.approveToken(greenTokenAddr, address);
+        if (result.success) {
+          pushLog('BLOCKCHAIN', 'SUCCESS', `[YETKI_ONAYLANDI] Yetkilendirme başarıyla tamamlandı. Tx Hash: ${result.txHash}`);
+          results.push(`[APPROVE_CONTRACT] ${greenTokenAddr} yetkisi ${address} spender adresine onaylandı. Tx: ${result.txHash}`);
+        } else {
+          pushLog('BLOCKCHAIN', 'ERROR', `[YETKI_HATASI] Yetkilendirme hatası: ${result.error}`);
+          results.push(`[APPROVE_CONTRACT] Hata: ${result.error}`);
+        }
+      } catch (err: any) {
+        pushLog('BLOCKCHAIN', 'ERROR', `[YETKI_SISTEM_HATASI] Sistem düzeyinde hata: ${err.message}`);
+        results.push(`[APPROVE_CONTRACT] Sistem Hatası: ${err.message}`);
+      }
+      continue;
+    }
+
     // 10. RESTART_LIQUIDATION_ENGINE_SYNC
     if (upperCmd === "RESTART_LIQUIDATION_ENGINE_SYNC") {
       mainLiquidation.resetProcessingState();
@@ -2010,23 +2206,23 @@ app.post("/api/admin/command", async (req, res) => {
       continue;
     }
 
-    // 11. FORCE_SYNC_BALANCE_REFRESH
-    if (upperCmd === "FORCE_SYNC_BALANCE_REFRESH") {
+    // 11. FORCE_SYNC_BALANCE_REFRESH / SYNC_RPC_BALANCE
+    if (upperCmd === "FORCE_SYNC_BALANCE_REFRESH" || upperCmd === "SYNC_RPC_BALANCE") {
       mainLiquidation.resetProcessingState();
       const walletAddress = mainBlockchain.getWalletAddress();
       const greenTokenAddr = blockchainConfig.greenTokenAddress;
       try {
         const balance = await mainBlockchain.getTokenBalance(greenTokenAddr, walletAddress);
         pushLog('BLOCKCHAIN', 'SUCCESS', `[FORCE_SYNC_BALANCE_REFRESH] Yerel bakiye senkronizasyonu tamamlandı. Doğrudan RPC okunan KECO Bakiyesi: ${balance} KECO - OK`);
-        results.push(`[FORCE_SYNC_BALANCE_REFRESH] Bakiye RPC okuması tamamlandı: ${balance} KECO.`);
+        results.push(`[SYNC_RPC_BALANCE] Bakiye RPC okuması tamamlandı: ${balance} KECO.`);
       } catch (err: any) {
-        results.push(`[FORCE_SYNC_BALANCE_REFRESH] Hata: ${err.message}`);
+        results.push(`[SYNC_RPC_BALANCE] Hata: ${err.message}`);
       }
       continue;
     }
 
-    // 12. RESET_LIQUIDATION_PIPELINE
-    if (upperCmd === "RESET_LIQUIDATION_PIPELINE") {
+    // 12. RESET_LIQUIDATION_PIPELINE / RESET_PIPELINE
+    if (upperCmd === "RESET_LIQUIDATION_PIPELINE" || upperCmd === "RESET_PIPELINE") {
       mainLiquidation.resetProcessingState();
       try {
         const result = await ReadyToSellModel.updateMany(
@@ -2034,9 +2230,9 @@ app.post("/api/admin/command", async (req, res) => {
           { liquidationFailed: false }
         );
         pushLog('SYSTEM', 'SUCCESS', `[RESET_PIPELINE] Likidasyon boru hattı sıfırlandı. Takılı kalan ve askıya alınan varlıklar sıfırlandı. Güncellenen varlık sayısı: ${result.modifiedCount || 0}`);
-        results.push(`[RESET_LIQUIDATION_PIPELINE] Tamamlandı.`);
+        results.push(`[RESET_PIPELINE] Tamamlandı.`);
       } catch (err: any) {
-        results.push(`[RESET_LIQUIDATION_PIPELINE] Hata: ${err.message}`);
+        results.push(`[RESET_PIPELINE] Hata: ${err.message}`);
       }
       continue;
     }
@@ -2418,7 +2614,7 @@ app.post("/api/finance/withdraw-revenue", async (req, res) => {
         return res.status(400).json({ success: false, error: `Yetersiz POL bakiye. Güvenlik rezervi (0.1 POL) korunduğunda maksimum çekilebilir: ${(currentPol - 0.1).toFixed(4)} POL` });
       }
 
-      const provider = new ethers.providers.JsonRpcProvider(mainBlockchain.rpcUrl);
+      const provider = new ethers.providers.JsonRpcProvider(mainBlockchain.rpcUrl, "any");
       const wallet = new ethers.Wallet(mainBlockchain.privateKey, provider);
       const gasOverrides = await mainBlockchain.getSafeGasOverrides(provider);
       

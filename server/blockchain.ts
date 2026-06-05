@@ -149,7 +149,7 @@ export class BlockchainRouter {
 
   public async getNetworkDetailsFromRpc(rpcUrl: string): Promise<{ chainId: number, explorerUrl: string, networkName: string }> {
     try {
-      const provider = new ethers.providers.JsonRpcProvider(rpcUrl);
+      const provider = new ethers.providers.JsonRpcProvider(rpcUrl, "any");
       const network = await provider.getNetwork();
       let explorerUrl = "https://polygonscan.com";
       let networkName = network.name;
@@ -181,7 +181,7 @@ export class BlockchainRouter {
         if (currentRpc.startsWith('ws')) {
           provider = new ethers.providers.WebSocketProvider(currentRpc);
         } else {
-          provider = new ethers.providers.JsonRpcProvider(currentRpc);
+          provider = new ethers.providers.JsonRpcProvider(currentRpc, "any");
         }
 
         // Render ağ kısıtlamalarını aşmak için dinamik bekleme süresi
@@ -324,7 +324,7 @@ export class BlockchainRouter {
   public async getUSDTBalance(targetAddress?: string): Promise<string> {
     const usdtAddress = ethers.utils.getAddress("0xc2132D05D31c914a87C6611C10748AEb04B58e8F".toLowerCase());
     try {
-      const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl);
+      const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl, "any");
       const contract = new ethers.Contract(usdtAddress, ["function balanceOf(address owner) view returns (uint256)"], provider);
       const walletAddress = ethers.utils.getAddress((targetAddress || this.getWalletAddress() || blockchainConfig.payoutWallet).toLowerCase());
       
@@ -344,7 +344,7 @@ export class BlockchainRouter {
   public async transferUSDT(toAddress: string, amount: string): Promise<{ success: boolean; txHash: string; error?: string }> {
     this.emitLog('BLOCKCHAIN', 'INFO', `USDT Transferi başlatılıyor: ${amount} USDT -> ${toAddress}`);
     try {
-      const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl);
+      const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl, "any");
       const wallet = new ethers.Wallet(this.privateKey, provider);
       
       const usdtAddress = ethers.utils.getAddress("0xc2132D05D31c914a87C6611C10748AEb04B58e8F".toLowerCase());
@@ -448,7 +448,7 @@ export class BlockchainRouter {
   public async swapPOLForUSDT(polAmount: string): Promise<{ success: boolean; txHash: string }> {
     this.emitLog('BLOCKCHAIN', 'INFO', `[EXIT_TO_CASH] ${polAmount} POL -> USDT takası başlatılıyor...`);
     try {
-      const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl);
+      const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl, "any");
       const wallet = new ethers.Wallet(this.privateKey, provider);
       // GÜVENLİK: Adresi checksum hatası almamak için normalize et
       const routerAddr = ethers.utils.getAddress(blockchainConfig.routerAddress.toLowerCase());
@@ -658,7 +658,7 @@ export class BlockchainRouter {
         if (currentRpc.startsWith('ws')) {
           provider = new ethers.providers.WebSocketProvider(currentRpc);
         } else {
-          provider = new ethers.providers.JsonRpcProvider(currentRpc);
+          provider = new ethers.providers.JsonRpcProvider(currentRpc, "any");
         }
         
         // Load and verify security keys
@@ -805,7 +805,7 @@ export class BlockchainRouter {
   public async refillGasFromUSDT(usdtAmount: string): Promise<{ success: boolean; txHash: string }> {
     this.emitLog('BLOCKCHAIN', 'WARNING', `[GAS_REFILL] Yakıt kritik seviyede! ${usdtAmount} USDT -> POL takası başlatılıyor...`);
     try {
-      const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl);
+      const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl, "any");
       const wallet = new ethers.Wallet(this.privateKey, provider);
       const routerAddr = ethers.utils.getAddress(blockchainConfig.routerAddress.toLowerCase());
       const usdtAddr = ethers.utils.getAddress(POLYGON_USDT.toLowerCase());
@@ -862,7 +862,7 @@ export class BlockchainRouter {
         return { success: false, txHash: '', error: errMsg };
       }
 
-      const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl);
+      const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl, "any");
       const wallet = new ethers.Wallet(this.privateKey, provider);
       
       // ADRES DOĞRULAMA: Token adresi bir kontrat mı yoksa cüzdan mı?
@@ -993,7 +993,7 @@ export class BlockchainRouter {
     this.emitLog('BLOCKCHAIN', 'INFO', `${assets.length} varlık için toplu mühürleme başlatılıyor...`);
     
     try {
-      const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl);
+      const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl, "any");
       const wallet = new ethers.Wallet(this.privateKey, provider);
 
       if (this.contractAddress === ethers.constants.AddressZero) {
@@ -1093,7 +1093,7 @@ export class BlockchainRouter {
   public async deployGreenToken(name: string, symbol: string): Promise<{ success: boolean; address: string; error?: string }> {
     this.emitLog('BLOCKCHAIN', 'INFO', `[TOKEN_GENESIS] Ultra-Stabil mühürleme başlatılıyor: ${name}...`);
     try {
-      const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl);
+      const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl, "any");
       const wallet = new ethers.Wallet(this.privateKey, provider);
       
       const artifactPath = path.join(process.cwd(), "artifacts/server/Sozlesme.sol/Sozlesme.json");
@@ -1149,7 +1149,7 @@ export class BlockchainRouter {
   public async mintToken(tokenAddress: string, toAddress: string, amount: string): Promise<{ success: boolean; txHash?: string; error?: string }> {
     this.emitLog('BLOCKCHAIN', 'INFO', `[TOKEN_MINT] Basım emri iletiliyor (Recycle & Sell Otonom Akışı): ${amount} KECO -> ${toAddress}`);
     try {
-      const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl);
+      const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl, "any");
       const wallet = new ethers.Wallet(this.privateKey, provider);
       const targetAddress = toAddress || "0x06E83497F599D67447EfFfeA399cC885CEB6eEff";
 
@@ -1256,10 +1256,53 @@ export class BlockchainRouter {
     }
   }
 
+  public async approveToken(tokenAddress: string, spenderAddress: string): Promise<{ success: boolean; txHash?: string; error?: string }> {
+    this.emitLog('BLOCKCHAIN', 'INFO', `[TOKEN_APPROVE] Limit onayı iletiliyor: Token: ${tokenAddress} -> Spender/Contract: ${spenderAddress}`);
+    try {
+      const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl, "any");
+      const wallet = new ethers.Wallet(this.privateKey, provider);
+      
+      const safeTokenAddr = tokenAddress.toLowerCase();
+      const safeSpenderAddr = spenderAddress.toLowerCase();
+      this.validateContract(safeTokenAddr);
+
+      const contract = new ethers.Contract(safeTokenAddr, [
+        "function approve(address spender, uint256 amount) public returns (bool)"
+      ], wallet);
+
+      let txOverrides: any = {
+        gasLimit: 80000
+      };
+
+      try {
+        const feeData = await provider.getFeeData();
+        if (feeData.maxPriorityFeePerGas && feeData.maxFeePerGas) {
+          const minPriorityFee = ethers.utils.parseUnits("35", "gwei");
+          const proposedPriority = feeData.maxPriorityFeePerGas.mul(150).div(100);
+          txOverrides.maxPriorityFeePerGas = proposedPriority.gt(minPriorityFee) ? proposedPriority : minPriorityFee;
+          const proposedMaxFee = feeData.maxFeePerGas.mul(150).div(100);
+          const minMaxFee = txOverrides.maxPriorityFeePerGas.add(ethers.utils.parseUnits("15", "gwei"));
+          txOverrides.maxFeePerGas = proposedMaxFee.gt(minMaxFee) ? proposedMaxFee : minMaxFee;
+        } else if (feeData.gasPrice) {
+          txOverrides.gasPrice = feeData.gasPrice.mul(150).div(100);
+        }
+      } catch (e) {}
+
+      const tx = await contract.approve(safeSpenderAddr, ethers.constants.MaxUint256, txOverrides);
+      this.emitLog('BLOCKCHAIN', 'SUCCESS', `[APPROVE_SENT] Onay işlemi Polygon ağına iletildi, onay bekleniyor... Tx: ${tx.hash}`);
+      await tx.wait();
+      return { success: true, txHash: tx.hash };
+    } catch (err: any) {
+      const errorMsg = this.parseBlockchainError(err);
+      this.emitLog('BLOCKCHAIN', 'ERROR', `[APPROVE_FAILED] Onay işleminde hata: ${errorMsg}`);
+      return { success: false, error: errorMsg };
+    }
+  }
+
   public async initializeLiquidityPool(polAmount: string, tokenAmount: string): Promise<{ success: boolean; txHash: string; error?: string }> {
     this.emitLog('BLOCKCHAIN', 'INFO', `[LIQUIDITY_INIT] Piyasa yapıcı modülü başlatılıyor: ${polAmount} POL / ${tokenAmount} KECO...`);
     try {
-      const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl);
+      const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl, "any");
       const wallet = new ethers.Wallet(this.privateKey, provider);
       const tokenAddr = ethers.utils.getAddress(blockchainConfig.greenTokenAddress.toLowerCase());
       const routerAddr = ethers.utils.getAddress(blockchainConfig.routerAddress.toLowerCase());
