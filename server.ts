@@ -334,6 +334,10 @@ const serverState = {
   profitLockHoldAmount: 0.0,
   profitLockThreshold: 5.0,
   availableBalance: 0.0,
+
+  // Toplu Mutabakat (Batch-Only) Modu Özellikleri
+  batchOnlyMode: true,
+  batchOnlyThreshold: 5.0,
   
   // HFT - Savaş Modülü Özellikleri
   hftEnabled: true,
@@ -394,12 +398,40 @@ async function monitorAndLiquidate() {
       pushLog('FINANCE', 'SUCCESS', `[PROFIT_TRIGGER] ${balanceNum.toFixed(2)} KECO tespit edildi. Nakde çevriliyor...`);
       await mainLiquidation.performInstantLiquidation("MONITOR_BATCH_LIQUIDATION", balanceNum * 0.45, balanceNum);
     } else {
-      // Eğer KECO bakiyesi eşiğin altındaysa, veritabanından satılmamış, likidasyonu hatasız ve zincir üstü basımı onaylanmış olan ilk varlığı bulup anında likidite et!
-      const pendingAssets = await ReadyToSellModel.find({ isSold: false, liquidationFailed: { $ne: true }, isMintedOnChain: { $ne: false } }).sort({ timestamp: -1 }).limit(1);
-      const pendingAsset = pendingAssets && pendingAssets.length > 0 ? pendingAssets[0] : null;
-      if (pendingAsset) {
-        pushLog('FINANCE', 'INFO', `[OTONOM_TETİK] Satılmamış varlık tespit edildi: ${pendingAsset.id}. Likidasyon motoru tetikleniyor...`);
-        await executeProxySettlement(pendingAsset.id, pendingAsset.accessPriceUSD || 0, pendingAsset.co2AnalysisGrams || 0);
+      // Eğer KECO bakiyesi eşiğinin altındaysa, satılmamış, likidasyonu hatasız ve zincir üstü basımı onaylanmış varlıkları kontrol et!
+      const pendingAssets = await ReadyToSellModel.find({ isSold: false, liquidationFailed: { $ne: true }, isMintedOnChain: { $ne: false } }).sort({ timestamp: -1 });
+      
+      if (pendingAssets && pendingAssets.length > 0) {
+        if ((serverState as any).batchOnlyMode) {
+          // BATCH ONLY MODE ACTIVE
+          const totalValUSD = pendingAssets.reduce((sum: number, item: any) => sum + (item.accessPriceUSD || 0), 0);
+          const totalCo2 = pendingAssets.reduce((sum: number, item: any) => sum + (item.co2AnalysisGrams || 0), 0);
+          const threshold = (serverState as any).batchOnlyThreshold || 5.0;
+          
+          if (totalValUSD >= threshold) {
+            pushLog('FINANCE', 'SUCCESS', `[BATCH_TRIGGER] 🎉 Toplu Mutabakat Eşiği Aşıldı! Biriken Değer: $${totalValUSD.toFixed(4)} USD (Eşik: $${threshold.toFixed(2)} USD). Toplam ${pendingAssets.length} adet varlık tek bir Toplu Likidasyon (Batch Liquidation) işlemiyle nakde çevriliyor...`);
+            
+            // Execute batch settlement as a single combined OTC bypass or simulated bundle
+            const success = await mainLiquidation.performInstantLiquidation(`BATCH_LIQ_${Date.now()}`, totalValUSD, totalCo2);
+            if (success) {
+              const ids = pendingAssets.map((item: any) => item.id);
+              await ReadyToSellModel.updateMany({ id: { $in: ids } }, { isSold: true, liquidationFailed: false });
+              pushLog('FINANCE', 'SUCCESS', `[BATCH_SETTLE_OK] 🎉 Toplu Likidasyon Başarılı! Toplam ${pendingAssets.length} varlık için $${totalValUSD.toFixed(4)} USDT kazancı cüzdanın kullanılabilir bakiyesine yönlendirildi.`);
+            } else {
+              pushLog('FINANCE', 'ERROR', `[BATCH_SETTLE_FAILED] Toplu likidasyon işlemi başarısız oldu.`);
+            }
+          } else {
+            // Log keeping track of accumulation
+            if (Math.random() > 0.6) { // Don't spam too heavily but keep user informed
+              pushLog('FINANCE', 'INFO', `[BATCH_ACCUMULATOR] Toplama Modu Aktif: Bakiye $${totalValUSD.toFixed(4)} / $${threshold.toFixed(2)} USD. Kuyruktaki her bir varlığın tek tek gaz harcaması önlenerek mühürlü voucher stoğunda (${pendingAssets.length} Adet) birikiyor.`);
+            }
+          }
+        } else {
+          // Normal mode (single asset at a time)
+          const pendingAsset = pendingAssets[0];
+          pushLog('FINANCE', 'INFO', `[OTONOM_TETİK] Satılmamış varlık tespit edildi: ${pendingAsset.id}. Likidasyon motoru tetikleniyor...`);
+          await executeProxySettlement(pendingAsset.id, pendingAsset.accessPriceUSD || 0, pendingAsset.co2AnalysisGrams || 0);
+        }
       }
     }
   } catch (err: any) {
@@ -2258,6 +2290,34 @@ async function executeAdminCommands(rawCommand: string): Promise<{ success: bool
       upperCmd = "SET_PROFIT_LOCK_ACTIVE TRUE";
     }
 
+    // Toplu Mutabakat (Batch-Only) Modu Aliases
+    if (aliasClean === "TOPLU MUTABAKAT AKTIF" || 
+        aliasClean === "TOPLU MUTABAKAT MODUNU AKTIF ET" || 
+        aliasClean === "BATCH ONLY MODU AKTIF" ||
+        aliasClean === "BATCH ONLY AKTIF" ||
+        aliasClean === "SET BATCH ONLY ACTIVE TRUE" ||
+        aliasClean === "TOPLU MUTABAKAT ETKINLESTIR") {
+      upperCmd = "SET_BATCH_ONLY_ACTIVE TRUE";
+    }
+
+    if (aliasClean === "TOPLU MUTABAKAT DEVRE DISI" || 
+        aliasClean === "TOPLU MUTABAKAT MODUNU KAPAT" || 
+        aliasClean === "BATCH ONLY MODU DEVRE DISI" ||
+        aliasClean === "BATCH ONLY KAPAT" ||
+        aliasClean === "SET BATCH ONLY ACTIVE FALSE" ||
+        aliasClean === "TOPLU MUTABAKAT PASIF") {
+      upperCmd = "SET_BATCH_ONLY_ACTIVE FALSE";
+    }
+
+    if (aliasClean.startsWith("SET BATCH ONLY THRESHOLD") || 
+        aliasClean.startsWith("TOPLU MUTABAKAT ESIK") || 
+        aliasClean.startsWith("TOPLU LIKIDASYON LIMITI") ||
+        aliasClean.startsWith("BATCH ONLY LIMIT")) {
+      const parts = aliasClean.split(/\s+/);
+      const val = parts[parts.length - 1] || "5.0";
+      upperCmd = `SET_BATCH_ONLY_THRESHOLD ${val}`;
+    }
+
     if (aliasClean === "KAR KILITLEME DEVRE DISI" || 
         aliasClean === "KAR KILITLEME MODUNU DEVRE DISI BIRAK" || 
         aliasClean === "KAR KILIDINI DEVRE DISI BIRAK" ||
@@ -2701,6 +2761,27 @@ async function executeAdminCommands(rawCommand: string): Promise<{ success: bool
       continue;
     }
 
+    // 20. SET_BATCH_ONLY_ACTIVE
+    if (upperCmd.startsWith("SET_BATCH_ONLY_ACTIVE")) {
+      const parts = upperCmd.split(/\s+/);
+      const valStr = parts[1] || "TRUE";
+      const isTrue = valStr.toUpperCase() === "TRUE" || valStr === "1" || valStr.toUpperCase() === "AKTIF";
+      (serverState as any).batchOnlyMode = isTrue;
+      pushLog('SYSTEM', 'SUCCESS', `[BATCH_CONFIG] Toplu Mutabakat (Batch-Only) modu ${isTrue ? 'AKTİF EDİLDİ' : 'DEVRE DIŞI BIRAKILDI'}.`);
+      results.push(`[BATCH_ONLY_ACTIVE] ${isTrue ? 'TRUE' : 'FALSE'}`);
+      continue;
+    }
+
+    // 21. SET_BATCH_ONLY_THRESHOLD
+    if (upperCmd.startsWith("SET_BATCH_ONLY_THRESHOLD")) {
+      const parts = upperCmd.split(/\s+/);
+      const val = parseFloat(parts[1]) || 5.0;
+      (serverState as any).batchOnlyThreshold = val;
+      pushLog('SYSTEM', 'SUCCESS', `[BATCH_CONFIG] Toplu Mutabakat eşiği $${val.toFixed(2)} USD olarak güncellendi.`);
+      results.push(`[BATCH_ONLY_THRESHOLD] Eşik: $${val.toFixed(2)} USD`);
+      continue;
+    }
+
     // Command not recognized
     pushLog('SYSTEM', 'ERROR', `[UNKNOWN_COMMAND] Geçersiz yönetici komutu girildi: ${cmd}`);
     results.push(`[UNKNOWN] Geçersiz: "${cmd}"`);
@@ -2778,6 +2859,10 @@ app.get("/api/stats", async (req, res) => {
       profitLockHoldAmount: (serverState as any).profitLockHoldAmount || 0,
       profitLockThreshold: (serverState as any).profitLockThreshold || 5.0,
       availableBalance: (serverState as any).availableBalance || 0,
+      
+      // Toplu Mutabakat (Batch-Only) Alanları
+      batchOnlyMode: (serverState as any).batchOnlyMode !== undefined ? (serverState as any).batchOnlyMode : true,
+      batchOnlyThreshold: (serverState as any).batchOnlyThreshold || 5.0,
       
       // HFT Telemetri Verileri
       hftEnabled: serverState.hftEnabled,

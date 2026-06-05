@@ -155,6 +155,12 @@ export default function App() {
   const [profitLockSaveSuccess, setProfitLockSaveSuccess] = useState<boolean>(false);
   const [isReleasingProfitLock, setIsReleasingProfitLock] = useState<boolean>(false);
 
+  // Toplu Mutabakat (Batch-Only) Frontend States
+  const [batchOnlyModeConfig, setBatchOnlyModeConfig] = useState<boolean>(true);
+  const [batchOnlyThresholdInput, setBatchOnlyThresholdInput] = useState<string>("5.0");
+  const [isUpdatingBatchOnly, setIsUpdatingBatchOnly] = useState<boolean>(false);
+  const [batchOnlySaveSuccess, setBatchOnlySaveSuccess] = useState<boolean>(false);
+
   // Telegram Bot State Değişkenleri
   const [telegramEnabled, setTelegramEnabled] = useState<boolean>(false);
   const [telegramHasCredentials, setTelegramHasCredentials] = useState<boolean>(false);
@@ -234,6 +240,36 @@ export default function App() {
       console.error("Failed to manually release profit lock:", err);
     } finally {
       setIsReleasingProfitLock(false);
+    }
+  };
+
+  // Batch-Only Settings Save Handlers
+  const handleSaveBatchOnlySettings = async (e: React.FormEvent) => {
+    if (e) e.preventDefault();
+    setIsUpdatingBatchOnly(true);
+    setBatchOnlySaveSuccess(false);
+    try {
+      // 1. Set active status
+      await fetch("/api/admin/command", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ command: `SET_BATCH_ONLY_ACTIVE ${batchOnlyModeConfig ? "TRUE" : "FALSE"}` })
+      });
+      // 2. Set threshold
+      const val = parseFloat(batchOnlyThresholdInput) || 5.0;
+      await fetch("/api/admin/command", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ command: `SET_BATCH_ONLY_THRESHOLD ${val}` })
+      });
+      
+      setBatchOnlySaveSuccess(true);
+      fetchStats();
+      setTimeout(() => setBatchOnlySaveSuccess(false), 3000);
+    } catch (err) {
+      console.error("Batch-Only parameters could not be updated:", err);
+    } finally {
+      setIsUpdatingBatchOnly(false);
     }
   };
 
@@ -338,7 +374,9 @@ export default function App() {
     if (stats.circuitBreakerStatus !== undefined) setCircuitBreakerStatus(stats.circuitBreakerStatus);
     if (stats.profitLockActive !== undefined) setProfitLockActiveConfig(stats.profitLockActive);
     if (stats.profitLockThreshold !== undefined) setProfitLockThresholdInput(stats.profitLockThreshold.toString());
-  }, [stats.hftEnabled, stats.pricingMode, stats.demandMultiplier, stats.lightweightMode, stats.circuitBreakerStatus, stats.profitLockActive, stats.profitLockThreshold]);
+    if (stats.batchOnlyMode !== undefined) setBatchOnlyModeConfig(stats.batchOnlyMode);
+    if (stats.batchOnlyThreshold !== undefined) setBatchOnlyThresholdInput(stats.batchOnlyThreshold.toString());
+  }, [stats.hftEnabled, stats.pricingMode, stats.demandMultiplier, stats.lightweightMode, stats.circuitBreakerStatus, stats.profitLockActive, stats.profitLockThreshold, stats.batchOnlyMode, stats.batchOnlyThreshold]);
 
   // Refs for auto-scroll logging window
   const terminalEndRef = useRef<HTMLDivElement>(null);
@@ -1227,6 +1265,71 @@ export default function App() {
                     {profitLockSaveSuccess && (
                       <p className="text-center font-mono text-emerald-400 text-xs animate-pulse">
                         ✓ Bakiye kilitleme ve muhasebe parametreleri sisteme işlendi!
+                      </p>
+                    )}
+
+                    {/* Divider veya Ara Başlık */}
+                    <div className="border-t border-slate-800/65 my-6"></div>
+
+                    <h5 className="text-[10px] font-mono text-emerald-400/90 uppercase tracking-widest flex items-center gap-1.5 font-bold mb-3">
+                      <Zap className="w-3.5 h-3.5 text-emerald-500" />
+                      Toplu Mutabakat Kontrolü (Gas-Saving Batch-Only Mode)
+                    </h5>
+
+                    {/* Toggle: Toplu Mutabakat Modu */}
+                    <div className="bg-slate-950/40 border border-slate-800/60 p-3 rounded-xl flex items-center justify-between">
+                      <div className="space-y-0.5 pr-4">
+                        <label className="text-slate-200 text-xs font-mono font-bold uppercase block">Toplu Mutabakat (Batch-Only)</label>
+                        <span className="text-[10px] text-slate-400 block leading-relaxed">
+                          Tekil küçük tutarlı ($0.06 - $0.10) satışlar yerine mühürlü voucherları toplu biriktirip tek işlemde nakde çevirir.
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setBatchOnlyModeConfig(!batchOnlyModeConfig)}
+                        className={`w-14 h-7 rounded-full p-1 transition-all cursor-pointer outline-none shrink-0 ${
+                          batchOnlyModeConfig ? "bg-emerald-600 justify-end" : "bg-slate-700"
+                        } flex items-center`}
+                      >
+                        <span className="w-5 h-5 rounded-full bg-white shadow-md block transition-all"></span>
+                      </button>
+                    </div>
+
+                    {/* Input: Toplu Mutabakat Barajı */}
+                    <div className="bg-slate-950/40 border border-slate-800/60 p-3.5 rounded-xl space-y-2">
+                      <div className="flex justify-between items-center text-xs font-mono">
+                        <label className="text-slate-200 font-bold uppercase text-[10px]">Toplu Likidasyon Eşiği</label>
+                        <span className="text-emerald-400 font-bold">${parseFloat(batchOnlyThresholdInput || "0").toFixed(2)} USD</span>
+                      </div>
+                      <div className="relative">
+                        <span className="absolute left-3.5 top-2.5 text-xs font-mono text-slate-500">$</span>
+                        <input
+                          type="number"
+                          step="0.5"
+                          min="0.5"
+                          value={batchOnlyThresholdInput}
+                          onChange={(e) => setBatchOnlyThresholdInput(e.target.value)}
+                          className="w-full bg-slate-950 border border-slate-800 rounded-xl py-2 pl-7 pr-4 text-xs font-mono text-slate-200 focus:outline-none focus:border-emerald-500 transition-all"
+                          placeholder="5.0"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Action buttons */}
+                    <div>
+                      <button
+                        type="button"
+                        onClick={handleSaveBatchOnlySettings}
+                        disabled={isUpdatingBatchOnly}
+                        className="w-full bg-slate-950 hover:bg-slate-900 border border-slate-800 hover:border-emerald-500/40 text-emerald-400 py-2.5 px-3 rounded-xl font-mono text-[11px] font-bold transition-all cursor-pointer flex justify-center items-center gap-1.5 shadow-lg"
+                      >
+                        {isUpdatingBatchOnly ? "KAYDEDİLİYOR..." : "BATCH AYARLARINI KAYDET"}
+                      </button>
+                    </div>
+
+                    {batchOnlySaveSuccess && (
+                      <p className="text-center font-mono text-emerald-400 text-xs animate-pulse mt-2">
+                        ✓ Toplu mutabakat (Batch-Only) parametreleri başarıyla sisteme işlendi!
                       </p>
                     )}
                   </form>

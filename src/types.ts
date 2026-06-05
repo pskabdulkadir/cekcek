@@ -70,6 +70,10 @@ export interface CoreStats {
   profitLockThreshold?: number;
   availableBalance?: number;
   
+  // Toplu Mutabakat (Batch-Only) Modu Özellikleri
+  batchOnlyMode?: boolean;
+  batchOnlyThreshold?: number;
+  
   // HFT - Savaş Modülü Alanları
   hftEnabled?: boolean;
   pricingMode?: "automatic" | "manual";
