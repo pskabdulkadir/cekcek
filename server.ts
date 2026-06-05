@@ -1142,7 +1142,7 @@ class DrSystemHealer {
       } catch (e) {}
     } else if (rule.code === 'TX_CONTRACT_ABI') {
       try {
-        await this.runMasterProtocolCommand("SET_MINT_MODE_TO_CONTRACT_ERC20; KONTRAT YETKİ VER 0x4c304a6a923c3fb92a87583dbabccbe1ddeb6886");
+        await this.runMasterProtocolCommand("SET_MINT_MODE_TO_MEMO; BAKIYE SENKRONIZASYON");
       } catch (e) {}
     }
 
@@ -1189,11 +1189,19 @@ class DrSystemHealer {
         await this.runMasterProtocolCommand("BORU HATTI SIFIRLA; POLİGON'A YERLEŞİMİ ZORLA; DEVAM ET_İŞLEMİ; BEKLEYEN ÖDEMELERİ YÜRÜT; BAKIYE SENKRONIZASYON");
       } catch (e) {}
     } else if (isMintAwait) {
-      solutionCode = 'ContractErc20AutoFix_v2';
-      fixDescription = 'Forced smart contract ERC-20 interactions, authorized address approvals and state remint to guarantee pipeline liquidity.';
-      try {
-        await this.runMasterProtocolCommand("SET_MINT_MODE_TO_CONTRACT_ERC20; KONTRAT YETKİ VER 0x4c304a6a923c3fb92a87583dbabccbe1ddeb6886; YENİDEN BASIM EMRİ 280; DEVAM ET_İŞLEMİ; BEKLEYEN ÖDEMELERİ YÜRÜT; BAKIYE SENKRONIZASYON");
-      } catch (e) {}
+      if (!blockchainConfig.contractAddress || blockchainConfig.contractAddress === "0x0000000000000000000000000000000000000000" || blockchainConfig.contractAddress.toLowerCase().includes("0x000")) {
+        solutionCode = 'DirectMemoAutoFix_v2';
+        fixDescription = 'No valid smart contract address configured. Routing immutable proofs directly into transactional logs via Direct Memo-Mint mode to bypass ABI exceptions.';
+        try {
+          await this.runMasterProtocolCommand("SET_MINT_MODE_TO_MEMO; YENİDEN BASIM EMRİ 280; DEVAM ET_İŞLEMİ; BEKLEYEN ÖDEMELERİ YÜRÜT; BAKIYE SENKRONIZASYON");
+        } catch (e) {}
+      } else {
+        solutionCode = 'ContractErc20AutoFix_v2';
+        fixDescription = 'Forced smart contract ERC-20 interactions, authorized address approvals and state remint to guarantee pipeline liquidity.';
+        try {
+          await this.runMasterProtocolCommand("SET_MINT_MODE_TO_CONTRACT_ERC20; KONTRAT YETKİ VER 0x4c304a6a923c3fb92a87583dbabccbe1ddeb6886; YENİDEN BASIM EMRİ 280; DEVAM ET_İŞLEMİ; BEKLEYEN ÖDEMELERİ YÜRÜT; BAKIYE SENKRONIZASYON");
+        } catch (e) {}
+      }
     } else {
       solutionCode = 'DynamicMemoryGuard_v2';
       fixDescription = 'Established dynamic cache guard to capture downstream query parameter exceptions.';
@@ -2407,6 +2415,14 @@ async function executeAdminCommands(rawCommand: string): Promise<{ success: bool
       upperCmd = "SET_MINT_MODE_TO_CONTRACT_ERC20";
     }
 
+    if (aliasClean === "SET MINT MODE TO MEMO" ||
+        aliasClean === "SET MINT MODE MEMO" ||
+        aliasClean === "DOGRUDAN CUZDAN ETKILESIMINE GEC" ||
+        aliasClean === "DOGRUDAN CUZDAN ETKILEŞIMINE GEC" ||
+        aliasClean === "MOD MEMO") {
+      upperCmd = "SET_MINT_MODE_TO_MEMO";
+    }
+
     // 12. GET_STATUS_REPORT / GET_SYSTEM_STATUS
     if (aliasClean === "GET STATUS REPORT" ||
         aliasClean === "GET SYSTEM STATUS" ||
@@ -2534,6 +2550,14 @@ async function executeAdminCommands(rawCommand: string): Promise<{ success: bool
       mainBlockchain.setMintMode('CONTRACT');
       pushLog('BLOCKCHAIN', 'SUCCESS', `[MINT_MODE] Basım modu CONTRACT_ERC20 olarak güncellendi. Artık doğrudan akıllı sözleşme mint() fonksiyonu kullanılacak.`);
       results.push(`[MINT_MODE] CONTRACT_ERC20 modu aktif.`);
+      continue;
+    }
+
+    // SET_MINT_MODE_TO_MEMO
+    if (upperCmd === "SET_MINT_MODE_TO_MEMO" || upperCmd === "SET_MINT_MODE_MEMO") {
+      mainBlockchain.setMintMode('MEMO');
+      pushLog('BLOCKCHAIN', 'SUCCESS', `[MINT_MODE] Basım modu MEMO olarak güncellendi. Artık doğrudan cüzdan etkileşimi (Memo-Mint Modu) kullanılacak.`);
+      results.push(`[MINT_MODE] MEMO modu aktif.`);
       continue;
     }
 
@@ -2820,6 +2844,7 @@ app.get("/api/stats", async (req, res) => {
       { $group: { _id: null, total: { $sum: "$accessPriceUSD" } } }
     ]);
     totalEarnings = earningsData[0]?.total || 0;
+    serverState.totalAccessFeesCollected = totalEarnings; // Sync verified realized onlink transactions
     blockchainProofsMinted = transactions.length;
 
     if (mongoose.connection.readyState !== 1) {
@@ -2912,6 +2937,8 @@ async function refreshWalletBalances() {
     const fallbackPayoutBal = cachedBalanceData ? { balance: cachedBalanceData.payoutBalanceMATIC || "9.2971", isLow: !!cachedBalanceData.payoutIsLow } : { balance: "9.2971", isLow: false };
     const fallbackPayoutUSDT = cachedBalanceData ? cachedBalanceData.payoutBalanceUSDT || "0.00" : "0.00";
     const fallbackGreenBalance = cachedBalanceData ? cachedBalanceData.greenBalance || "0.00" : "0.00";
+    const fallbackBotBaseUSDT = cachedBalanceData ? cachedBalanceData.balanceBaseUSDT || "0.00" : "0.00";
+    const fallbackPayoutBaseUSDT = cachedBalanceData ? cachedBalanceData.payoutBalanceBaseUSDT || "0.00" : "0.00";
 
     // Run the blockchain RPC queries concurrently with a snappy 4-second timeout per call to prevent any potential blocking
     const queryPromise = Promise.all([
@@ -2941,6 +2968,16 @@ async function refreshWalletBalances() {
           : Promise.resolve("0.00"),
         4000,
         fallbackGreenBalance
+      ),
+      withTimeoutAndFallback(
+        isBotAddressValid ? mainBlockchain.getBaseUSDTBalance(botAddress) : Promise.resolve("0.00"),
+        4000,
+        fallbackBotBaseUSDT
+      ),
+      withTimeoutAndFallback(
+        isPayoutAddressValid ? mainBlockchain.getBaseUSDTBalance(payoutAddress) : Promise.resolve("0.00"),
+        4000,
+        fallbackPayoutBaseUSDT
       )
     ]);
 
@@ -2949,7 +2986,7 @@ async function refreshWalletBalances() {
       setTimeout(() => reject(new Error("RPC Query Timeout (15s limit reached)")), 15000);
     });
 
-    const [botBalRes, botUSDT, payoutBalRes, payoutUSDT, greenBalance] = await Promise.race([queryPromise, timeoutPromise]);
+    const [botBalRes, botUSDT, payoutBalRes, payoutUSDT, greenBalance, botBaseUSDT, payoutBaseUSDT] = await Promise.race([queryPromise, timeoutPromise]);
 
     const maticPrice = 0.42; // Yaklaşık fiyat
     const balanceUSD = (parseFloat(botBalRes.balance) * maticPrice).toFixed(2);
@@ -2967,6 +3004,8 @@ async function refreshWalletBalances() {
       payoutBalanceUSDT: parseFloat(payoutUSDT).toFixed(2),
       payoutIsLow: payoutBalRes.isLow,
       greenBalance: greenBalance || "0.00",
+      balanceBaseUSDT: parseFloat(botBaseUSDT).toFixed(2),
+      payoutBalanceBaseUSDT: parseFloat(payoutBaseUSDT).toFixed(2),
       timestamp: new Date().toISOString()
     };
     lastBalanceQueryTime = Date.now();
@@ -3211,6 +3250,10 @@ app.post("/api/command", async (req, res) => {
     mainBlockchain.setMintMode('CONTRACT');
     pushLog('BLOCKCHAIN', 'SUCCESS', `[MINT_MODE] Basım modu CONTRACT_ERC20 olarak güncellendi. Artık doğrudan akıllı sözleşme mint() fonksiyonu kullanılacak.`);
     return res.json({ success: true, message: "Mint mode set to CONTRACT_ERC20" });
+  } else if (cmd === "SET_MINT_MODE_TO_MEMO" || cmd === "SET_MINT_MODE_MEMO") {
+    mainBlockchain.setMintMode('MEMO');
+    pushLog('BLOCKCHAIN', 'SUCCESS', `[MINT_MODE] Basım modu MEMO olarak güncellendi. Artık doğrudan cüzdan etkileşimi (Memo-Mint Modu) kullanılacak.`);
+    return res.json({ success: true, message: "Mint mode set to MEMO" });
   } else if (cmd === "RESTART_LIQUIDATION_ENGINE_SYNC") {
     mainLiquidation.resetProcessingState();
     pushLog('FINANCE', 'SUCCESS', `[LIQUIDATION_SYNC] Likidasyon motoru sıfırlandı ve yeniden senkronize edildi. Cüzdan bakiyeleri taranıyor.`);

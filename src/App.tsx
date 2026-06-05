@@ -280,10 +280,12 @@ export default function App() {
     balanceMATIC: string;
     balanceUSD: string;
     balanceUSDT?: string;
+    balanceBaseUSDT?: string;
     isLow: boolean;
     payoutBalanceMATIC?: string;
     payoutBalanceUSD?: string;
     payoutBalanceUSDT?: string;
+    payoutBalanceBaseUSDT?: string;
     payoutIsLow?: boolean;
     error?: string;
     timestamp: string;
@@ -2050,16 +2052,17 @@ export default function App() {
                               <span className="text-[9px] font-mono text-slate-400 select-all">
                                 {walletBalance.address ? `${walletBalance.address.slice(0, 8)}...${walletBalance.address.slice(-6)}` : "Tanımsız"}
                               </span>
-                              <div className="text-right">
-                                <span className="text-sm font-bold text-purple-400 font-mono block">
+                              <div className="text-right space-y-0.5">
+                                <span className="text-xs font-bold text-purple-400 font-mono block">
                                   {walletBalance.balanceMATIC} POL
                                 </span>
-                                <span className="text-[9px] text-slate-500 font-mono block mt-0.5">
+                                <span className="text-[9px] text-slate-500 font-mono block">
                                   ≈ ${walletBalance.balanceUSD} USD
                                 </span>
-                                <span className="text-xs font-bold text-emerald-400 font-mono block mt-1">
-                                  {walletBalance.balanceUSDT || "0.00"} USDT
-                                </span>
+                                <div className="text-[10px] font-mono text-emerald-400 font-medium block mt-1">
+                                  <div>Polygon: {walletBalance.balanceUSDT || "0.00"} USDT</div>
+                                  <div className="text-cyan-400">Base L2: {walletBalance.balanceBaseUSDT || "0.00"} USDT</div>
+                                </div>
                               </div>
                             </div>
 
@@ -2118,16 +2121,17 @@ export default function App() {
                               <span className="text-[9px] font-mono text-slate-400 select-all">
                                 {walletBalance.payoutAddress ? `${walletBalance.payoutAddress.slice(0, 8)}...${walletBalance.payoutAddress.slice(-6)}` : "Tanımsız"}
                               </span>
-                              <div className="text-right">
-                                <span className="text-sm font-bold text-slate-300 font-mono block">
+                              <div className="text-right space-y-0.5">
+                                <span className="text-xs font-bold text-slate-300 font-mono block">
                                   {walletBalance.payoutBalanceMATIC || "0.00"} POL
                                 </span>
-                                <span className="text-[9px] text-slate-500 font-mono block mt-0.5">
+                                <span className="text-[9px] text-slate-500 font-mono block">
                                   ≈ ${walletBalance.payoutBalanceUSD || "0.00"} USD
                                 </span>
-                                <span className="text-xs font-bold text-emerald-400 font-mono block mt-1">
-                                  {walletBalance.payoutBalanceUSDT || "0.00"} USDT
-                                </span>
+                                <div className="text-[10px] font-mono text-emerald-400 font-medium block mt-1">
+                                  <div>Polygon: {walletBalance.payoutBalanceUSDT || "0.00"} USDT</div>
+                                  <div className="text-cyan-400">Base L2: {walletBalance.payoutBalanceBaseUSDT || "0.00"} USDT</div>
+                                </div>
                               </div>
                             </div>
 

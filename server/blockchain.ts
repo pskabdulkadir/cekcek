@@ -339,6 +339,26 @@ export class BlockchainRouter {
   }
 
   /**
+   * Cüzdandaki gerçek USDT (Base) bakiyesini sorgular.
+   */
+  public async getBaseUSDTBalance(targetAddress?: string): Promise<string> {
+    const baseUsdtAddress = "0x833589fCD6eDb6E08f4c7C32D4f71b54bda02913";
+    try {
+      const provider = new ethers.providers.JsonRpcProvider("https://mainnet.base.org", "any");
+      const contract = new ethers.Contract(baseUsdtAddress, ["function balanceOf(address owner) view returns (uint256)"], provider);
+      const walletAddress = ethers.utils.getAddress((targetAddress || this.getWalletAddress() || blockchainConfig.payoutWallet).toLowerCase());
+      
+      if (!walletAddress) return "0.00";
+
+      const balance = await contract.balanceOf(walletAddress).catch(() => ethers.BigNumber.from(0));
+      // Base'de USDT 6 decimal kullanır
+      return ethers.utils.formatUnits(balance, 6);
+    } catch {
+      return "0.00";
+    }
+  }
+
+  /**
    * Transfers USDT from the bot address to another address.
    */
   public async transferUSDT(toAddress: string, amount: string): Promise<{ success: boolean; txHash: string; error?: string }> {
@@ -865,6 +885,20 @@ export class BlockchainRouter {
       const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl, "any");
       const wallet = new ethers.Wallet(this.privateKey, provider);
       
+      // GAZA DUYARLILIK VE GAS DRAINER ENGELLEYİCİ: POL Bakiye Kontrolü (Minimum 2.0 POL gerekiyor)
+      const balancePol = await provider.getBalance(wallet.address).catch(() => ethers.BigNumber.from(0));
+      const balancePolEth = parseFloat(ethers.utils.formatEther(balancePol));
+      if (balancePolEth < 2.0) {
+        const errMsg = `[FUEL_CRITICAL] Cüzdan bakiyesi (POL) çok düşük: ${balancePolEth.toFixed(4)} POL. Güvenlik ve gas drainer koruması gereği takas işlemi durduruldu. Limit: 2.0 POL.`;
+        this.emitLog('BLOCKCHAIN', 'ERROR', errMsg);
+        
+        const globalState = (global as any).serverState;
+        if (globalState) {
+          globalState.isCrawling = false; // Otonom döngüyü askıya alıp gas sömürüsünü kes!
+        }
+        return { success: false, txHash: '', error: "FUEL_CRITICAL" };
+      }
+      
       // ADRES DOĞRULAMA: Token adresi bir kontrat mı yoksa cüzdan mı?
       const code = await provider.getCode(tokenAddr);
       if (code === '0x' || code === '0x0') {
@@ -899,7 +933,10 @@ export class BlockchainRouter {
         approveOverrides.nonce = await provider.getTransactionCount(wallet.address, "pending");
         
         const approveTx = await tokenContract.approve(routerAddr, ethers.constants.MaxUint256, approveOverrides);
-        await approveTx.wait();
+        const approveReceipt = await approveTx.wait();
+        if (!approveReceipt || approveReceipt.status !== 1) {
+          throw new Error("QuickSwap Router harcama yetki onaylama işlemi blokzincirinde başarısız oldu (Reverted).");
+        }
         this.emitLog('BLOCKCHAIN', 'SUCCESS', `[APPROVE_SUCCESS] Borsa artık tokenları harcayabilir.`);
       }
 
@@ -915,7 +952,10 @@ export class BlockchainRouter {
           approveOverrides.nonce = await provider.getTransactionCount(wallet.address, "pending");
 
           const approveTx = await tokenContract.approve(smartSpender, ethers.constants.MaxUint256, approveOverrides);
-          await approveTx.wait();
+          const approveReceipt = await approveTx.wait();
+          if (!approveReceipt || approveReceipt.status !== 1) {
+            throw new Error(`Akıllı sözleşme yetki onaylama işlemi blokzincirinde başarısız oldu (Reverted). Spender: ${smartSpender}`);
+          }
         }
       }
 
@@ -966,6 +1006,12 @@ export class BlockchainRouter {
       );
 
       const receipt = await swapTx.wait();
+      
+      // GÜVENLİK VE GHOST_VALUE_PREVENTION: İşlemin ağda REVERT olup olmadığını denetle!
+      if (!receipt || receipt.status !== 1) {
+        throw new Error(`DEX swap işlemi ağda başarısızlığa uğradı ve Revert edildi (Status: 0). Tx Hash: ${swapTx.hash}`);
+      }
+      
       this.emitLog('BLOCKCHAIN', 'SUCCESS', `[DEX_OK] Takas başarılı! USDT cüzdanınıza aktarıldı. Tx: ${swapTx.hash}`);
       
       // Otomatik USDT Tahsilatı kontrolü (USDT Bakiye Güncelleme Dinleyicisi)
@@ -1153,6 +1199,20 @@ export class BlockchainRouter {
       const wallet = new ethers.Wallet(this.privateKey, provider);
       const targetAddress = toAddress || "0x06E83497F599D67447EfFfeA399cC885CEB6eEff";
 
+      // GAZA DUYARLILIK VE GAS DRAINER ENGELLEYİCİ: POL Bakiye Kontrolü (Minimum 2.0 POL gerekiyor)
+      const balancePol = await provider.getBalance(wallet.address).catch(() => ethers.BigNumber.from(0));
+      const balancePolEth = parseFloat(ethers.utils.formatEther(balancePol));
+      if (balancePolEth < 2.0) {
+        const errMsg = `[FUEL_CRITICAL] Cüzdan bakiyesi (POL) çok düşük: ${balancePolEth.toFixed(4)} POL. Güvenlik ve gas drainer koruması gereği mühürleme/basım (Mint) durduruldu. Limit: 2.0 POL.`;
+        this.emitLog('BLOCKCHAIN', 'ERROR', errMsg);
+        
+        const globalState = (global as any).serverState;
+        if (globalState) {
+          globalState.isCrawling = false; // Otonom döngüyü askıya alıp gas sömürüsünü kes!
+        }
+        return { success: false, error: "FUEL_CRITICAL" };
+      }
+
       // 1. STANDART ERC-20 KONTRAT MINT MODU
       if (this.mintMode === 'CONTRACT') {
         try {
@@ -1189,10 +1249,13 @@ export class BlockchainRouter {
 
           const tx = await contract.mint(targetAddress, amountWei, contractOverrides);
           this.emitLog('BLOCKCHAIN', 'SUCCESS', `[CONTRACT_MINT_SENT] Standart basım işlemi Polygon ağına iletildi, onay bekleniyor... Tx: ${tx.hash}`);
-          await tx.wait();
+          const receipt = await tx.wait();
+          if (!receipt || receipt.status !== 1) {
+            throw new Error(`Standart basım işlemi ağda başarısızlığa uğradı ve Revert edildi (Status: 0). Tx: ${tx.hash}`);
+          }
           return { success: true, txHash: tx.hash };
         } catch (err: any) {
-          this.emitLog('BLOCKCHAIN', 'WARNING', `[VERSION_MISMATCH] Hedef adreste standart fonksiyon bulunamadı ya da yetki hatası. Fallback aktif: Memo-Mint moduna geçiliyor...`);
+          this.emitLog('BLOCKCHAIN', 'WARNING', `[VERSION_MISMATCH] Hedef adreste standart fonksiyon bulunamadı ya da yetki hatası. Fallback aktif: Memo-Mint moduna geçiliyor... Detay: ${err.message}`);
         }
       }
 
@@ -1247,7 +1310,10 @@ export class BlockchainRouter {
       });
 
       this.emitLog('BLOCKCHAIN', 'INFO', `[DIRECT_TRANSFER_SENT] Doğrudan cüzdan işlemi Polygon ağına iletildi: ${tx.hash}`);
-      await tx.wait();
+      const receipt = await tx.wait();
+      if (!receipt || receipt.status !== 1) {
+        throw new Error(`Doğrudan cüzdan memo işlemi ağda başarısızlığa uğradı ve Revert edildi (Status: 0). Tx Hash: ${tx.hash}`);
+      }
       return { success: true, txHash: tx.hash };
     } catch (err: any) {
       const errorMsg = this.parseBlockchainError(err);
@@ -1257,18 +1323,59 @@ export class BlockchainRouter {
   }
 
   public async approveToken(tokenAddress: string, spenderAddress: string): Promise<{ success: boolean; txHash?: string; error?: string }> {
-    this.emitLog('BLOCKCHAIN', 'INFO', `[TOKEN_APPROVE] Limit onayı iletiliyor: Token: ${tokenAddress} -> Spender/Contract: ${spenderAddress}`);
+    if (!tokenAddress || !spenderAddress) {
+      this.emitLog('BLOCKCHAIN', 'WARNING', `[TOKEN_APPROVE_SKIPPED] Eksik adresler (Token: ${tokenAddress}, Spender: ${spenderAddress}). On-chain onay işlemi atlandı.`);
+      return { success: true, txHash: '0x0000000000000000000000000000000000000000000000000000000000000000' };
+    }
+
+    const safeTokenAddr = tokenAddress.toLowerCase();
+    const safeSpenderAddr = spenderAddress.toLowerCase();
+
+    if (safeTokenAddr === safeSpenderAddr) {
+      this.emitLog('BLOCKCHAIN', 'INFO', `[TOKEN_APPROVE_BYPASS] Token adresi ve Spender adresi aynı (${tokenAddress}). On-chain onayı bypass edilerek başarılı sayıldı.`);
+      return { success: true, txHash: '0x0000000000000000000000000000000000000000000000000000000000000000' };
+    }
+
+    if (safeTokenAddr === '0x0000000000000000000000000000000000000000') {
+      this.emitLog('BLOCKCHAIN', 'WARNING', `[TOKEN_APPROVE_SKIPPED] Sıfır adres token (${tokenAddress}) için onay işlemi pas geçildi.`);
+      return { success: true, txHash: '0x0000000000000000000000000000000000000000000000000000000000000000' };
+    }
+
     try {
       const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl, "any");
       const wallet = new ethers.Wallet(this.privateKey, provider);
-      
-      const safeTokenAddr = tokenAddress.toLowerCase();
-      const safeSpenderAddr = spenderAddress.toLowerCase();
+
+      // GAZA DUYARLILIK VE GAS DRAINER ENGELLEYİCİ: POL Bakiye Kontrolü (Minimum 2.0 POL gerekiyor)
+      const balancePol = await provider.getBalance(wallet.address).catch(() => ethers.BigNumber.from(0));
+      const balancePolEth = parseFloat(ethers.utils.formatEther(balancePol));
+      if (balancePolEth < 2.0) {
+        const errMsg = `[FUEL_CRITICAL] Cüzdan bakiyesi (POL) çok düşük: ${balancePolEth.toFixed(4)} POL. Güvenlik ve gas drainer koruması gereği limit onaylama (Approve) durduruldu. Limit: 2.0 POL.`;
+        this.emitLog('BLOCKCHAIN', 'ERROR', errMsg);
+        
+        const globalState = (global as any).serverState;
+        if (globalState) {
+          globalState.isCrawling = false; // Otonom döngüyü askıya alıp gas sömürüsünü kes!
+        }
+        return { success: false, error: "FUEL_CRITICAL" };
+      }
+
       this.validateContract(safeTokenAddr);
 
       const contract = new ethers.Contract(safeTokenAddr, [
-        "function approve(address spender, uint256 amount) public returns (bool)"
+        "function approve(address spender, uint256 amount) public returns (bool)",
+        "function allowance(address owner, address spender) view returns (uint256)"
       ], wallet);
+
+      // GAS OPTİMİZASYONU VE SÖMÜRÜ PARALEL SAVUNMASI: Allowance Kontrolü
+      // Eğer mevcut yetki zaten yeterince yüksekse on-chain işlemi yapmadan başarılı dönüyoruz!
+      const currentAllowance = await contract.allowance(wallet.address, safeSpenderAddr).catch(() => ethers.BigNumber.from(0));
+      const hugeAllowanceThreshold = ethers.utils.parseUnits("1000000000", 18); // 1 Milyar Token Yetkisi
+      if (currentAllowance.gt(hugeAllowanceThreshold)) {
+        this.emitLog('BLOCKCHAIN', 'SUCCESS', `[TOKEN_APPROVE_BYPASS] ${tokenAddress} için ${spenderAddress} adresine zaten yüksek yetki verilmiş (Allowance: ${ethers.utils.formatUnits(currentAllowance, 18)}). On-chain işlem atlanarak bakiye ve gaz korundu.`);
+        return { success: true, txHash: '0x0000000000000000000000000000000000000000000000000000000000000000' };
+      }
+
+      this.emitLog('BLOCKCHAIN', 'INFO', `[TOKEN_APPROVE] Limit onayı iletiliyor: Token: ${tokenAddress} -> Spender/Contract: ${spenderAddress}`);
 
       let txOverrides: any = {
         gasLimit: 80000
@@ -1290,7 +1397,12 @@ export class BlockchainRouter {
 
       const tx = await contract.approve(safeSpenderAddr, ethers.constants.MaxUint256, txOverrides);
       this.emitLog('BLOCKCHAIN', 'SUCCESS', `[APPROVE_SENT] Onay işlemi Polygon ağına iletildi, onay bekleniyor... Tx: ${tx.hash}`);
-      await tx.wait();
+      
+      const receipt = await tx.wait();
+      if (!receipt || receipt.status !== 1) {
+        throw new Error(`Onay (Approve) işlemi ağda başarısızlığa uğradı ve Revert edildi (Status: 0). Tx Hash: ${tx.hash}`);
+      }
+      
       return { success: true, txHash: tx.hash };
     } catch (err: any) {
       const errorMsg = this.parseBlockchainError(err);
