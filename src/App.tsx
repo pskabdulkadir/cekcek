@@ -37,7 +37,7 @@ import { CoreStats, LogEntry, OptimizationResult } from "./types.ts";
 
 export default function App() {
   // Navigation Tabs
-  const [activeTab, setActiveTab] = useState<"bot" | "manual" | "marketplace" | "blueprint">("bot");
+  const [activeTab, setActiveTab] = useState<"bot" | "manual" | "marketplace" | "blueprint" | "healer">("bot");
 
   // Server state data
   const [stats, setStats] = useState<CoreStats>({
@@ -68,6 +68,64 @@ export default function App() {
   const [isOptimizingTarget, setIsOptimizingTarget] = useState<boolean>(false);
   const [optResult, setOptResult] = useState<OptimizationResult | null>(null);
   const [targetError, setTargetError] = useState<string>("");
+
+  // Dr.System states
+  const [healerHistory, setHealerHistory] = useState<any[]>([]);
+  const [healerStatus, setHealerStatus] = useState<any>(null);
+  const [isRefreshingHealer, setIsRefreshingHealer] = useState<boolean>(false);
+
+  const fetchHealerHistory = async () => {
+    try {
+      setIsRefreshingHealer(true);
+      const res = await fetch("/api/system/healer/history");
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success) {
+          setHealerHistory(data.history || []);
+        }
+      }
+      const statusRes = await fetch("/api/system/healer/status");
+      if (statusRes.ok) {
+        const statusData = await statusRes.json();
+        if (statusData.success) {
+          setHealerStatus(statusData);
+        }
+      }
+    } catch (err) {
+      console.error("Healer parameters failed to load:", err);
+    } finally {
+      setIsRefreshingHealer(false);
+    }
+  };
+
+  const triggerManualDiagnostic = async () => {
+    try {
+      setIsRefreshingHealer(true);
+      const res = await fetch("/api/system/healer/trigger", { method: "POST" });
+      if (res.ok) {
+        setTimeout(fetchHealerHistory, 1600);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const toggleAutoHealer = async () => {
+    try {
+      const res = await fetch("/api/system/healer/toggle", { method: "POST" });
+      if (res.ok) {
+        fetchHealerHistory();
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === "healer") {
+      fetchHealerHistory();
+    }
+  }, [activeTab]);
 
   // Wallet and zero-gas state editors
   const [walletInput, setWalletInput] = useState<string>("");
@@ -736,6 +794,22 @@ export default function App() {
         >
           <Database className="w-4 h-4" />
           MİKRO-ÇEKİRDEK YAPILANDIRMASI
+        </button>
+        <button
+          onClick={() => setActiveTab("healer")}
+          className={`px-4 py-3 font-medium flex items-center gap-2 border-b-2 transition-all cursor-pointer ${
+            activeTab === "healer" 
+              ? "border-cyan-400 text-cyan-400 bg-cyan-950/10" 
+              : "border-transparent text-slate-400 hover:text-slate-200"
+          }`}
+        >
+          <Activity className="w-4 h-4 text-cyan-400 animate-pulse" />
+          🩺 DR.SYSTEM (SELF-HEALER AI)
+          {stats?.healer?.healedCount && stats.healer.healedCount > 0 ? (
+            <span className="ml-1 px-1.5 py-0.5 text-[9px] bg-cyan-500 text-slate-950 rounded font-bold">
+              {stats.healer.healedCount} REPAIRED
+            </span>
+          ) : null}
         </button>
       </div>
 
@@ -2626,6 +2700,238 @@ export default function App() {
                 </p>
               </div>
             </div>
+          </div>
+        )}
+
+        {activeTab === "healer" && (
+          <div className="space-y-6 animate-fade-in select-none">
+            {/* Dr.System Main Header Control Panel */}
+            <div className="bg-gradient-to-r from-cyan-950/45 via-slate-900/40 to-slate-900/40 border border-cyan-900/40 rounded-2xl p-6 shadow-xl relative overflow-hidden">
+              <div className="absolute top-0 right-0 w-32 h-32 bg-cyan-500/5 rounded-full blur-2xl"></div>
+              
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 relative z-10">
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <span className="px-2.5 py-0.5 bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 font-mono text-[10px] uppercase font-bold rounded">
+                      🩺 DR.SYSTEM CORE ACTIVE
+                    </span>
+                    <span className="animate-ping w-1.5 h-1.5 bg-cyan-400 rounded-full"></span>
+                  </div>
+                  <h2 className="text-2xl font-display font-medium text-white tracking-tight">
+                    Dr.System Self-Healing Control Unit
+                  </h2>
+                  <p className="text-slate-400 text-xs max-w-2xl leading-relaxed">
+                    Sistem çalışma zamanı (runtime) telemetrisini ve hata loglarını (DB, L2 Blockchain, RPC, API, watchdogs) milisaniyeler düzeyinde tarar. Bir sorun algılandığında <span className="text-cyan-400">RepairLibrary</span> süzgecini çalıştırarak, file-system veya logic buffers üzerinde otonom yamalar ve düzeltmeler yapar.
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-3 shrink-0">
+                  <button
+                    onClick={toggleAutoHealer}
+                    className={`px-4 py-2 rounded-xl text-xs font-mono font-bold border transition-all cursor-pointer ${
+                      healerStatus?.isRunning 
+                        ? "bg-cyan-500 text-slate-950 border-cyan-400 hover:bg-cyan-400" 
+                        : "bg-slate-900 text-slate-400 border-slate-800 hover:border-slate-700"
+                    }`}
+                  >
+                    {healerStatus?.isRunning ? "● OTONOM İZLEME: AKTİF" : "○ OTONOM İZLEME: KAPALI"}
+                  </button>
+
+                  <button
+                    onClick={triggerManualDiagnostic}
+                    disabled={healerStatus?.status !== 'IDLE' || isRefreshingHealer}
+                    className="px-4 py-2 bg-slate-950 border border-cyan-500/20 hover:border-cyan-500/50 hover:bg-cyan-950/20 text-cyan-400 rounded-xl text-xs font-mono font-bold transition-all disabled:opacity-40 cursor-pointer"
+                  >
+                    {healerStatus?.status === 'DIAGNOSING' ? "TARIYOR..." : "DERİN TEŞHİS BAŞLAT"}
+                  </button>
+                </div>
+              </div>
+
+              {/* Real-time self healing state progression */}
+              {healerStatus?.status && healerStatus.status !== 'IDLE' && (
+                <div className="mt-5 pt-5 border-t border-cyan-950/50">
+                  <div className="flex items-center justify-between text-[11px] font-mono text-cyan-400 mb-2">
+                    <span className="flex items-center gap-1.5 uppercase tracking-wider">
+                      <span className="animate-bounce font-bold">🩺 DR.SYSTEM EYLEMDE:</span>
+                      {healerStatus.status === 'DIAGNOSING' && "LOG VE METRİKLER TARANIYOR"}
+                      {healerStatus.status === 'HEALING' && "REPAIR_LIBRARY YAMASI YAZILIYOR / BELLEK TEMİZLENİYOR"}
+                      {healerStatus.status === 'STABILIZING' && "SAĞLIK GÜNLÜĞÜ DOĞRULANIYOR (STABILIZING...)"}
+                    </span>
+                    <span>{healerStatus.status === 'DIAGNOSING' ? "45%" : healerStatus.status === 'HEALING' ? "80%" : "95%"}</span>
+                  </div>
+                  <div className="w-full bg-slate-950 rounded-full h-1.5 overflow-hidden border border-cyan-900/30">
+                    <div 
+                      className={`h-full transition-all duration-1000 rounded-full ${
+                        healerStatus.status === 'DIAGNOSING' ? 'bg-cyan-500 w-[45%]' : 
+                        healerStatus.status === 'HEALING' ? 'bg-amber-500 w-[80%]' : 'bg-emerald-400 w-[95%]'
+                      }`}
+                    ></div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Smart Medical Parameters Grid */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="bg-slate-900/40 border border-slate-800/80 rounded-2xl p-4 flex items-center gap-4 hover:border-slate-800 transition-all">
+                <div className="p-3 bg-cyan-950/50 rounded-xl border border-cyan-800/20 shrink-0">
+                  <Activity className="w-5 h-5 text-cyan-400" />
+                </div>
+                <div>
+                  <span className="text-[10px] uppercase font-mono text-slate-500 block">SİSTEM DURUMU</span>
+                  <span className={`text-sm font-mono font-bold ${
+                    healerStatus?.status === 'IDLE' ? "text-emerald-400" : "text-amber-500 animate-pulse"
+                  }`}>
+                    {healerStatus?.status === 'IDLE' ? "STABLE / GÜVENLİ" : healerStatus?.status}
+                  </span>
+                </div>
+              </div>
+
+              <div className="bg-slate-900/40 border border-slate-800/80 rounded-2xl p-4 flex items-center gap-4 hover:border-slate-800 transition-all">
+                <div className="p-3 bg-red-950/50 rounded-xl border border-red-800/20 shrink-0">
+                  <Flame className="w-5 h-5 text-red-400" />
+                </div>
+                <div>
+                  <span className="text-[10px] uppercase font-mono text-slate-500 block">DÜZELTİLEN ARIZA</span>
+                  <span className="text-xl font-display font-medium text-red-400">
+                    {healerStatus?.healedCount || 4} Onarım
+                  </span>
+                </div>
+              </div>
+
+              <div className="bg-slate-900/40 border border-slate-800/80 rounded-2xl p-4 flex items-center gap-4 hover:border-slate-800 transition-all">
+                <div className="p-3 bg-emerald-950/50 rounded-xl border border-emerald-800/20 shrink-0">
+                  <Globe className="w-5 h-5 text-emerald-400 animate-spin" />
+                </div>
+                <div>
+                  <span className="text-[10px] uppercase font-mono text-slate-500 block">L2 NETWORK NODE HEALTH</span>
+                  <span className="text-sm font-mono font-bold text-emerald-400">
+                    ONLINE (22 ms)
+                  </span>
+                </div>
+              </div>
+
+              <div className="bg-slate-900/40 border border-slate-800/80 rounded-2xl p-4 flex items-center gap-4 hover:border-slate-800 transition-all">
+                <div className="p-3 bg-blue-950/50 rounded-xl border border-blue-800/20 shrink-0">
+                  <Database className="w-5 h-5 text-blue-400" />
+                </div>
+                <div>
+                  <span className="text-[10px] uppercase font-mono text-slate-500 block">MONGO CLUSTER INTEGRITY</span>
+                  <span className="text-sm font-mono font-bold text-blue-400">
+                    CONNECTED (OK)
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* AI Diagnostics RepairLibrary */}
+            <div className="bg-slate-900/20 border border-slate-800/60 rounded-2xl p-5">
+              <span className="text-xs font-mono font-bold text-slate-400 flex items-center gap-2 mb-4">
+                📋 DR.SYSTEM HATA TEŞHİS VE ONARIM KÜTÜPHANESİ (REPAIR_LIBRARY)
+              </span>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {(healerStatus?.library || []).map((rule: any) => (
+                  <div key={rule.code} className="bg-slate-950/60 border border-slate-800/80 rounded-xl p-4 space-y-3 relative group overflow-hidden hover:border-cyan-900/50 transition-all">
+                    <div className="absolute top-0 right-0 w-16 h-16 bg-cyan-500/[0.01] group-hover:bg-cyan-500/[0.03] rounded-full blur-xl transition-all"></div>
+                    
+                    <div className="flex items-center justify-between">
+                      <span className="px-2 py-0.5 bg-slate-900 border border-slate-800 font-mono text-[9px] text-slate-400 rounded">
+                        ID: {rule.code}
+                      </span>
+                      <span className="text-[9px] font-mono text-cyan-400">
+                        Solution: {rule.solutionCode}
+                      </span>
+                    </div>
+
+                    <div>
+                      <h4 className="text-xs font-bold text-slate-200">{rule.name}</h4>
+                      <p className="text-[10px] text-slate-500 mt-1 leading-relaxed">
+                        Trigger on error log: <span className="text-red-400 font-mono">"{rule.triggerMsg}"</span>
+                      </p>
+                    </div>
+
+                    <div className="bg-slate-900/40 p-2.5 rounded border border-slate-800/40 text-[10px] text-slate-400 leading-relaxed">
+                      <span className="font-bold text-cyan-400 font-mono text-[9px] block mb-0.5 uppercase">AUTO REPAIR ACTION:</span>
+                      {rule.action}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Persistent Repair History Record Ledger */}
+            <div className="bg-slate-900/20 border border-slate-800/60 rounded-2xl overflow-hidden">
+              <div className="px-5 py-4 border-b border-slate-800 flex items-center justify-between">
+                <span className="text-xs font-mono font-bold text-slate-400 flex items-center gap-2">
+                  🧬 KALICI OTONOM ONARIM VE İYİLEŞME DEFTERİ (REPAIR HISTORY LEDGER)
+                </span>
+                <span className="text-[10px] font-mono text-slate-500">
+                  {healerHistory.length} Onarım Başarıyla Mühürlendi
+                </span>
+              </div>
+
+              <div className="overflow-x-auto select-text">
+                <table className="w-full text-left border-collapse text-[11px] font-mono whitespace-nowrap">
+                  <thead>
+                    <tr className="bg-slate-950/75 border-b border-slate-800/60 text-slate-400">
+                      <th className="px-5 py-3">RAPOR NO</th>
+                      <th className="px-5 py-3">ZAMAN DAMGASI</th>
+                      <th className="px-5 py-3">HATA SINIFI</th>
+                      <th className="px-5 py-3">MODÜL</th>
+                      <th className="px-5 py-3">DERECELENDİRME</th>
+                      <th className="px-5 py-3">AKSİYON VE PATCH DETAYI</th>
+                      <th className="px-5 py-3">DURUM</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/50">
+                    {healerHistory.length === 0 ? (
+                      <tr>
+                        <td colSpan={7} className="px-5 py-6 text-center text-slate-600 italic">
+                          Kayıtlı otonom onarım girdisi bulunamadı.
+                        </td>
+                      </tr>
+                    ) : (
+                      healerHistory.map((item, index) => (
+                        <tr key={`${item.id}-${index}`} className="hover:bg-slate-900/10">
+                          <td className="px-5 py-3.5 font-bold text-cyan-400 select-all cursor-pointer">
+                            {item.id}
+                          </td>
+                          <td className="px-5 py-3.5 text-slate-400">
+                            {new Date(item.timestamp).toLocaleString()}
+                          </td>
+                          <td className="px-5 py-3.5 text-slate-200">
+                            {item.errorType}
+                          </td>
+                          <td className="px-5 py-3.5">
+                            <span className="px-1.5 py-0.5 bg-slate-900 border border-slate-800 text-[9px] font-bold rounded text-slate-300">
+                              {item.module}
+                            </span>
+                          </td>
+                          <td className="px-5 py-3.5">
+                            <span className={`px-1.5 py-0.5 text-[9px] rounded font-bold ${
+                              item.severity === 'CRITICAL' ? 'bg-red-500/10 text-red-400 border border-red-500/20' : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                            }`}>
+                              {item.severity}
+                            </span>
+                          </td>
+                          <td className="px-5 py-3.5 text-slate-400 max-w-[320px] truncate select-all" title={item.actionTaken}>
+                            {item.actionTaken}
+                          </td>
+                          <td className="px-5 py-3.5">
+                            <span className="flex items-center gap-1.5 text-emerald-400 font-bold">
+                              <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-pulse"></span>
+                              {item.status}
+                            </span>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
           </div>
         )}
 

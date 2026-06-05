@@ -72,6 +72,7 @@ export interface CoreStats {
   circuitBreakerStatus?: "NORMAL" | "BREAKER_ACTIVE_SLOW_DOWN";
   selectedNetworkPath?: "polygon" | "arbitrum" | "base";
   merkleBufferCount?: number;
+  healer?: { isRunning: boolean; status: string; healedCount: number };
 }
 
 export interface OptimizationResult {
