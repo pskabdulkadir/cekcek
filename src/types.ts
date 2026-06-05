@@ -64,6 +64,12 @@ export interface CoreStats {
   totalAccessFeesCollected: number; // totalRealizedCash yerine totalAccessFeesCollected
   // zeroGasModeActive: boolean; // Artık kullanılmıyor
   
+  // Profit-Lock (Kar Kilitleme) Özellikleri
+  profitLockActive?: boolean;
+  profitLockHoldAmount?: number;
+  profitLockThreshold?: number;
+  availableBalance?: number;
+  
   // HFT - Savaş Modülü Alanları
   hftEnabled?: boolean;
   pricingMode?: "automatic" | "manual";

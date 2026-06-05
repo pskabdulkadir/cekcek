@@ -30,7 +30,8 @@ import {
   AlertTriangle,
   Flame,
   Code,
-  Zap
+  Zap,
+  Unlock
 } from "lucide-react";
 
 import { CoreStats, LogEntry, OptimizationResult } from "./types.ts";
@@ -56,6 +57,10 @@ export default function App() {
     totalDataInsightsPublished: 0,
     totalAccessFeesCollected: 0,
     totalServiceFeesCollected: 0, // Eksik alan eklendi
+    profitLockActive: true,
+    profitLockHoldAmount: 0.0,
+    profitLockThreshold: 5.0,
+    availableBalance: 0.0,
     contractAddress: "",
     autonomousMode: false,
     commitThreshold: 0
@@ -143,6 +148,13 @@ export default function App() {
   const [isUpdatingHft, setIsUpdatingHft] = useState<boolean>(false);
   const [hftSaveSuccess, setHftSaveSuccess] = useState<boolean>(false);
 
+  // Profit Lock Frontend States
+  const [profitLockActiveConfig, setProfitLockActiveConfig] = useState<boolean>(true);
+  const [profitLockThresholdInput, setProfitLockThresholdInput] = useState<string>("5.0");
+  const [isUpdatingProfitLock, setIsUpdatingProfitLock] = useState<boolean>(false);
+  const [profitLockSaveSuccess, setProfitLockSaveSuccess] = useState<boolean>(false);
+  const [isReleasingProfitLock, setIsReleasingProfitLock] = useState<boolean>(false);
+
   // Telegram Bot State Değişkenleri
   const [telegramEnabled, setTelegramEnabled] = useState<boolean>(false);
   const [telegramHasCredentials, setTelegramHasCredentials] = useState<boolean>(false);
@@ -173,6 +185,55 @@ export default function App() {
       console.error("Savaş Modülü HFT ayarları güncellenemedi:", err);
     } finally {
       setIsUpdatingHft(false);
+    }
+  };
+
+  // Profit Lock Settings Save & Release Handlers
+  const handleSaveProfitLockSettings = async (e: React.FormEvent) => {
+    if (e) e.preventDefault();
+    setIsUpdatingProfitLock(true);
+    setProfitLockSaveSuccess(false);
+    try {
+      // 1. Set active status
+      await fetch("/api/admin/command", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ command: `SET_PROFIT_LOCK_ACTIVE ${profitLockActiveConfig ? "TRUE" : "FALSE"}` })
+      });
+      // 2. Set threshold
+      const val = parseFloat(profitLockThresholdInput) || 5.0;
+      await fetch("/api/admin/command", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ command: `SET_PROFIT_LOCK_THRESHOLD ${val}` })
+      });
+      
+      setProfitLockSaveSuccess(true);
+      fetchStats();
+      setTimeout(() => setProfitLockSaveSuccess(false), 3000);
+    } catch (err) {
+      console.error("Profit Lock parameters could not be updated:", err);
+    } finally {
+      setIsUpdatingProfitLock(false);
+    }
+  };
+
+  const handleReleaseProfitLock = async () => {
+    setIsReleasingProfitLock(true);
+    try {
+      const res = await fetch("/api/admin/command", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ command: "RELEASE_PROFIT_LOCK" })
+      });
+      if (res.ok) {
+        fetchStats();
+        fetchWalletBalance();
+      }
+    } catch (err) {
+      console.error("Failed to manually release profit lock:", err);
+    } finally {
+      setIsReleasingProfitLock(false);
     }
   };
 
@@ -275,7 +336,9 @@ export default function App() {
     if (stats.demandMultiplier !== undefined) setDemandMultiplier(stats.demandMultiplier);
     if (stats.lightweightMode !== undefined) setLightweightMode(stats.lightweightMode);
     if (stats.circuitBreakerStatus !== undefined) setCircuitBreakerStatus(stats.circuitBreakerStatus);
-  }, [stats.hftEnabled, stats.pricingMode, stats.demandMultiplier, stats.lightweightMode, stats.circuitBreakerStatus]);
+    if (stats.profitLockActive !== undefined) setProfitLockActiveConfig(stats.profitLockActive);
+    if (stats.profitLockThreshold !== undefined) setProfitLockThresholdInput(stats.profitLockThreshold.toString());
+  }, [stats.hftEnabled, stats.pricingMode, stats.demandMultiplier, stats.lightweightMode, stats.circuitBreakerStatus, stats.profitLockActive, stats.profitLockThreshold]);
 
   // Refs for auto-scroll logging window
   const terminalEndRef = useRef<HTMLDivElement>(null);
@@ -1089,6 +1152,86 @@ export default function App() {
                   </form>
                 </div>
 
+                {/* 3. Profit-Lock & Muhasebe Kontrolü */}
+                <div className="bg-slate-900/40 border border-slate-800/80 rounded-2xl p-5 md:p-6 shadow-lg space-y-5">
+                  <h4 className="text-xs font-mono text-emerald-400 uppercase tracking-widest flex items-center gap-2">
+                    <Coins className="w-4 h-4 text-emerald-500" />
+                    Bakiye Kilitleme ve Muhasebe Bölümü
+                  </h4>
+
+                  <form onSubmit={handleSaveProfitLockSettings} className="space-y-4">
+                    {/* Toggle: Kar Kilitleme Modu */}
+                    <div className="bg-slate-950/40 border border-slate-800/60 p-3 rounded-xl flex items-center justify-between">
+                      <div className="space-y-0.5 pr-4">
+                        <label className="text-slate-200 text-xs font-mono font-bold uppercase block">Kar Kilitleme (Profit-Lock)</label>
+                        <span className="text-[10px] text-slate-400 block leading-relaxed">
+                          Kazançlar belirlenen limit eşiğe ulaşana kadar yedek hold havuzunda birikir.
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setProfitLockActiveConfig(!profitLockActiveConfig)}
+                        className={`w-14 h-7 rounded-full p-1 transition-all cursor-pointer outline-none shrink-0 ${
+                          profitLockActiveConfig ? "bg-emerald-600 justify-end" : "bg-slate-700"
+                        } flex items-center`}
+                      >
+                        <span className="w-5 h-5 rounded-full bg-white shadow-md block transition-all"></span>
+                      </button>
+                    </div>
+
+                    {/* Input: Kar Kilidi Eşiği */}
+                    <div className="bg-slate-950/40 border border-slate-800/60 p-3.5 rounded-xl space-y-2">
+                      <div className="flex justify-between items-center text-xs font-mono">
+                        <label className="text-slate-200 font-bold uppercase text-[10px]">Kar Kilidi Barajı (Valuation-Limit)</label>
+                        <span className="text-emerald-400 font-bold">${parseFloat(profitLockThresholdInput || "0").toFixed(2)} USD</span>
+                      </div>
+                      <div className="relative">
+                        <span className="absolute left-3.5 top-2.5 text-xs font-mono text-slate-500">$</span>
+                        <input
+                          type="number"
+                          step="0.1"
+                          min="0.1"
+                          value={profitLockThresholdInput}
+                          onChange={(e) => setProfitLockThresholdInput(e.target.value)}
+                          className="w-full bg-slate-950 border border-slate-800 rounded-xl py-2 pl-7 pr-4 text-xs font-mono text-slate-200 focus:outline-none focus:border-emerald-500 transition-all"
+                          placeholder="5.0"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Action buttons */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <button
+                        type="submit"
+                        disabled={isUpdatingProfitLock}
+                        className="w-full bg-emerald-600 hover:bg-emerald-500 text-slate-955 py-2.5 px-3 rounded-xl font-mono text-[11px] font-bold transition-all cursor-pointer flex justify-center items-center gap-1.5 shadow-lg hover:shadow-emerald-500/10"
+                      >
+                        {isUpdatingProfitLock ? "KAYDEDİLİYOR..." : "KİLİT AYARLARINI KAYDET"}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={handleReleaseProfitLock}
+                        disabled={isReleasingProfitLock || (stats.profitLockHoldAmount || 0) <= 0}
+                        className={`w-full py-2.5 px-3 rounded-xl font-mono text-[11px] font-bold transition-all cursor-pointer flex justify-center items-center gap-1.5 border ${
+                          (stats.profitLockHoldAmount || 0) > 0
+                            ? "bg-slate-900 border-amber-500/40 hover:bg-slate-800 text-amber-400"
+                            : "bg-slate-950/40 border-slate-900 text-slate-600 cursor-not-allowed"
+                        }`}
+                      >
+                        <Unlock className="w-3.5 h-3.5" />
+                        {isReleasingProfitLock ? "SERBEST BIRAKILIYOR..." : "MANUEL KAR TRANSFERİ"}
+                      </button>
+                    </div>
+
+                    {profitLockSaveSuccess && (
+                      <p className="text-center font-mono text-emerald-400 text-xs animate-pulse">
+                        ✓ Bakiye kilitleme ve muhasebe parametreleri sisteme işlendi!
+                      </p>
+                    )}
+                  </form>
+                </div>
+
               </div>
               
               {/* Right Column: Merkle Tree Queue, Pathfinder & On-Chain registrations */}
@@ -1537,21 +1680,61 @@ export default function App() {
               </div>
 
               {/* Accumulated Real-Time Revenue Board */}
-              <div className="bg-slate-950/90 border border-emerald-500/30 rounded-2xl p-5 w-full md:w-80 shadow-inner shrink-0 relative overflow-hidden text-right">
+              <div className="bg-slate-950/90 border border-emerald-500/30 rounded-2xl p-5 w-full md:w-[24rem] shadow-inner shrink-0 relative overflow-hidden text-right flex flex-col gap-3">
                 <div className="absolute top-0 left-0 w-12 h-12 bg-emerald-500/5 rounded-full blur-xl"></div>
-                <div className="flex items-center justify-between border-b border-slate-900 pb-2 mb-2">
-                  <span className="text-[10px] font-mono text-slate-500 uppercase">TAHSİL EDİLEN ERİŞİM ÜCRETİ</span>
-                  <div className="flex items-center gap-1.5">
-                    <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-ping"></span>
-                    <span className="text-[9px] font-mono text-emerald-400">ERİŞİM_AKTİF</span>
+                
+                {/* Header info */}
+                <div>
+                  <div className="flex items-center justify-between border-b border-slate-900 pb-1.5">
+                    <span className="text-[10px] font-mono text-slate-500 uppercase">AKILLI SÖZLEŞME VE ÜRETİM GELİRİ</span>
+                    <div className="flex items-center gap-1.5">
+                      <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-ping"></span>
+                      <span className="text-[9px] font-mono text-emerald-400">ERİŞİM_AKTİF</span>
+                    </div>
+                  </div>
+                  <div className="text-2xl font-display font-medium text-emerald-400 tracking-tight mt-1">
+                    ${(stats.totalAccessFeesCollected || 0).toFixed(4)} <span className="text-xs font-mono text-slate-500">USD</span>
                   </div>
                 </div>
-                <div className="text-3xl md:text-4xl font-display font-medium text-emerald-400 tracking-tight">
-                  ${(stats.totalAccessFeesCollected || 0).toFixed(4)} <span className="text-sm font-mono text-slate-500">USD</span>
+
+                {/* Profit Lock Status Indicator */}
+                <div className="bg-slate-900/60 border border-slate-800/80 rounded-xl p-3 text-left space-y-1.5">
+                  <div className="flex items-center justify-between text-[10px] font-mono">
+                    <span className="text-slate-400 font-semibold flex items-center gap-1">
+                      <Zap className="w-3 h-3 text-amber-500" />
+                      Profit-Lock (Kar Kilidi)
+                    </span>
+                    <span className={`px-1.5 py-0.5 rounded text-[9px] uppercase font-bold ${(stats.profitLockHoldAmount || 0) >= (stats.profitLockThreshold || 5.0) ? 'bg-emerald-950 text-emerald-400 border border-emerald-500/30' : 'bg-amber-950/70 text-amber-500 border border-amber-500/20'}`}>
+                      {(stats.profitLockHoldAmount || 0) >= (stats.profitLockThreshold || 5.0) ? '🔓 KİLİT_AÇILDI' : '🔒 KİLİTLİ'}
+                    </span>
+                  </div>
+
+                  <div className="space-y-1">
+                    <div className="flex justify-between text-[10px] font-mono text-slate-500">
+                      <span>Kilitli Rezerv Havuzu:</span>
+                      <span className="text-slate-300 font-bold">${(stats.profitLockHoldAmount || 0).toFixed(4)} / ${(stats.profitLockThreshold || 5.0).toFixed(2)} USD</span>
+                    </div>
+                    {/* Progress bar to visual threshold */}
+                    <div className="w-full h-1.5 bg-slate-950 rounded-full overflow-hidden border border-slate-900 flex">
+                      <div 
+                        className="h-full bg-gradient-to-r from-amber-500 to-emerald-400 transition-all duration-500"
+                        style={{ width: `${Math.min(100, ((stats.profitLockHoldAmount || 0) / (stats.profitLockThreshold || 5.0)) * 100)}%` }}
+                      ></div>
+                    </div>
+                  </div>
+
+                  <div className="flex justify-between items-center text-[10px] font-mono border-t border-slate-900 pt-1.5">
+                    <span className="text-slate-400 flex items-center gap-1">
+                      <Coins className="w-3 h-3 text-emerald-400" />
+                      Kullanılabilir Net Bakiye:
+                    </span>
+                    <span className="text-emerald-400 font-bold text-xs">${(stats.availableBalance || 0).toFixed(4)} USD</span>
+                  </div>
                 </div>
-                <div className="mt-2 text-[11px] font-mono text-emerald-500/80 flex items-center justify-end gap-2 border-t border-slate-900 pt-2">
-                   <span>Yayınlanan Rapor:</span>
-                   <span className="font-bold">{stats.totalDataInsightsPublished} Adet</span>
+
+                <div className="text-[10px] font-mono text-slate-500 flex items-center justify-between border-t border-slate-900 pt-1.5">
+                   <span className="text-left font-sans text-[9px]">Gas için ana bakiye korunuyor. KECO rezervi kar kilidine dahil edilmiştir.</span>
+                   <span className="font-bold shrink-0">{stats.totalDataInsightsPublished} Rapor</span>
                 </div>
               </div>
             </div>

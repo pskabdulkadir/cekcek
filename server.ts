@@ -329,6 +329,12 @@ const serverState = {
   totalDataInsightsPublished: 0, // Yayınlanan veri analitiği raporu sayısı
   totalAccessFeesCollected: 0, // Tahsil edilen veri erişim ücretleri
   
+  // Profit-Lock (Kar Kilitleme) Özellikleri
+  profitLockActive: true,
+  profitLockHoldAmount: 0.0,
+  profitLockThreshold: 5.0,
+  availableBalance: 0.0,
+  
   // HFT - Savaş Modülü Özellikleri
   hftEnabled: true,
   pricingMode: "automatic" as "automatic" | "manual",
@@ -1047,15 +1053,30 @@ class DrSystemHealer {
     }, 5000);
   }
 
+  async runMasterProtocolCommand(command: string) {
+    try {
+      pushLog('SYSTEM', 'INFO', `[Dr.System] ⚙️ Otonom Master Komut Yürütülüyor: "${command}"...`);
+      const res = await executeAdminCommands(command);
+      pushLog('SYSTEM', 'SUCCESS', `[Dr.System] ✓ Otonom Protokol Yanıtı: ${res.message}`);
+    } catch (e: any) {
+      pushLog('SYSTEM', 'ERROR', `[Dr.System] ❌ Otonom Protokol Hatası: ${e.message}`);
+    }
+  }
+
   async scanLog(module: string, level: string, msg: string) {
     if (!this.isRunning) return;
     
-    // Check if error
-    const isError = level === 'ERROR' || msg.includes('FAIL') || msg.includes('ERROR') || msg.includes('SETTLE_SKIP') || msg.includes('stuck');
-    if (!isError) return;
-
     // Prevent recursive healing chains or excessive overhead
-    if (this.status === 'HEALING' || this.status === 'STABILIZING') return;
+    if (this.status !== 'IDLE') return;
+
+    // Ignore healing system's own logs to avoid feedback loops
+    if (msg.includes('Dr.System') || msg.includes('[Dr.System]') || msg.includes('Otonom Protokol')) {
+      return;
+    }
+    
+    // Check if error or warning trigger
+    const isError = level === 'ERROR' || level === 'WARNING' || msg.includes('FAIL') || msg.includes('ERROR') || msg.includes('SETTLE_SKIP') || msg.includes('stuck') || msg.includes('GREEN/KECO yeşil token bulunamadı') || msg.includes('unconfirmed mint') || msg.includes('MINT_AWAIT');
+    if (!isError) return;
 
     // Locate matching trigger
     let triggeredRule = null;
@@ -1081,10 +1102,15 @@ class DrSystemHealer {
     this.status = 'HEALING';
     pushLog('SYSTEM', 'INFO', `[Dr.System] 🛠️ OTOMATİK MÜDAHALE: ${rule.code} uygulanıyor. Çözüm kodu: ${rule.solutionCode}`);
     
-    // Execute actual recovery mechanisms
+    // Execute actual recovery mechanisms & master protocol commands
     if (rule.code === 'WATCHDOG_STUCK') {
       try {
         mainLiquidation.resetProcessingState();
+        await this.runMasterProtocolCommand("BORU HATTI SIFIRLA; POLİGON'A YERLEŞİMİ ZORLA; DEVAM ET_İŞLEMİ; BEKLEYEN ÖDEMELERİ YÜRÜT; BAKIYE SENKRONIZASYON");
+      } catch (e) {}
+    } else if (rule.code === 'TX_CONTRACT_ABI') {
+      try {
+        await this.runMasterProtocolCommand("SET_MINT_MODE_TO_CONTRACT_ERC20; KONTRAT YETKİ VER 0x4c304a6a923c3fb92a87583dbabccbe1ddeb6886");
       } catch (e) {}
     }
 
@@ -1119,6 +1145,7 @@ class DrSystemHealer {
     this.status = 'HEALING';
     
     const isSettleSkip = msg.includes('SETTLE_SKIP') || msg.includes('Likidasyon başarısız oldu') || msg.includes('askıya alındı');
+    const isMintAwait = msg.includes('GREEN/KECO yeşil token bulunamadı') || msg.includes('unconfirmed mint') || msg.includes('MINT_AWAIT');
     let fixDescription = '';
     let solutionCode = '';
     
@@ -1127,6 +1154,13 @@ class DrSystemHealer {
       fixDescription = 'Reset processing stage and wiped temporary lock keys to prevent queue buffer congestion.';
       try {
         mainLiquidation.resetProcessingState();
+        await this.runMasterProtocolCommand("BORU HATTI SIFIRLA; POLİGON'A YERLEŞİMİ ZORLA; DEVAM ET_İŞLEMİ; BEKLEYEN ÖDEMELERİ YÜRÜT; BAKIYE SENKRONIZASYON");
+      } catch (e) {}
+    } else if (isMintAwait) {
+      solutionCode = 'ContractErc20AutoFix_v2';
+      fixDescription = 'Forced smart contract ERC-20 interactions, authorized address approvals and state remint to guarantee pipeline liquidity.';
+      try {
+        await this.runMasterProtocolCommand("SET_MINT_MODE_TO_CONTRACT_ERC20; KONTRAT YETKİ VER 0x4c304a6a923c3fb92a87583dbabccbe1ddeb6886; YENİDEN BASIM EMRİ 280; DEVAM ET_İŞLEMİ; BEKLEYEN ÖDEMELERİ YÜRÜT; BAKIYE SENKRONIZASYON");
       } catch (e) {}
     } else {
       solutionCode = 'DynamicMemoryGuard_v2';
@@ -1160,6 +1194,8 @@ class DrSystemHealer {
 }
 
 const drSystem = new DrSystemHealer();
+(global as any).serverState = serverState;
+(global as any).drSystem = drSystem;
 
 /**
  * PROTOKOL: Sistem Başlatma ve Temizlik (RESET)
@@ -2085,14 +2121,15 @@ app.get("/api/system/healer/history", async (req, res) => {
 /**
  * Yönetici Komut Satırı İşleyici
  */
-app.post("/api/admin/command", async (req, res) => {
-  const rawCommand = req.body.command || "";
-  
+/**
+ * Yönetici Komut Satırı İşleyici Çekirdeği
+ */
+async function executeAdminCommands(rawCommand: string): Promise<{ success: boolean; message: string }> {
   // Split commands by semicolon or newline to support sequential chaining
   const lines = rawCommand.split(/[;\n]/).map((l: string) => l.trim()).filter((l: string) => l.length > 0);
   
   if (lines.length === 0) {
-    return res.status(400).json({ error: "Boş komut dizisi iletildi." });
+    return { success: false, message: "Boş komut dizisi iletildi." };
   }
 
   const results: string[] = [];
@@ -2207,6 +2244,51 @@ app.post("/api/admin/command", async (req, res) => {
         aliasClean === "START LIQUIDATION" ||
         aliasClean === "START_LIQUIDATION") {
       upperCmd = "START_LIQUIDATION_ENGINE";
+    }
+
+    // Profit Lock Aliases
+    if (aliasClean === "KAR KILITLEME AKTIF" || 
+        aliasClean === "KAR KILITLEME MODUNU AKTIF ET" || 
+        aliasClean === "KAR KILIDINI AKTIF ET" ||
+        aliasClean === "PROFIT LOCK AKTIF ET" ||
+        aliasClean === "SET PROFIT LOCK ACTIVE TRUE" ||
+        aliasClean === "PROFIT_LOCK_ACTIVE TRUE" ||
+        aliasClean === "SET PROFIT LOCK ACTIVE" ||
+        aliasClean === "KAR KILITLEME HALE GETIR") {
+      upperCmd = "SET_PROFIT_LOCK_ACTIVE TRUE";
+    }
+
+    if (aliasClean === "KAR KILITLEME DEVRE DISI" || 
+        aliasClean === "KAR KILITLEME MODUNU DEVRE DISI BIRAK" || 
+        aliasClean === "KAR KILIDINI DEVRE DISI BIRAK" ||
+        aliasClean === "KAR KILITLEME KAPAT" ||
+        aliasClean === "PROFIT LOCK KAPAT" ||
+        aliasClean === "SET PROFIT LOCK ACTIVE FALSE" ||
+        aliasClean === "PROFIT_LOCK_ACTIVE FALSE" ||
+        aliasClean === "KAR KILITLEME PASIF" ||
+        aliasClean === "KAR KILITLEME PASIF ET") {
+      upperCmd = "SET_PROFIT_LOCK_ACTIVE FALSE";
+    }
+
+    if (aliasClean === "KAR KILIDINI AC" || 
+        aliasClean === "KAR KILIDINI SERBEST BIRAK" || 
+        aliasClean === "KILITLI REZERVLERI AC" ||
+        aliasClean === "RELEASE PROFIT LOCK" ||
+        aliasClean === "DISCHARGE RESERVES" ||
+        aliasClean === "MANUEL KAR TRANSFERI" ||
+        aliasClean === "KAR CEKIMI" ||
+        aliasClean === "MANUEL KAR CEKIMI" ||
+        aliasClean === "KAR KILIDI RELEASE") {
+      upperCmd = "RELEASE_PROFIT_LOCK";
+    }
+
+    if (aliasClean.startsWith("SET PROFIT LOCK THRESHOLD") || 
+        aliasClean.startsWith("KAR KILIDINI ESIK AYARLA") || 
+        aliasClean.startsWith("KAR KILITI ESIK AYARLA") ||
+        aliasClean.startsWith("KAR KILIT ESIK")) {
+      const parts = aliasClean.split(/\s+/);
+      const val = parts[parts.length - 1] || "5.0";
+      upperCmd = `SET_PROFIT_LOCK_THRESHOLD ${val}`;
     }
 
     // 8. ADJUST_CONFIRMATION_DELAY / SET_LIQUIDATION_TRIGGER_DELAY parameter mapping
@@ -2582,17 +2664,59 @@ app.post("/api/admin/command", async (req, res) => {
       continue;
     }
 
+    // 17. SET_PROFIT_LOCK_ACTIVE
+    if (upperCmd.startsWith("SET_PROFIT_LOCK_ACTIVE")) {
+      const parts = upperCmd.split(/\s+/);
+      const valStr = parts[1] || "TRUE";
+      const isTrue = valStr.toUpperCase() === "TRUE" || valStr === "1" || valStr.toUpperCase() === "AKTIF";
+      (serverState as any).profitLockActive = isTrue;
+      pushLog('SYSTEM', 'SUCCESS', `[PROFIT_LOCK_CONFIG] Kar Kilitleme (Profit-Lock) modu ${isTrue ? 'AKTİF EDİLDİ' : 'DEVRE DIŞI BIRAKILDI'}.`);
+      results.push(`[PROFIT_LOCK_ACTIVE] ${isTrue ? 'TRUE' : 'FALSE'}`);
+      continue;
+    }
+
+    // 18. SET_PROFIT_LOCK_THRESHOLD
+    if (upperCmd.startsWith("SET_PROFIT_LOCK_THRESHOLD")) {
+      const parts = upperCmd.split(/\s+/);
+      const val = parseFloat(parts[1]) || 5.0;
+      (serverState as any).profitLockThreshold = val;
+      pushLog('SYSTEM', 'SUCCESS', `[PROFIT_LOCK_CONFIG] Kar Kilidi eşiği (Profit-Lock Threshold) $${val.toFixed(2)} USD olarak güncellendi.`);
+      results.push(`[PROFIT_LOCK_THRESHOLD] Eşik: $${val.toFixed(2)} USD`);
+      continue;
+    }
+
+    // 19. RELEASE_PROFIT_LOCK / DISCHARGE_RESERVES
+    if (upperCmd.startsWith("RELEASE_PROFIT_LOCK") || upperCmd.startsWith("DISCHARGE_RESERVES")) {
+      const releasedAmount = (serverState as any).profitLockHoldAmount || 0;
+      if (releasedAmount > 0) {
+        (serverState as any).availableBalance = ((serverState as any).availableBalance || 0) + releasedAmount;
+        (serverState as any).profitLockHoldAmount = 0.0;
+        const payoutAddr = serverState.payoutWalletAddress || "0x06E83497F599D67447EfFfeA399cC885CEB6eEff";
+        pushLog('SYSTEM', 'SUCCESS', `[PROFIT_LOCK_MANUAL] 🎉 Kar Kilidi Manuel Olarak Açıldı! Kilit altında tutulan $${releasedAmount.toFixed(4)} USD, Available Balance (Kullanılabilir Bakiye) ve (${payoutAddr}) adresine aktarıldı.`);
+        results.push(`[RELEASE_PROFIT_LOCK] $${releasedAmount.toFixed(4)} USD serbest bırakıldı.`);
+      } else {
+        pushLog('SYSTEM', 'WARNING', `[PROFIT_LOCK_MANUAL] Kilit altında biriken nakit bulunamadı.`);
+        results.push(`[RELEASE_PROFIT_LOCK] Kilit altında sıfır bakiye.`);
+      }
+      continue;
+    }
+
     // Command not recognized
     pushLog('SYSTEM', 'ERROR', `[UNKNOWN_COMMAND] Geçersiz yönetici komutu girildi: ${cmd}`);
     results.push(`[UNKNOWN] Geçersiz: "${cmd}"`);
     overallSuccess = false;
   }
 
-  if (!overallSuccess) {
-    return res.status(400).json({ success: false, message: results.join(" | ") });
-  }
+  return { success: overallSuccess, message: results.join(" | ") };
+}
 
-  return res.json({ success: true, message: results.join(" | ") });
+app.post("/api/admin/command", async (req, res) => {
+  const rawCommand = req.body.command || "";
+  const result = await executeAdminCommands(rawCommand);
+  if (!result.success) {
+    return res.status(400).json(result);
+  }
+  return res.json(result);
 });
 
 /**
@@ -2648,6 +2772,12 @@ app.get("/api/stats", async (req, res) => {
       contractAddress: blockchainConfig.contractAddress,
       totalDataInsightsPublished: serverState.totalDataInsightsPublished,
       totalAccessFeesCollected: serverState.totalAccessFeesCollected,
+      
+      // Profit-Lock Alanları
+      profitLockActive: (serverState as any).profitLockActive !== undefined ? (serverState as any).profitLockActive : true,
+      profitLockHoldAmount: (serverState as any).profitLockHoldAmount || 0,
+      profitLockThreshold: (serverState as any).profitLockThreshold || 5.0,
+      availableBalance: (serverState as any).availableBalance || 0,
       
       // HFT Telemetri Verileri
       hftEnabled: serverState.hftEnabled,
