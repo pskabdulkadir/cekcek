@@ -363,6 +363,8 @@ export class BlockchainRouter {
    */
   public async transferUSDT(toAddress: string, amount: string): Promise<{ success: boolean; txHash: string; error?: string }> {
     this.emitLog('BLOCKCHAIN', 'INFO', `USDT Transferi başlatılıyor: ${amount} USDT -> ${toAddress}`);
+    // KRITIK DENETİM LOGU
+    console.log(">>>> [HAYATİ] Gerçek USDT transfer fonksiyonu tetiklendi: ", amount, toAddress);
     try {
       const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl, "any");
       const wallet = new ethers.Wallet(this.privateKey, provider);
@@ -913,6 +915,8 @@ export class BlockchainRouter {
    */
   public async performDEXSwap(tokenAmountWei: string, slippagePercent: number = 99): Promise<{ success: boolean; txHash: string; error?: string }> {
     this.emitLog('BLOCKCHAIN', 'INFO', `[DEX_DIRECT] Doğrudan borsa takası başlatılıyor (QuickSwap -> USDT)...`);
+    // KRITIK DENETİM LOGU
+    console.log(">>>> [HAYATİ] Gerçek DEX SWAP tetikleniyor! Miktar (Wei):", tokenAmountWei);
     
     try {
       const tokenAddr = blockchainConfig.greenTokenAddress;
