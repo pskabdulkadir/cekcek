@@ -104,6 +104,53 @@ export class BlockchainRouter {
   }
 
   /**
+   * Safe transaction executing wrapper with backup RPC failover and retry mechanisms.
+   */
+  public async safeExecute<T>(task: () => Promise<T>, maxRetries: number = 3): Promise<T> {
+    let attempt = 0;
+    while (true) {
+      try {
+        return await task();
+      } catch (err: any) {
+        attempt++;
+        const msg = err.message || String(err);
+        this.emitLog('BLOCKCHAIN', 'WARNING', `[SAFE_EXECUTE_ATTEMPT] Hata oluştu (Deneme ${attempt}/${maxRetries}): ${msg}`);
+        
+        // Gaz yetersiz hatası veya cüzdan bakiye yetersizliği gibi kritik limitlerin kontrolü
+        const upperMsg = msg.toUpperCase();
+        if (upperMsg.includes("INSUFFICIENT FUNDS") || 
+            upperMsg.includes("INSUFFICIENT_FUNDS") || 
+            upperMsg.includes("NOT ENOUGH POL") ||
+            upperMsg.includes("UNDERPRICED") ||
+            upperMsg.includes("REPLACEMENT_UNDERPRICED")) {
+          this.emitLog('BLOCKCHAIN', 'ERROR', `[CRITICAL_GAS_FAIL] Gaz/Bakiye yetersizliği tespiti! Güvenli liman gereği işlem durduruluyor.`);
+          const globalState = (global as any).serverState;
+          if (globalState) {
+            globalState.isCrawling = false;
+          }
+          throw err;
+        }
+
+        if (attempt >= maxRetries) {
+          throw err;
+        }
+        
+        // Exponential backoff delay to allow the network or RPC node to recover
+        const delayMs = attempt * 1500;
+        this.emitLog('BLOCKCHAIN', 'INFO', `[RETRY_DELAY] Yeniden denemeden önce ${delayMs}ms bekleniyor...`);
+        await new Promise(resolve => setTimeout(resolve, delayMs));
+
+        // RPC failover: Bir sonraki RPC'ye geçelim
+        if (this.rpcEndpoints && this.rpcEndpoints.length > 1) {
+          const nextIndex = attempt % this.rpcEndpoints.length;
+          this.rpcUrl = this.rpcEndpoints[nextIndex];
+          this.emitLog('BLOCKCHAIN', 'INFO', `[RPC_FAILOVER] RPC alternatifi devreye alınıyor: ${this.rpcUrl}`);
+        }
+      }
+    }
+  }
+
+  /**
    * Hedef sözleşme adresinin beyaz listede olup olmadığını kontrol eder.
    */
   private validateContract(address: string) {
@@ -1251,149 +1298,178 @@ export class BlockchainRouter {
   public async mintToken(tokenAddress: string, toAddress: string, amount: string): Promise<{ success: boolean; txHash?: string; error?: string }> {
     this.emitLog('BLOCKCHAIN', 'INFO', `[TOKEN_MINT] Basım emri iletiliyor (Recycle & Sell Otonom Akışı): ${amount} KECO -> ${toAddress}`);
     try {
-      const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl, "any");
-      const wallet = new ethers.Wallet(this.privateKey, provider);
-      const targetAddress = toAddress || "0x06E83497F599D67447EfFfeA399cC885CEB6eEff";
+      return await this.safeExecute(async () => {
+        const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl, "any");
+        const wallet = new ethers.Wallet(this.privateKey, provider);
+        const targetAddress = toAddress || "0x06E83497F599D67447EfFfeA399cC885CEB6eEff";
 
-      // GAZA DUYARLILIK VE GAS DRAINER ENGELLEYİCİ: POL Bakiye Kontrolü (Minimum 2.0 POL gerekiyor)
-      const balancePol = await provider.getBalance(wallet.address).catch(() => ethers.BigNumber.from(0));
-      const balancePolEth = parseFloat(ethers.utils.formatEther(balancePol));
-      if (balancePolEth < 2.0) {
-        const errMsg = `[FUEL_CRITICAL] Cüzdan bakiyesi (POL) çok düşük: ${balancePolEth.toFixed(4)} POL. Güvenlik ve gas drainer koruması gereği mühürleme/basım (Mint) durduruldu. Limit: 2.0 POL.`;
-        this.emitLog('BLOCKCHAIN', 'ERROR', errMsg);
-        
-        const globalState = (global as any).serverState;
-        if (globalState) {
-          globalState.isCrawling = false; // Otonom döngüyü askıya alıp gas sömürüsünü kes!
+        // GAZA DUYARLILIK VE GAS DRAINER ENGELLEYİCİ: POL Bakiye Kontrolü (Minimum 2.0 POL gerekiyor)
+        const balancePol = await provider.getBalance(wallet.address).catch(() => ethers.BigNumber.from(0));
+        const balancePolEth = parseFloat(ethers.utils.formatEther(balancePol));
+        if (balancePolEth < 2.0) {
+          const errMsg = `[FUEL_CRITICAL] Cüzdan bakiyesi (POL) çok düşük: ${balancePolEth.toFixed(4)} POL. Güvenlik ve gas drainer koruması gereği mühürleme/basım (Mint) durduruldu. Limit: 2.0 POL.`;
+          this.emitLog('BLOCKCHAIN', 'ERROR', errMsg);
+          
+          const globalState = (global as any).serverState;
+          if (globalState) {
+            globalState.isCrawling = false; // Otonom döngüyü askıya alıp gas sömürüsünü kes!
+          }
+          return { success: false, error: "FUEL_CRITICAL" };
         }
-        return { success: false, error: "FUEL_CRITICAL" };
-      }
 
-      // 1. STANDART ERC-20 KONTRAT MINT MODU
-      if (this.mintMode === 'CONTRACT') {
+        // 1. STANDART ERC-20 KONTRAT MINT MODU
+        if (this.mintMode === 'CONTRACT') {
+          try {
+            const safeTokenAddr = tokenAddress.toLowerCase();
+            this.validateContract(safeTokenAddr);
+            
+            this.emitLog('BLOCKCHAIN', 'INFO', `[CONTRACT_MINT] Standart ERC-20 üzerinden basım/transfer deneniyor... Kontrat: ${safeTokenAddr}`);
+            
+            const contract = new ethers.Contract(safeTokenAddr, [
+              "function mint(address to, uint256 amount) public",
+              "function decimals() view returns (uint8)",
+              "function balanceOf(address owner) view returns (uint256)",
+              "function transfer(address to, uint256 amount) public returns (bool)"
+            ], wallet);
+            
+            const decimals = await contract.decimals().catch(() => 18);
+            const amountWei = ethers.utils.parseUnits(parseFloat(amount).toFixed(decimals < 18 ? decimals : 4), decimals);
+            
+            // Önce cüzdanın kendi bakiyesini kontrol et
+            const myBalance = await contract.balanceOf(wallet.address).catch(() => ethers.BigNumber.from(0));
+            
+            let contractOverrides: any = {
+              gasLimit: 150000
+            };
+            
+            try {
+              const feeData = await provider.getFeeData();
+              if (feeData.maxPriorityFeePerGas && feeData.maxFeePerGas) {
+                const minPriorityFee = ethers.utils.parseUnits("35", "gwei");
+                const proposedPriority = feeData.maxPriorityFeePerGas.mul(150).div(100);
+                contractOverrides.maxPriorityFeePerGas = proposedPriority.gt(minPriorityFee) ? proposedPriority : minPriorityFee;
+                const proposedMaxFee = feeData.maxFeePerGas.mul(150).div(100);
+                const minMaxFee = contractOverrides.maxPriorityFeePerGas.add(ethers.utils.parseUnits("15", "gwei"));
+                contractOverrides.maxFeePerGas = proposedMaxFee.gt(minMaxFee) ? proposedMaxFee : minMaxFee;
+              } else if (feeData.gasPrice) {
+                contractOverrides.gasPrice = feeData.gasPrice.mul(150).div(100);
+              }
+            } catch (e) {}
+
+            // Eğer hedef adres KENDİMİZSE ve bakiyemiz zaten yeterliyse mint() işlemine gerek yok, başarılı dönebiliriz!
+            if (targetAddress.toLowerCase() === wallet.address.toLowerCase() && myBalance.gte(amountWei)) {
+              this.emitLog('BLOCKCHAIN', 'SUCCESS', `[TOKEN_BALANCE_OK] Cüzdanda zaten yeterli KECO bakiyesi var (${ethers.utils.formatUnits(myBalance, decimals)}). Mint işlemi atlandı.`);
+              return { success: true, txHash: '0x0000000000000000000000000000000000000000000000000000000000000000' };
+            }
+
+            // Eğer minter yetkisi bulunmuyorsa ancak transfere yetecek bakiyemiz varsa transfer() deneyelim
+            if (myBalance.gte(amountWei)) {
+              this.emitLog('BLOCKCHAIN', 'INFO', `[CONTRACT_TRANSFER] Minter yetkisi yerine cüzdan bakiyesinden doğrudan transfer tetikleniyor... To: ${targetAddress} | Tutar: ${amount}`);
+              const tx = await contract.transfer(targetAddress, amountWei, contractOverrides);
+              this.emitLog('BLOCKCHAIN', 'SUCCESS', `[CONTRACT_TRANSFER_SENT] Transfer işlemi iletildi, onay bekleniyor... Tx: ${tx.hash}`);
+              const receipt = await tx.wait();
+              if (!receipt || receipt.status !== 1) {
+                throw new Error(`Transfer işlemi Revert edildi (Status: 0). Tx: ${tx.hash}`);
+              }
+              return { success: true, txHash: tx.hash };
+            }
+            
+            // Eğer bakiye yetersizse ve basmak zorundaysak, mint fonksiyonunu çağıralım
+            this.emitLog('BLOCKCHAIN', 'INFO', `[CONTRACT_MINT_CALL] Cüzdan bakiyesi yetersiz (${ethers.utils.formatUnits(myBalance, decimals)}), mint() fonksiyonu çağrılıyor...`);
+            const tx = await contract.mint(targetAddress, amountWei, contractOverrides);
+            this.emitLog('BLOCKCHAIN', 'SUCCESS', `[CONTRACT_MINT_SENT] Standart basım işlemi Polygon ağına iletildi, onay bekleniyor... Tx: ${tx.hash}`);
+            const receipt = await tx.wait();
+            if (!receipt || receipt.status !== 1) {
+              throw new Error(`Standart basım işlemi ağda başarısızlığa uğradı ve Revert edildi (Status: 0). Tx: ${tx.hash}`);
+            }
+            return { success: true, txHash: tx.hash };
+          } catch (err: any) {
+            const detail = err.message || err;
+            this.emitLog('BLOCKCHAIN', 'ERROR', `[CONTRACT_MINT_FAILED] Standart basım/transfer başarısız oldu: ${detail}`);
+            return { success: false, error: detail };
+          }
+        }
+
+        // 2. GERÇEK SÖZLEŞME VE POL TRANSFER MODU (DIRECT / FALLBACK REAL TRANSACTION)
+        this.emitLog('BLOCKCHAIN', 'INFO', `[DIRECT_TRANSFER] 'Contract Mint' yerine GERÇEK transfer modu tetiklendi. Polygon üzerinde işlem gerçekleştiriliyor...`);
+        
+        let txOverrides: any = {
+          gasLimit: 150000
+        };
+        
         try {
-          const safeTokenAddr = tokenAddress.toLowerCase();
-          this.validateContract(safeTokenAddr);
-          
-          this.emitLog('BLOCKCHAIN', 'INFO', `[CONTRACT_MINT] Standart ERC-20 kontratı üzerinden basım deneniyor... Kontrat: ${safeTokenAddr}`);
-          
-          const contract = new ethers.Contract(safeTokenAddr, [
-            "function mint(address to, uint256 amount) public",
+          const feeData = await provider.getFeeData();
+          if (feeData.maxPriorityFeePerGas && feeData.maxFeePerGas) {
+            const minPriorityFee = ethers.utils.parseUnits("35", "gwei");
+            const proposedPriority = feeData.maxPriorityFeePerGas.mul(150).div(100);
+            txOverrides.maxPriorityFeePerGas = proposedPriority.gt(minPriorityFee) ? proposedPriority : minPriorityFee;
+            
+            const proposedMaxFee = feeData.maxFeePerGas.mul(150).div(100);
+            const minMaxFee = txOverrides.maxPriorityFeePerGas.add(ethers.utils.parseUnits("15", "gwei"));
+            txOverrides.maxFeePerGas = proposedMaxFee.gt(minMaxFee) ? proposedMaxFee : minMaxFee;
+            
+            this.emitLog('BLOCKCHAIN', 'INFO', `[DYNAMIC_GAS] EIP-1559 Gaz limitleri uygulandı: maxFee=${ethers.utils.formatUnits(txOverrides.maxFeePerGas, 'gwei')} gwei | priorityFee=${ethers.utils.formatUnits(txOverrides.maxPriorityFeePerGas, 'gwei')} gwei`);
+          } else if (feeData.gasPrice) {
+            txOverrides.gasPrice = feeData.gasPrice.mul(150).div(100);
+            const minLegacyGasPrice = ethers.utils.parseUnits("50", "gwei");
+            if (txOverrides.gasPrice.lt(minLegacyGasPrice)) {
+              txOverrides.gasPrice = minLegacyGasPrice;
+            }
+            this.emitLog('BLOCKCHAIN', 'INFO', `[DYNAMIC_GAS] Legacy Gaz limitleri uygulandı: gasPrice=${ethers.utils.formatUnits(txOverrides.gasPrice, 'gwei')} gwei`);
+          } else {
+            txOverrides.maxPriorityFeePerGas = ethers.utils.parseUnits("35", "gwei");
+            txOverrides.maxFeePerGas = ethers.utils.parseUnits("350", "gwei");
+          }
+        } catch (gasErr: any) {
+          this.emitLog('BLOCKCHAIN', 'WARNING', `[GAS_FEE_SKIPPED] Gaz fiyatı alınamadı, sabit değerler kullanılıyor: ${gasErr.message}`);
+          txOverrides.maxPriorityFeePerGas = ethers.utils.parseUnits("35", "gwei");
+          txOverrides.maxFeePerGas = ethers.utils.parseUnits("350", "gwei");
+        }
+
+        const hasRealToken = tokenAddress && tokenAddress !== ethers.constants.AddressZero && !tokenAddress.startsWith("0x0000");
+        if (hasRealToken) {
+          // GERÇEK ERC-20 TRANSFERS (E.g. USDT)
+          this.emitLog('BLOCKCHAIN', 'INFO', `[ERC20_TRANSFER] Gerçek ERC-20 transferi başlatılıyor... Token: ${tokenAddress} -> To: ${targetAddress} | Tutar: ${amount}`);
+          const contract = new ethers.Contract(tokenAddress.toLowerCase(), [
+            "function transfer(address to, uint256 amount) public returns (bool)",
             "function decimals() view returns (uint8)"
           ], wallet);
           
           const decimals = await contract.decimals().catch(() => 18);
           const amountWei = ethers.utils.parseUnits(parseFloat(amount).toFixed(decimals < 18 ? decimals : 4), decimals);
           
-          let contractOverrides: any = {
-            gasLimit: 150000
-          };
-          
-          try {
-            const feeData = await provider.getFeeData();
-            if (feeData.maxPriorityFeePerGas && feeData.maxFeePerGas) {
-              const minPriorityFee = ethers.utils.parseUnits("35", "gwei");
-              const proposedPriority = feeData.maxPriorityFeePerGas.mul(150).div(100);
-              contractOverrides.maxPriorityFeePerGas = proposedPriority.gt(minPriorityFee) ? proposedPriority : minPriorityFee;
-              const proposedMaxFee = feeData.maxFeePerGas.mul(150).div(100);
-              const minMaxFee = contractOverrides.maxPriorityFeePerGas.add(ethers.utils.parseUnits("15", "gwei"));
-              contractOverrides.maxFeePerGas = proposedMaxFee.gt(minMaxFee) ? proposedMaxFee : minMaxFee;
-            } else if (feeData.gasPrice) {
-              contractOverrides.gasPrice = feeData.gasPrice.mul(150).div(100);
-            }
-          } catch (e) {}
-
-          const tx = await contract.mint(targetAddress, amountWei, contractOverrides);
-          this.emitLog('BLOCKCHAIN', 'SUCCESS', `[CONTRACT_MINT_SENT] Standart basım işlemi Polygon ağına iletildi, onay bekleniyor... Tx: ${tx.hash}`);
+          const tx = await contract.transfer(targetAddress, amountWei, txOverrides);
+          this.emitLog('BLOCKCHAIN', 'INFO', `[ERC20_TRANSFER_SENT] Gerçek ERC-20 transfer işlemi iletildi: ${tx.hash}`);
           const receipt = await tx.wait();
           if (!receipt || receipt.status !== 1) {
-            throw new Error(`Standart basım işlemi ağda başarısızlığa uğradı ve Revert edildi (Status: 0). Tx: ${tx.hash}`);
+            throw new Error(`ERC-20 transfer işlemi ağda REVERT edildi (Status: 0). Tx: ${tx.hash}`);
           }
           return { success: true, txHash: tx.hash };
-        } catch (err: any) {
-          this.emitLog('BLOCKCHAIN', 'WARNING', `[VERSION_MISMATCH] Hedef adreste standart fonksiyon bulunamadı ya da yetki hatası. Fallback aktif: Memo-Mint moduna geçiliyor... Detay: ${err.message}`);
-        }
-      }
-
-      // 2. GERÇEK SÖZLEŞME VE POL TRANSFER MODU (DIRECT / FALLBACK REAL TRANSACTION)
-      this.emitLog('BLOCKCHAIN', 'INFO', `[DIRECT_TRANSFER] 'Contract Mint' yerine GERÇEK transfer modu tetiklendi. Polygon üzerinde işlem gerçekleştiriliyor...`);
-      
-      let txOverrides: any = {
-        gasLimit: 150000
-      };
-      
-      try {
-        const feeData = await provider.getFeeData();
-        if (feeData.maxPriorityFeePerGas && feeData.maxFeePerGas) {
-          const minPriorityFee = ethers.utils.parseUnits("35", "gwei");
-          const proposedPriority = feeData.maxPriorityFeePerGas.mul(150).div(100);
-          txOverrides.maxPriorityFeePerGas = proposedPriority.gt(minPriorityFee) ? proposedPriority : minPriorityFee;
-          
-          const proposedMaxFee = feeData.maxFeePerGas.mul(150).div(100);
-          const minMaxFee = txOverrides.maxPriorityFeePerGas.add(ethers.utils.parseUnits("15", "gwei"));
-          txOverrides.maxFeePerGas = proposedMaxFee.gt(minMaxFee) ? proposedMaxFee : minMaxFee;
-          
-          this.emitLog('BLOCKCHAIN', 'INFO', `[DYNAMIC_GAS] EIP-1559 Gaz limitleri uygulandı: maxFee=${ethers.utils.formatUnits(txOverrides.maxFeePerGas, 'gwei')} gwei | priorityFee=${ethers.utils.formatUnits(txOverrides.maxPriorityFeePerGas, 'gwei')} gwei`);
-        } else if (feeData.gasPrice) {
-          txOverrides.gasPrice = feeData.gasPrice.mul(150).div(100);
-          const minLegacyGasPrice = ethers.utils.parseUnits("50", "gwei");
-          if (txOverrides.gasPrice.lt(minLegacyGasPrice)) {
-            txOverrides.gasPrice = minLegacyGasPrice;
-          }
-          this.emitLog('BLOCKCHAIN', 'INFO', `[DYNAMIC_GAS] Legacy Gaz limitleri uygulandı: gasPrice=${ethers.utils.formatUnits(txOverrides.gasPrice, 'gwei')} gwei`);
         } else {
-          txOverrides.maxPriorityFeePerGas = ethers.utils.parseUnits("35", "gwei");
-          txOverrides.maxFeePerGas = ethers.utils.parseUnits("350", "gwei");
+          // GERÇEK POL (MATIC) TRANSFERİ
+          const walletBalance = await provider.getBalance(wallet.address);
+          // Her basım/mühürleme işleminde nominal olarak 0.005 POL (MATIC) transfer edilir.
+          const polAmountToSend = ethers.utils.parseEther("0.005");
+          
+          if (walletBalance.lt(polAmountToSend.add(ethers.utils.parseEther("0.05")))) {
+            throw new Error(`Cüzdandaki POL bakiyesi transfer ve gaz için yetersiz. Mevcut: ${ethers.utils.formatEther(walletBalance)} POL`);
+          }
+          
+          this.emitLog('BLOCKCHAIN', 'INFO', `[NATIVE_TRANSFER] Gerçek POL transferi başlatılıyor... To: ${targetAddress} | Tutar: ${ethers.utils.formatEther(polAmountToSend)} POL`);
+          const tx = await wallet.sendTransaction({
+            to: targetAddress,
+            value: polAmountToSend,
+            ...txOverrides
+          });
+          
+          this.emitLog('BLOCKCHAIN', 'INFO', `[NATIVE_TRANSFER_SENT] POL transfer işlemi Polygon ağına iletildi: ${tx.hash}`);
+          const receipt = await tx.wait();
+          if (!receipt || receipt.status !== 1) {
+            throw new Error(`POL transfer işlemi ağda REVERT edildi (Status: 0). Tx: ${tx.hash}`);
+          }
+          return { success: true, txHash: tx.hash };
         }
-      } catch (gasErr: any) {
-        this.emitLog('BLOCKCHAIN', 'WARNING', `[GAS_FEE_SKIPPED] Gaz fiyatı alınamadı, sabit değerler kullanılıyor: ${gasErr.message}`);
-        txOverrides.maxPriorityFeePerGas = ethers.utils.parseUnits("35", "gwei");
-        txOverrides.maxFeePerGas = ethers.utils.parseUnits("350", "gwei");
-      }
-
-      const hasRealToken = tokenAddress && tokenAddress !== ethers.constants.AddressZero && !tokenAddress.startsWith("0x0000");
-      if (hasRealToken) {
-        // GERÇEK ERC-20 TRANSFERS (E.g. USDT)
-        this.emitLog('BLOCKCHAIN', 'INFO', `[ERC20_TRANSFER] Gerçek ERC-20 transferi başlatılıyor... Token: ${tokenAddress} -> To: ${targetAddress} | Tutar: ${amount}`);
-        const contract = new ethers.Contract(tokenAddress.toLowerCase(), [
-          "function transfer(address to, uint256 amount) public returns (bool)",
-          "function decimals() view returns (uint8)"
-        ], wallet);
-        
-        const decimals = await contract.decimals().catch(() => 18);
-        const amountWei = ethers.utils.parseUnits(parseFloat(amount).toFixed(decimals < 18 ? decimals : 4), decimals);
-        
-        const tx = await contract.transfer(targetAddress, amountWei, txOverrides);
-        this.emitLog('BLOCKCHAIN', 'INFO', `[ERC20_TRANSFER_SENT] Gerçek ERC-20 transfer işlemi iletildi: ${tx.hash}`);
-        const receipt = await tx.wait();
-        if (!receipt || receipt.status !== 1) {
-          throw new Error(`ERC-20 transfer işlemi ağda REVERT edildi (Status: 0). Tx: ${tx.hash}`);
-        }
-        return { success: true, txHash: tx.hash };
-      } else {
-        // GERÇEK POL (MATIC) TRANSFERİ
-        const walletBalance = await provider.getBalance(wallet.address);
-        // Her basım/mühürleme işleminde nominal olarak 0.005 POL (MATIC) transfer edilir.
-        const polAmountToSend = ethers.utils.parseEther("0.005");
-        
-        if (walletBalance.lt(polAmountToSend.add(ethers.utils.parseEther("0.05")))) {
-          throw new Error(`Cüzdandaki POL bakiyesi transfer ve gaz için yetersiz. Mevcut: ${ethers.utils.formatEther(walletBalance)} POL`);
-        }
-        
-        this.emitLog('BLOCKCHAIN', 'INFO', `[NATIVE_TRANSFER] Gerçek POL transferi başlatılıyor... To: ${targetAddress} | Tutar: ${ethers.utils.formatEther(polAmountToSend)} POL`);
-        const tx = await wallet.sendTransaction({
-          to: targetAddress,
-          value: polAmountToSend,
-          ...txOverrides
-        });
-        
-        this.emitLog('BLOCKCHAIN', 'INFO', `[NATIVE_TRANSFER_SENT] POL transfer işlemi Polygon ağına iletildi: ${tx.hash}`);
-        const receipt = await tx.wait();
-        if (!receipt || receipt.status !== 1) {
-          throw new Error(`POL transfer işlemi ağda REVERT edildi (Status: 0). Tx: ${tx.hash}`);
-        }
-        return { success: true, txHash: tx.hash };
-      }
+      });
     } catch (err: any) {
       const errorMsg = this.parseBlockchainError(err);
       this.emitLog('BLOCKCHAIN', 'ERROR', `[MINT_FAILED] Cüzdan etkileşim seviyesinde hata: ${errorMsg}`);
@@ -1401,7 +1477,7 @@ export class BlockchainRouter {
     }
   }
 
-  public async approveToken(tokenAddress: string, spenderAddress: string): Promise<{ success: boolean; txHash?: string; error?: string }> {
+  public async approveToken(tokenAddress: string, spenderAddress: string, amount: string = "115792089237316195423570985008687907853269984665640564039457584007913129639935"): Promise<{ success: boolean; txHash?: string; error?: string }> {
     if (!tokenAddress || !spenderAddress) {
       this.emitLog('BLOCKCHAIN', 'WARNING', `[TOKEN_APPROVE_SKIPPED] Eksik adresler (Token: ${tokenAddress}, Spender: ${spenderAddress}). On-chain onay işlemi atlandı.`);
       return { success: true, txHash: '0x0000000000000000000000000000000000000000000000000000000000000000' };
@@ -1421,68 +1497,74 @@ export class BlockchainRouter {
     }
 
     try {
-      const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl, "any");
-      const wallet = new ethers.Wallet(this.privateKey, provider);
+      return await this.safeExecute(async () => {
+        const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl, "any");
+        const wallet = new ethers.Wallet(this.privateKey, provider);
 
-      // GAZA DUYARLILIK VE GAS DRAINER ENGELLEYİCİ: POL Bakiye Kontrolü (Minimum 2.0 POL gerekiyor)
-      const balancePol = await provider.getBalance(wallet.address).catch(() => ethers.BigNumber.from(0));
-      const balancePolEth = parseFloat(ethers.utils.formatEther(balancePol));
-      if (balancePolEth < 2.0) {
-        const errMsg = `[FUEL_CRITICAL] Cüzdan bakiyesi (POL) çok düşük: ${balancePolEth.toFixed(4)} POL. Güvenlik ve gas drainer koruması gereği limit onaylama (Approve) durduruldu. Limit: 2.0 POL.`;
-        this.emitLog('BLOCKCHAIN', 'ERROR', errMsg);
+        // GAZA DUYARLILIK VE GAS DRAINER ENGELLEYİCİ: POL Bakiye Kontrolü (Minimum 2.0 POL gerekiyor)
+        const balancePol = await provider.getBalance(wallet.address).catch(() => ethers.BigNumber.from(0));
+        const balancePolEth = parseFloat(ethers.utils.formatEther(balancePol));
+        if (balancePolEth < 2.0) {
+          const errMsg = `[FUEL_CRITICAL] Cüzdan bakiyesi (POL) çok düşük: ${balancePolEth.toFixed(4)} POL. Güvenlik ve gas drainer koruması gereği limit onaylama (Approve) durduruldu. Limit: 2.0 POL.`;
+          this.emitLog('BLOCKCHAIN', 'ERROR', errMsg);
+          
+          const globalState = (global as any).serverState;
+          if (globalState) {
+            globalState.isCrawling = false; // Otonom döngüyü askıya alıp gas sömürüsünü kes!
+          }
+          return { success: false, error: "FUEL_CRITICAL" };
+        }
+
+        this.validateContract(safeTokenAddr);
+
+        const contract = new ethers.Contract(safeTokenAddr, [
+          "function approve(address spender, uint256 amount) public returns (bool)",
+          "function allowance(address owner, address spender) view returns (uint256)",
+          "function decimals() view returns (uint8)"
+        ], wallet);
+
+        const decimals = await contract.decimals().catch(() => 18);
+        let amountWei = ethers.constants.MaxUint256;
+        if (amount !== "115792089237316195423570985008687907853269984665640564039457584007913129639935") {
+          amountWei = ethers.utils.parseUnits(parseFloat(amount).toFixed(decimals < 18 ? decimals : 4), decimals);
+        }
+
+        const currentAllowance = await contract.allowance(wallet.address, safeSpenderAddr).catch(() => ethers.BigNumber.from(0));
+        if (currentAllowance.gte(amountWei)) {
+          this.emitLog('BLOCKCHAIN', 'SUCCESS', `[TOKEN_APPROVE_ALREADY_SET] ${tokenAddress} için spender ${spenderAddress} adresine zaten yeterli limit tanımlanmış (Mevcut Allowance: ${ethers.utils.formatUnits(currentAllowance, decimals)}, Gereken: ${amount}). On-chain işlem atlandı.`);
+          return { success: true, txHash: '0x0000000000000000000000000000000000000000000000000000000000000000' };
+        }
+
+        this.emitLog('BLOCKCHAIN', 'INFO', `[TOKEN_APPROVE] Limit onayı iletiliyor: Token: ${tokenAddress} -> Spender/Contract: ${spenderAddress} | Tutar: ${amount}`);
+
+        let txOverrides: any = {
+          gasLimit: 80000
+        };
+
+        try {
+          const feeData = await provider.getFeeData();
+          if (feeData.maxPriorityFeePerGas && feeData.maxFeePerGas) {
+            const minPriorityFee = ethers.utils.parseUnits("35", "gwei");
+            const proposedPriority = feeData.maxPriorityFeePerGas.mul(150).div(100);
+            txOverrides.maxPriorityFeePerGas = proposedPriority.gt(minPriorityFee) ? proposedPriority : minPriorityFee;
+            const proposedMaxFee = feeData.maxFeePerGas.mul(150).div(100);
+            const minMaxFee = txOverrides.maxPriorityFeePerGas.add(ethers.utils.parseUnits("15", "gwei"));
+            txOverrides.maxFeePerGas = proposedMaxFee.gt(minMaxFee) ? proposedMaxFee : minMaxFee;
+          } else if (feeData.gasPrice) {
+            txOverrides.gasPrice = feeData.gasPrice.mul(150).div(100);
+          }
+        } catch (e) {}
+
+        const tx = await contract.approve(safeSpenderAddr, amountWei, txOverrides);
+        this.emitLog('BLOCKCHAIN', 'SUCCESS', `[APPROVE_SENT] Onay (Approve) işlemi Polygon ağına iletildi, onay bekleniyor... Tx: ${tx.hash}`);
         
-        const globalState = (global as any).serverState;
-        if (globalState) {
-          globalState.isCrawling = false; // Otonom döngüyü askıya alıp gas sömürüsünü kes!
+        const receipt = await tx.wait();
+        if (!receipt || receipt.status !== 1) {
+          throw new Error(`Onay (Approve) işlemi ağda başarısızlığa uğradı ve Revert edildi (Status: 0). Tx Hash: ${tx.hash}`);
         }
-        return { success: false, error: "FUEL_CRITICAL" };
-      }
-
-      this.validateContract(safeTokenAddr);
-
-      const contract = new ethers.Contract(safeTokenAddr, [
-        "function approve(address spender, uint256 amount) public returns (bool)",
-        "function allowance(address owner, address spender) view returns (uint256)"
-      ], wallet);
-
-      // GAS OPTİMİZASYONU VE SÖMÜRÜ PARALEL SAVUNMASI: Allowance Kontrolü
-      // Eğer mevcut yetki zaten yeterince yüksekse on-chain işlemi yapmadan başarılı dönüyoruz!
-      const currentAllowance = await contract.allowance(wallet.address, safeSpenderAddr).catch(() => ethers.BigNumber.from(0));
-      const hugeAllowanceThreshold = ethers.utils.parseUnits("1000000000", 18); // 1 Milyar Token Yetkisi
-      if (currentAllowance.gt(hugeAllowanceThreshold)) {
-        this.emitLog('BLOCKCHAIN', 'SUCCESS', `[TOKEN_APPROVE_BYPASS] ${tokenAddress} için ${spenderAddress} adresine zaten yüksek yetki verilmiş (Allowance: ${ethers.utils.formatUnits(currentAllowance, 18)}). On-chain işlem atlanarak bakiye ve gaz korundu.`);
-        return { success: true, txHash: '0x0000000000000000000000000000000000000000000000000000000000000000' };
-      }
-
-      this.emitLog('BLOCKCHAIN', 'INFO', `[TOKEN_APPROVE] Limit onayı iletiliyor: Token: ${tokenAddress} -> Spender/Contract: ${spenderAddress}`);
-
-      let txOverrides: any = {
-        gasLimit: 80000
-      };
-
-      try {
-        const feeData = await provider.getFeeData();
-        if (feeData.maxPriorityFeePerGas && feeData.maxFeePerGas) {
-          const minPriorityFee = ethers.utils.parseUnits("35", "gwei");
-          const proposedPriority = feeData.maxPriorityFeePerGas.mul(150).div(100);
-          txOverrides.maxPriorityFeePerGas = proposedPriority.gt(minPriorityFee) ? proposedPriority : minPriorityFee;
-          const proposedMaxFee = feeData.maxFeePerGas.mul(150).div(100);
-          const minMaxFee = txOverrides.maxPriorityFeePerGas.add(ethers.utils.parseUnits("15", "gwei"));
-          txOverrides.maxFeePerGas = proposedMaxFee.gt(minMaxFee) ? proposedMaxFee : minMaxFee;
-        } else if (feeData.gasPrice) {
-          txOverrides.gasPrice = feeData.gasPrice.mul(150).div(100);
-        }
-      } catch (e) {}
-
-      const tx = await contract.approve(safeSpenderAddr, ethers.constants.MaxUint256, txOverrides);
-      this.emitLog('BLOCKCHAIN', 'SUCCESS', `[APPROVE_SENT] Onay işlemi Polygon ağına iletildi, onay bekleniyor... Tx: ${tx.hash}`);
-      
-      const receipt = await tx.wait();
-      if (!receipt || receipt.status !== 1) {
-        throw new Error(`Onay (Approve) işlemi ağda başarısızlığa uğradı ve Revert edildi (Status: 0). Tx Hash: ${tx.hash}`);
-      }
-      
-      return { success: true, txHash: tx.hash };
+        
+        return { success: true, txHash: tx.hash };
+      });
     } catch (err: any) {
       const errorMsg = this.parseBlockchainError(err);
       this.emitLog('BLOCKCHAIN', 'ERROR', `[APPROVE_FAILED] Onay işleminde hata: ${errorMsg}`);

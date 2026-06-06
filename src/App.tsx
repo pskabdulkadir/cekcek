@@ -365,6 +365,27 @@ export default function App() {
     }
   };
 
+  const [isOnChainTesting, setIsOnChainTesting] = useState<boolean>(false);
+  const [onChainTestResult, setOnChainTestResult] = useState<string | null>(null);
+
+  const handleRunOnChainTest = async () => {
+    setIsOnChainTesting(true);
+    setOnChainTestResult(null);
+    try {
+      const res = await fetch("/api/test/onchain", { method: "POST" });
+      const data = await res.json();
+      if (data.success) {
+        setOnChainTestResult(`BAŞARILI! Onay Tx: ${data.approveTx.substring(0, 10)}... | Basım Tx: ${data.mintTx.substring(0, 10)}...`);
+      } else {
+        setOnChainTestResult(`HATA: ${data.error}`);
+      }
+    } catch (err: any) {
+      setOnChainTestResult(`HATA: ${err.message}`);
+    } finally {
+      setIsOnChainTesting(false);
+    }
+  };
+
   // Batch-Only Settings Save Handlers
   const handleSaveBatchOnlySettings = async (e: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -2663,7 +2684,28 @@ export default function App() {
                                 <span className="text-fuchsia-400 font-bold group-hover:text-fuchsia-300">SÖZLEŞME BASIM AKTİF</span>
                                 <span className="text-slate-500 text-[9px] truncate">Doğrudan ERC20 Modu</span>
                             </button>
+                            <button
+                                type="button"
+                                id="cmd-btn-run-onchain-test"
+                                disabled={isOnChainTesting}
+                                onClick={handleRunOnChainTest}
+                                className={`border px-2 py-1.5 rounded-xl font-mono text-[10px] text-left transition-all flex flex-col gap-0.5 group ${isOnChainTesting ? 'bg-slate-900 border-yellow-500/20 text-yellow-500 cursor-not-allowed' : 'bg-slate-950 hover:bg-slate-900 border-slate-800 hover:border-yellow-500/30 text-slate-300'}`}
+                            >
+                                <span className="text-yellow-400 font-bold group-hover:text-yellow-300">
+                                  {isOnChainTesting ? "TEST EDİLİYOR..." : "GERÇEK PROTOKOL TESTİ"}
+                                </span>
+                                <span className="text-slate-500 text-[9px] truncate">Approve & Transfer 1 KECO</span>
+                            </button>
                         </div>
+
+                        {onChainTestResult && (
+                          <div className={`mt-3 p-3 rounded-xl border font-mono text-[10px] ${onChainTestResult.startsWith("BAŞARILI") ? 'bg-emerald-950/40 border-emerald-500/20 text-emerald-400' : 'bg-rose-950/40 border-rose-500/20 text-rose-400'}`}>
+                            <div className="flex justify-between items-center">
+                              <span><strong>On-Chain Hata Ayıklama Raporu:</strong> {onChainTestResult}</span>
+                              <button type="button" onClick={() => setOnChainTestResult(null)} className="text-[9px] bg-slate-900 hover:bg-slate-800 border border-slate-800 px-1.5 py-0.5 rounded text-slate-400 hover:text-slate-200">Kapat</button>
+                            </div>
+                          </div>
+                        )}
                         
                         {/* Master Protokol Referans Tablosu */}
                         <div className="mt-4 pt-4 border-t border-slate-800/50">

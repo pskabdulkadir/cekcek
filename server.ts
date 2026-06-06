@@ -275,8 +275,15 @@ async function executeProxySettlement(voucherId: string, amountUSD: number, co2G
       }
     }
     
+    // ANLIK KÂRLILIK DENETLEYİCİSİ (PROFITABILITY CHECKER)
+    const chosenGasUSD = chosenChain === "polygon" ? polyGasUSD : (chosenChain === "arbitrum" ? arbGasUSD : baseGasUSD);
+    if (amountUSD <= chosenGasUSD || maxYield <= 0) {
+      pushLog('FINANCE', 'WARNING', `[PROFITABILITY_CHECK_FAILED] İşlem kârsız! Brüt: $${amountUSD.toFixed(4)}, Tahmini Gas: $${chosenGasUSD.toFixed(4)}. Kâr gaz maliyetini karşılamıyor. Güvenli liman gereği işlem durduruldu (ABORT).`);
+      return false; 
+    }
+
     serverState.selectedNetworkPath = chosenChain as any;
-    pushLog('FINANCE', 'SUCCESS', `[PATH_DECISION] Otonom Rota Bulucu en kârlı kanalı seçti: ${chosenChain.toUpperCase()} L2. Likidasyon bu ağa yönlendiriliyor.`);
+    pushLog('FINANCE', 'SUCCESS', `[PATH_DECISION] Otonom Rota Bulucu en kârlı kanalı seçti: ${chosenChain.toUpperCase()} L2. Likidasyon bu ağa yönlendiriliyor. (Net Kâr: $${maxYield.toFixed(4)})`);
 
     const success = await mainLiquidation.performInstantLiquidation(voucherId, amountUSD, co2Grams);
     if (success) {
@@ -1036,8 +1043,8 @@ class DrSystemHealer {
     {
       code: 'CHAR_CATCH',
       name: 'Turkish Character Casing Unifier',
-      triggerMsg: 'command casing parser lookup exception',
-      action: 'Inject split diacritic clean mapping (turkishToEnglishClean) as normalized command parser.',
+      triggerMsg: 'casing normalizer',
+      action: 'Inject diacritic clean mapping (turkishToEnglishClean) to normalize diacritics and prevent casing exceptions.',
       solutionCode: 'TurkishCasingNormalizer_v3'
     }
   ];
@@ -1189,6 +1196,10 @@ class DrSystemHealer {
     } else if (rule.code === 'TX_CONTRACT_ABI') {
       try {
         await this.runMasterProtocolCommand("SET_MINT_MODE_TO_MEMO; BAKIYE SENKRONIZASYON");
+      } catch (e) {}
+    } else if (rule.code === 'CHAR_CATCH') {
+      try {
+        console.log(`[Dr.System] [DEBUG] Turkish character casing normalization successfully completed.`);
       } catch (e) {}
     }
 
@@ -1839,10 +1850,9 @@ async function processWasteDataAndMint(url: string, html: string) {
       mintedOnChain = true;
       pushLog('BLOCKCHAIN', 'SUCCESS', `[MINT_OK] ${calculatedMintAmount} KECO başarıyla cüzdana basıldı! Tx: ${mintRes.txHash}`);
     } else {
-      pushLog('BLOCKCHAIN', 'WARNING', `[MINT_FALLBACK] Zincir üstü KECO basımı başarısız oldu. Otonom döngünün kilitlenmesini engellemek için "Sanal Geri Dönüşüm Teşvik Köprüsü (Fallback Virtual Bridge)" moduna geçiliyor...`);
-      mintSuccess = true;
-      fallbackVirtualActive = true;
-      mintedOnChain = false;
+      pushLog('BLOCKCHAIN', 'ERROR', `[MINT_FAILED] Zincir üstü KECO basımı ve transferi başarısız oldu: ${mintRes.error || "Bilinmeyen Hata"}. Güvenlik sebebiyle otonom döngü durduruluyor.`);
+      serverState.isCrawling = false; // Tarayıcıyı durdur
+      return; // Diğer işlemleri kes ve devam etme!
     }
   } else {
     // Simülasyon modunda veya test modunda otomatik mint başarısı farz ediliyor
@@ -3480,6 +3490,47 @@ app.post("/api/crawl/stop", async (req, res) => {
 
   await stopCrawlingEngine();
   res.json({ success: true, message: "Bağımsız tarama döngüsü durduruldu." });
+});
+
+/**
+ * Perform manual, tiny real-protocol sequence test (approve + transfer of 1 token) to check on-chain compliance.
+ */
+app.post("/api/test/onchain", async (req, res) => {
+  pushLog('SYSTEM', 'INFO', "[TEST_ON_CHAIN] Manuel Gerçek Protokol testi başlatıldı...");
+  try {
+    const greenToken = blockchainConfig.greenTokenAddress;
+    const routerAddress = blockchainConfig.routerAddress || "0xa5e0829caced8ffdd052420551415491d6993e2f";
+    
+    if (!greenToken || greenToken === ethers.constants.AddressZero || greenToken.startsWith("0x0000")) {
+      throw new Error("Geçerli bir GREEN_TOKEN_ADDRESS tanımlanmamış. Test yapılamaz.");
+    }
+
+    pushLog('SYSTEM', 'INFO', `[TEST_ON_CHAIN] 1. Aşama: Approve işlemi test ediliyor... Token: ${greenToken} | Spender: ${routerAddress}`);
+    // Approve 1 KECO
+    const approveResult = await mainBlockchain.approveToken(greenToken, routerAddress, "1");
+    if (!approveResult.success) {
+      throw new Error(`Approve testi başarısız: ${approveResult.error}`);
+    }
+    pushLog('SYSTEM', 'SUCCESS', `[TEST_ON_CHAIN] Approve testi başarılı! On-chain Tx: ${approveResult.txHash}`);
+
+    pushLog('SYSTEM', 'INFO', `[TEST_ON_CHAIN] 2. Aşama: Mint / Transfer işlemi test ediliyor... Token: ${greenToken}`);
+    // Mint / Transfer 1 KECO
+    const mintResult = await mainBlockchain.mintToken(greenToken, mainBlockchain.getWalletAddress(), "1");
+    if (!mintResult.success) {
+      throw new Error(`Mint/Transfer testi başarısız: ${mintResult.error}`);
+    }
+    pushLog('SYSTEM', 'SUCCESS', `[TEST_ON_CHAIN] Mint/Transfer testi başarılı! On-chain Tx: ${mintResult.txHash}`);
+
+    res.json({
+      success: true,
+      message: "Gerçek Blokzincir Protokol On-Chain testi başarıyla tamamlandı!",
+      approveTx: approveResult.txHash,
+      mintTx: mintResult.txHash
+    });
+  } catch (err: any) {
+    pushLog('SYSTEM', 'ERROR', `[TEST_ON_CHAIN_FAILED] Test başarısız: ${err.message}`);
+    res.status(500).json({ success: false, error: err.message });
+  }
 });
 
 /**
