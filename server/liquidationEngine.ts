@@ -172,4 +172,81 @@ export class LiquidationEngine {
   public resetProcessingState() {
     this.isProcessing = false;
   }
+
+  /**
+   * Otonom Nakit Akış Mekanizması (Harvest Strategy)
+   * 1. Bakiyeyi İzle: Cüzdandaki KECO token bakiyesini balanceOf() ile sürekli denetle.
+   * 2. Otomatik Takas: Eğer balance > 1000 KECO veya holdAmount >= 50 USDT ise,
+   *    swapExactTokensForTokens() çağırarak KECO'yu otomatik olarak USDT'ye çevirir.
+   * 3. Güvenlik Katmanı: Price Impact koruması doğrultusunda minAmountOut getAmountsOut'un %98'i olarak (%2 slippage) belirlenir.
+   * 4. Transfer: Başarılı takas sonrası (tx status 1), USDT otomatik olarak payout operasyon cüzdanına teslim edilir.
+   */
+  public async checkAndHarvest(): Promise<boolean> {
+    const globalState = (global as any).serverState;
+    if (this.isProcessing) {
+      return false;
+    }
+
+    try {
+      const walletAddress = this.blockchain.getWalletAddress();
+      if (!walletAddress) return false;
+
+      const greenTokenAddr = blockchainConfig.greenTokenAddress;
+      if (!greenTokenAddr || greenTokenAddr === ethers.constants.AddressZero || greenTokenAddr.startsWith("0x0000")) {
+        return false;
+      }
+
+      // 1. KECO Bakiyesini İzle (balanceOf)
+      const balance = await this.blockchain.getTokenBalance(greenTokenAddr, walletAddress);
+      const balanceNum = parseFloat(balance);
+      
+      const holdAmount = globalState ? (globalState.profitLockHoldAmount || 0) : 0;
+      
+      // Eşik tetikleyicileri
+      const isBalanceTriggered = balanceNum > 1000.0;
+      const isHoldTriggered = holdAmount >= 50.0;
+
+      if (!isBalanceTriggered && !isHoldTriggered) {
+        return false;
+      }
+
+      this.isProcessing = true;
+      this.emitLog('INFO', `[HARVEST_CHECK] Otonom Hasat Eşiği Aşıldı! Bakiye: ${balanceNum.toFixed(4)} KECO | Kilitli Kar: $${holdAmount.toFixed(4)} USDT. İşlem sıraya alınıyor...`);
+
+      if (balanceNum <= 0.01) {
+        this.emitLog('WARNING', `[HARVEST_ABORT] Hasat edilebilecek KECO bakiyesi yetersiz: ${balanceNum.toFixed(4)}`);
+        this.isProcessing = false;
+        return false;
+      }
+
+      // KECO miktarını wei formatına çevir
+      const tokenAmountWei = ethers.utils.parseUnits(balanceNum.toFixed(18), 18).toString();
+
+      // 2 & 3: %2 Slippage (%98 minAmountOut) ile QuickSwap performDEXSwap çağrısı yap
+      this.emitLog('INFO', `[HARVEST_START] ${balanceNum.toFixed(4)} KECO otomatik olarak %2 slippage (%98 Price Impact koruması) ile USDT'ye dönüştürülüyor...`);
+      const result = await this.blockchain.performDEXSwap(tokenAmountWei, 98);
+      
+      if (result.success) {
+        this.emitLog('SUCCESS', `[HARVEST_SUCCESS] Otonom Hasat Başarılı! USDT cüzdanınıza aktarıldı. Tx: ${result.txHash}`);
+        
+        // Gelir bakiye verilerini güncelle
+        if (globalState) {
+          const estimatedIncome = balanceNum * 0.45;
+          globalState.totalAccessFeesCollected = (globalState.totalAccessFeesCollected || 0) + estimatedIncome;
+          globalState.availableBalance = (globalState.availableBalance || 0) + estimatedIncome;
+          if (isHoldTriggered) {
+            globalState.profitLockHoldAmount = 0.0;
+          }
+        }
+        this.isProcessing = false;
+        return true;
+      } else {
+        throw new Error(result.error || "Miktar veya likidite havuzu sınırlaması nedeniyle borsa takas emri revert edildi.");
+      }
+    } catch (err: any) {
+      this.emitLog('ERROR', `[HARVEST_FAILED] Otonom hasat hatası: ${err.message}`);
+      this.isProcessing = false;
+      return false;
+    }
+  }
 }

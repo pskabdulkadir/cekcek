@@ -714,20 +714,43 @@ export class BlockchainRouter {
         const isZeroContract = this.contractAddress === ethers.constants.AddressZero;
 
         if (isZeroContract) {
+          const greenToken = blockchainConfig.greenTokenAddress;
+          if (greenToken && !greenToken.startsWith("0x0000")) {
+            const tokenBalanceStr = await this.getTokenBalance(greenToken, wallet.address);
+            const tokenBalance = parseFloat(tokenBalanceStr);
+            if (tokenBalance > 0) {
+              this.emitLog('BLOCKCHAIN', 'INFO', `[DEX_AUTOSWAP] KECO -> USDT otonom takas modu tetiklendi. Bakiye: ${tokenBalanceStr} KECO`);
+              const tokenAmountWei = ethers.utils.parseUnits(tokenBalanceStr, 18);
+              const swapResult = await this.performDEXSwap(tokenAmountWei.toString());
+              if (swapResult.success) {
+                return {
+                  success: true,
+                  txHash: swapResult.txHash,
+                  simulated: false
+                };
+              } else {
+                this.emitLog('BLOCKCHAIN', 'WARNING', `[DEX_AUTOSWAP_FAIL] Swap başarısız oldu: ${swapResult.error || 'Bilinmeyen hata'}. Memo mod fallback devrede.`);
+              }
+            }
+          }
+
           this.emitLog('BLOCKCHAIN', 'INFO', `Akıllı kontrat adresi belirtilmedi. Veri analitiği kanıtı doğrudan Polygon üzerinde mühürleniyor (Memo mod)...`);
 
           const memoMessage = `DATA_INSIGHT_PROOF:${proofHash}:${(co2AnalysisGrams || 0).toFixed(4)}_CO2_g_ANALYSIS`;
           const memoBytes = ethers.utils.hexlify(ethers.utils.toUtf8Bytes(memoMessage));
 
           const memoNonce = await provider.getTransactionCount(wallet.address, "pending");
-          const tx = await wallet.sendTransaction({
+          const txRequest = {
             to: wallet.address, // Self-transaction safely stores immutable record
             value: ethers.utils.parseEther("0"),
             data: memoBytes,
             gasLimit: 30000, // Memo transaction'lar için gasLimit düşük tutulabilir
             nonce: memoNonce,
             ...txOverrides // Dinamik gas fiyatlarını uygula
-          });
+          };
+
+          console.log("SENDING_REAL_TX (MEMO)", txRequest);
+          const tx = await wallet.sendTransaction(txRequest);
 
           this.emitLog('BLOCKCHAIN', 'INFO', `Veri analitiği kanıt işlemi ağa başarıyla iletildi. Blok onayı bekleniyor... İşlem Kodu: ${tx.hash}`);
           const receipt = await tx.wait(1); // Wait for 1 confirmation
@@ -765,11 +788,19 @@ export class BlockchainRouter {
 
             this.emitLog('BLOCKCHAIN', 'INFO', `Deneme 1: registerDataAsset çağrılıyor...`);
             const txNonce1 = await provider.getTransactionCount(wallet.address, "pending");
-            tx = await contract.registerDataAsset(amountWei, proofHash, {
+            const txRequest1 = {
               gasLimit: 150000, // Kontrat çağrısı için daha yüksek gasLimit
               nonce: txNonce1,
               ...txOverrides // Dinamik gas fiyatlarını uygula
+            };
+
+            console.log("SENDING_REAL_TX (REGISTER_DATA_ASSET)", {
+              to: contract.address,
+              data: contract.interface.encodeFunctionData("registerDataAsset", [amountWei, proofHash]),
+              ...txRequest1
             });
+
+            tx = await contract.registerDataAsset(amountWei, proofHash, txRequest1);
           } catch (firstErr: any) {
             this.emitLog('BLOCKCHAIN', 'WARNING', `mintAndSwap başarısız oldu: ${firstErr.message}. Deneme 2: submitProof çağrılıyor...`);
             // Ensure proofHash matches bytes32 for standard submitProof require signature
@@ -785,11 +816,19 @@ export class BlockchainRouter {
             
             // submitProof (bytes32 proofHash, uint256 amount)
             const txNonce2 = await provider.getTransactionCount(wallet.address, "pending");
-            tx = await contract.submitProof(bytes32Proof, amountWei, { // submitProof hala geçerli
+            const txRequest2 = {
               gasLimit: 150000, // Kontrat çağrısı için daha yüksek gasLimit
               nonce: txNonce2,
               ...txOverrides // Dinamik gas fiyatlarını uygula
+            };
+
+            console.log("SENDING_REAL_TX (SUBMIT_PROOF)", {
+              to: contract.address,
+              data: contract.interface.encodeFunctionData("submitProof", [bytes32Proof, amountWei]),
+              ...txRequest2
             });
+
+            tx = await contract.submitProof(bytes32Proof, amountWei, txRequest2);
           }
 
           this.emitLog('BLOCKCHAIN', 'INFO', `Ağa başarıyla iletildi. Blok onayı bekleniyor... İşlem Kodu: ${tx.hash}`);
@@ -870,8 +909,9 @@ export class BlockchainRouter {
   /**
    * PROTOKOL_DIRECT_DEX: Varlıkları doğrudan QuickSwap üzerinden USDT'ye çevirir.
    * @param tokenAmountWei Takas edilecek miktar (Wei biriminde)
+   * @param slippagePercent Kayma payı oranı (Örn. 99 = %1 slippage, 98 = %2 slippage, varsayılan 99)
    */
-  public async performDEXSwap(tokenAmountWei: string): Promise<{ success: boolean; txHash: string; error?: string }> {
+  public async performDEXSwap(tokenAmountWei: string, slippagePercent: number = 99): Promise<{ success: boolean; txHash: string; error?: string }> {
     this.emitLog('BLOCKCHAIN', 'INFO', `[DEX_DIRECT] Doğrudan borsa takası başlatılıyor (QuickSwap -> USDT)...`);
     
     try {
@@ -987,14 +1027,14 @@ export class BlockchainRouter {
 
       const expectedUsdt = amountsOut[2];
       
-      // %1 Slippage Tolerance (Kayma Toleransı)
-      const amountOutMin = ethers.BigNumber.from(expectedUsdt).mul(99).div(100);
+      // Slippage Tolerance (Kayma Toleransı)
+      const amountOutMin = ethers.BigNumber.from(expectedUsdt).mul(slippagePercent).div(100);
 
       const txOverrides = await this.getHighPriorityGasOverrides(provider);
       txOverrides.gasLimit = 300000; // Stabil gaz limiti
       txOverrides.nonce = await provider.getTransactionCount(wallet.address, "pending");
 
-      this.emitLog('BLOCKCHAIN', 'INFO', `[DEX_LIVE] Fiyat: $${ethers.utils.formatUnits(expectedUsdt, 6)} USDT | Tolerans: %1 | Emre çıkılıyor...`);
+      this.emitLog('BLOCKCHAIN', 'INFO', `[DEX_LIVE] Fiyat: $${ethers.utils.formatUnits(expectedUsdt, 6)} USDT | Tolerans: %${100 - slippagePercent} | Emre çıkılıyor...`);
       
       const swapTx = await router.swapExactTokensForTokens(
         tokenAmountWei,

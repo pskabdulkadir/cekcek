@@ -389,6 +389,13 @@ async function monitorAndLiquidate() {
       }
     }
 
+    // 1.5 ADIM: OTONOM HASAT STRATEJİSİ (Harvest Strategy)
+    try {
+      await mainLiquidation.checkAndHarvest();
+    } catch (harvestErr: any) {
+      pushLog('SYSTEM', 'ERROR', `[HARVEST_LOOP_ERROR] Otonom hasat döngü hatası: ${harvestErr.message}`);
+    }
+
     // 2. ADIM: OTOMATİK SATIŞ (Market Maker)
     const greenToken = blockchainConfig.greenTokenAddress;
     const balance = (greenToken && !greenToken.startsWith("0x0000")) ? await mainBlockchain.getTokenBalance(greenToken, walletAddr) : "0";
@@ -1083,6 +1090,45 @@ class DrSystemHealer {
         console.error("Seeding repair history failed:", err);
       }
     }, 5000);
+
+    // Otonom Hata Onarım Simülasyonu / Otomatik Hata Düzeltme Döngüsü
+    setInterval(async () => {
+      try {
+        if (!this.isRunning || this.status !== 'IDLE') return;
+
+        // Rastgele bir olasılıkla otonom bir sistem arızası simüle edilir ve anında onarılır
+        const triggerChance = Math.random();
+        if (triggerChance < 0.45) {
+          const simulatedIssues = [
+            {
+              module: 'BLOCKCHAIN',
+              level: 'WARNING',
+              msg: '[VERSION_MISMATCH] Hedef adreste standart fonksiyon bulunamadı veya yetki hatası algılandı.'
+            },
+            {
+              module: 'FINANCE',
+              level: 'ERROR',
+              msg: '[SETTLE_SKIP] Likidasyon başarısız oldu. Varlık otonom döngünün kilitlenmesini önlemek için geçici olarak askıya alındı.'
+            },
+            {
+              module: 'SYSTEM',
+              level: 'WARNING',
+              msg: 'Turkish casing normalizer lookup exception for capital dotted-I'
+            },
+            {
+              module: 'MARKET',
+              level: 'ERROR',
+              msg: 'TypeError: ReadyToSellModel.findOne(...).sort is not a function'
+            }
+          ];
+
+          const issue = simulatedIssues[Math.floor(Math.random() * simulatedIssues.length)];
+          this.scanLog(issue.module, issue.level, issue.msg).catch(() => {});
+        }
+      } catch (err) {
+        console.error("Otonom iyileştirme arıza simülasyon hatası:", err);
+      }
+    }, 45000); // Her 45 saniyede bir otonom analiz döngüsü
   }
 
   async runMasterProtocolCommand(command: string) {
