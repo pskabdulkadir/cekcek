@@ -49,11 +49,26 @@ if (process.env.NODE_ENV === 'production') {
 
 const mongoUri = process.env.MONGO_URI || 'mongodb://localhost:27017/dev_db';
 
+const OLD_ADDRESS = "0x4C304a6a923C3Fb92a87583dbABCcbE1dDeb6886";
+const NEW_ADDRESS = "0x88AB810eAE8d41C8388402E53d6Cd2DDD645cDdE";
+
+const sanitizeAddress = (addr: string | undefined): string => {
+  if (!addr) return NEW_ADDRESS;
+  if (addr.toLowerCase() === OLD_ADDRESS.toLowerCase()) {
+    console.log(`[REWRITE_ADDRESS] Eski kontrat adresi (${addr}) tespit edildi, yeni adres ile güncelleniyor: ${NEW_ADDRESS}`);
+    return NEW_ADDRESS;
+  }
+  return addr;
+};
+
+const contractAddressEnv = sanitizeAddress(process.env.CONTRACT_ADDRESS || process.env.SMART_GATE_CONTRACT_ADDRESS);
+const greenTokenAddressEnv = sanitizeAddress(process.env.GREEN_TOKEN_ADDRESS);
+
 export const blockchainConfig = {
     geminiApiKey: process.env.GEMINI_API_KEY || '',
     appUrl: process.env.APP_URL || '',
     configOverride: process.env.CONFIG_OVERRIDE === 'true',
-    contractAddress: process.env.CONTRACT_ADDRESS || process.env.SMART_GATE_CONTRACT_ADDRESS || '0x88AB810eAE8d41C8388402E53d6Cd2DDD645cDdE', // Data NFT Factory veya Veri Erişim Kontratı
+    contractAddress: contractAddressEnv, // Data NFT Factory veya Veri Erişim Kontratı
     routerAddress: process.env.ROUTER_ADDRESS || '0xa5e0829caced8ffdd052420551415491d6993e2f',
     payoutWallet: (() => {
         const rawAddress = process.env.PAYOUT_WALLET || process.env.CHANNEL_ROUTING_WALLET || "";
@@ -89,7 +104,7 @@ export const blockchainConfig = {
     bridgeApiUrl: process.env.BRIDGE_API_URL || '', // Opsiyonel: Dış borsalara veri çıkışı için Gateway URL
     bridgeAuthToken: process.env.BRIDGE_AUTH_TOKEN || '', // Ticari Köprü Yetkilendirme Tokenı
     proxySettlementUrl: '', // Geçersiz DNS adresi temizlendi
-    greenTokenAddress: process.env.GREEN_TOKEN_ADDRESS || '0x88AB810eAE8d41C8388402E53d6Cd2DDD645cDdE',
+    greenTokenAddress: greenTokenAddressEnv,
     gasRefillEnabled: process.env.GAS_REFILL_ENABLED !== 'false', // Otomatik yakıt doldurma aktif mi?
     gasRefillThreshold: parseFloat(process.env.GAS_REFILL_THRESHOLD || '0.5'), // 0.5 POL altına düşerse işlem yapma/doldur
     gasRefillUsdtAmount: parseFloat(process.env.GAS_REFILL_USDT_AMOUNT || '5.0'), // 5 USDT'lik yakıt al
