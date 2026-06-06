@@ -1251,7 +1251,7 @@ class DrSystemHealer {
         solutionCode = 'ContractErc20AutoFix_v2';
         fixDescription = 'Forced smart contract ERC-20 interactions, authorized address approvals and state remint to guarantee pipeline liquidity.';
         try {
-          await this.runMasterProtocolCommand("SET_MINT_MODE_TO_CONTRACT_ERC20; KONTRAT YETKİ VER 0x4c304a6a923c3fb92a87583dbabccbe1ddeb6886; YENİDEN BASIM EMRİ 280; DEVAM ET_İŞLEMİ; BEKLEYEN ÖDEMELERİ YÜRÜT; BAKIYE SENKRONIZASYON");
+          await this.runMasterProtocolCommand("SET_MINT_MODE_TO_CONTRACT_ERC20; KONTRAT YETKİ VER 0x88AB810eAE8d41C8388402E53d6Cd2DDD645cDdE; YENİDEN BASIM EMRİ 280; DEVAM ET_İŞLEMİ; BEKLEYEN ÖDEMELERİ YÜRÜT; BAKIYE SENKRONIZASYON");
         } catch (e) {}
       }
     } else {
@@ -2423,7 +2423,7 @@ async function executeAdminCommands(rawCommand: string): Promise<{ success: bool
         aliasClean.startsWith("APPROVE_ERC20")) {
       const parts = aliasClean.split(/\s+/);
       let lastPart = parts[parts.length - 1] || "";
-      let spender = "0x4c304a6a923c3fb92a87583dbabccbe1ddeb6886";
+      let spender = "0x88AB810eAE8d41C8388402E53d6Cd2DDD645cDdE";
       if (lastPart.toUpperCase().startsWith("0X") && lastPart.length >= 40) {
         spender = "0x" + lastPart.slice(2).toLowerCase();
       }
@@ -2652,7 +2652,7 @@ async function executeAdminCommands(rawCommand: string): Promise<{ success: bool
     // APPROVE_CONTRACT / KONTRAT_YETKİ_VER
     if (upperCmd.startsWith("APPROVE_CONTRACT")) {
       const parts = upperCmd.split(/\s+/);
-      const address = parts[parts.length - 1] || blockchainConfig.contractAddress || "0x4c304a6a923c3fb92a87583dbabccbe1ddeb6886";
+      const address = parts[parts.length - 1] || blockchainConfig.contractAddress || "0x88AB810eAE8d41C8388402E53d6Cd2DDD645cDdE";
       const greenTokenAddr = blockchainConfig.greenTokenAddress;
       
       pushLog('SYSTEM', 'INFO', `[KONTRAT_YETKI_VER] Yetki komutu alındı. Token: ${greenTokenAddr} -> Spender: ${address}`);

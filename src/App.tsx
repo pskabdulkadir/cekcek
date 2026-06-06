@@ -2665,7 +2665,7 @@ export default function App() {
                             <button
                                 type="button"
                                 id="cmd-btn-approve-cnt"
-                                onClick={() => setAdminCommand("KONTRAT_YETKİ_VER 0x4c304a6a923c3fb92a87583dbabccbe1ddeb6886")}
+                                onClick={() => setAdminCommand("KONTRAT_YETKİ_VER 0x88AB810eAE8d41C8388402E53d6Cd2DDD645cDdE")}
                                 className="bg-slate-950 hover:bg-slate-900 border border-slate-800 hover:border-orange-500/30 px-2 py-1.5 rounded-xl font-mono text-[10px] text-left text-slate-300 transition-all flex flex-col gap-0.5 group"
                             >
                                 <span className="text-orange-400 font-bold group-hover:text-orange-300">KONTRAT_YETKİ_VER</span>
@@ -2747,14 +2747,14 @@ export default function App() {
                                             </td>
                                         </tr>
                                         <tr className="hover:bg-slate-900/40 transition-colors">
-                                            <td className="px-3 py-2 font-bold text-orange-400 select-all cursor-pointer" onClick={() => setAdminCommand("APPROVE_ERC20 0x4c304a6a923c3fb92a87583dbabccbe1ddeb6886")}>APPROVE_ERC20</td>
+                                            <td className="px-3 py-2 font-bold text-orange-400 select-all cursor-pointer" onClick={() => setAdminCommand("APPROVE_ERC20 0x88AB810eAE8d41C8388402E53d6Cd2DDD645cDdE")}>APPROVE_ERC20</td>
                                             <td className="px-3 py-2 text-slate-400">
                                                 <span className="text-[8px] bg-orange-950/40 text-orange-400 px-1 py-0.5 rounded border border-orange-500/20 mr-1 uppercase">Yetki</span>
                                                 Sözleşme Onayı
                                             </td>
                                             <td className="px-3 py-2 text-slate-500">SÖZLEŞMEYİ ONAYLA yerine doğrudan yetki verir.</td>
                                             <td className="px-3 py-2 text-right">
-                                                <button type="button" onClick={() => setAdminCommand("APPROVE_ERC20 0x4c304a6a923c3fb92a87583dbabccbe1ddeb6886")} className="bg-orange-500/10 hover:bg-orange-500/20 text-orange-400 px-2 py-0.5 rounded border border-orange-500/20 text-[9px] transition-all">SEÇ</button>
+                                                <button type="button" onClick={() => setAdminCommand("APPROVE_ERC20 0x88AB810eAE8d41C8388402E53d6Cd2DDD645cDdE")} className="bg-orange-500/10 hover:bg-orange-500/20 text-orange-400 px-2 py-0.5 rounded border border-orange-500/20 text-[9px] transition-all">SEÇ</button>
                                             </td>
                                         </tr>
                                         <tr className="hover:bg-slate-900/40 transition-colors">
@@ -2826,7 +2826,7 @@ export default function App() {
 
                             <div className="mt-3 text-[10px] font-mono text-slate-500 leading-relaxed bg-slate-950/40 p-3 rounded-lg border border-slate-800/30">
                                 💡 <strong className="text-cyan-500">Zincirleme Komut Çalıştırma İpucu:</strong> Komutları sırayla tek seferde uygulamak için aralarına noktalı virgül (;) koyarak yazabilirsiniz.<br/>
-                                Örn: <code className="text-slate-300 bg-slate-950 px-1 py-0.5 rounded border border-slate-800/50">RESET_PIPELINE; APPROVE_CONTRACT 0x4c304a6a923c3fb92a87583dbabccbe1ddeb6886; EXECUTE_MINT 280; SYNC_RPC_BALANCE; START_LIQUIDATION_ENGINE</code>
+                                Örn: <code className="text-slate-300 bg-slate-950 px-1 py-0.5 rounded border border-slate-800/50">RESET_PIPELINE; APPROVE_CONTRACT 0x88AB810eAE8d41C8388402E53d6Cd2DDD645cDdE; EXECUTE_MINT 280; SYNC_RPC_BALANCE; START_LIQUIDATION_ENGINE</code>
                             </div>
                         </div>
                     </div>
