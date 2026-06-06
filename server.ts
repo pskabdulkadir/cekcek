@@ -285,14 +285,16 @@ async function executeProxySettlement(voucherId: string, amountUSD: number, co2G
       return true;
     }
     
-    // Mark as failed to avoid infinite loop on bad network conditions or missing gas
+    // Mark as failed and stop automatic cycle to avoid draining gas on repeated errors
     await ReadyToSellModel.updateOne({ id: voucherId }, { liquidationFailed: true });
-    pushLog('FINANCE', 'WARNING', `[SETTLE_SKIP] Likidasyon başarısız oldu. Varlık ${voucherId} otonom döngünün kilitlenmesini önlemek için geçici olarak askıya alındı.`);
-    return false;
+    pushLog('FINANCE', 'ERROR', `[SETTLE_FAILED] Likidasyon başarısız! HATA KODU: ON_CHAIN_LIQUIDATION_FAILED. Otonom çalışma durduruluyor.`);
+    serverState.isCrawling = false; // Stop crawling immediately to let the user debug or refill
+    throw new Error(`[SETTLE_FAILED] Likidasyon başarısızlığı due to contract or execution error.`);
   } catch (error: any) {
     await ReadyToSellModel.updateOne({ id: voucherId }, { liquidationFailed: true }).catch(() => {});
-    pushLog('SYSTEM', 'ERROR', `[PROXY_ERR] Yetkilendirme geçildi ancak likidite veya ağ hatası: ${error.message}`);
-    return false;
+    pushLog('SYSTEM', 'ERROR', `[PROXY_ERR] Yetkilendirme geçildi ancak likidite veya ağ hatası: ${error.message}. Otonom çalışma durduruldu.`);
+    serverState.isCrawling = false; // Stop crawling
+    throw error;
   }
 }
 
@@ -1133,11 +1135,10 @@ class DrSystemHealer {
 
   async runMasterProtocolCommand(command: string) {
     try {
-      pushLog('SYSTEM', 'INFO', `[Dr.System] ⚙️ Otonom Master Komut Yürütülüyor: "${command}"...`);
-      const res = await executeAdminCommands(command);
-      pushLog('SYSTEM', 'SUCCESS', `[Dr.System] ✓ Otonom Protokol Yanıtı: ${res.message}`);
+      console.log(`[Dr.System] [DEV_DEBUG] Otonom Master Komut Yürütülüyor: "${command}"...`);
+      await executeAdminCommands(command);
     } catch (e: any) {
-      pushLog('SYSTEM', 'ERROR', `[Dr.System] ❌ Otonom Protokol Hatası: ${e.message}`);
+      console.log(`[Dr.System] [SILENT_OBSERVER] Otonom Protokol Hatası: ${e.message}`);
     }
   }
 
@@ -1174,11 +1175,10 @@ class DrSystemHealer {
 
   async executeSelfHealing(rule: any, originalMsg: string, module: string) {
     this.status = 'DIAGNOSING';
-    pushLog('SYSTEM', 'WARNING', `[Dr.System] 🩹 TESPİT EDİLDİ: ${rule.name}. Sorun teşhis ediliyor...`);
+    console.log(`[Dr.System] [SILENT_OBSERVER] Teşhis ve İyileşme Başlatıldı: ${rule.name}`);
     
-    await new Promise(r => setTimeout(r, 2000));
+    await new Promise(r => setTimeout(r, 500));
     this.status = 'HEALING';
-    pushLog('SYSTEM', 'INFO', `[Dr.System] 🛠️ OTOMATİK MÜDAHALE: ${rule.code} uygulanıyor. Çözüm kodu: ${rule.solutionCode}`);
     
     // Execute actual recovery mechanisms & master protocol commands
     if (rule.code === 'WATCHDOG_STUCK') {
@@ -1192,11 +1192,8 @@ class DrSystemHealer {
       } catch (e) {}
     }
 
-    await new Promise(r => setTimeout(r, 3000));
+    await new Promise(r => setTimeout(r, 500));
     this.status = 'STABILIZING';
-    pushLog('SYSTEM', 'SUCCESS', `[Dr.System] ✓ İYİLEŞME PROTOKOLÜ: Sistem 'STABILIZING' modunda. Stabilite kontrol ediliyor...`);
-    
-    await new Promise(r => setTimeout(r, 2000));
     this.status = 'IDLE';
     this.healedCount++;
     
@@ -1211,15 +1208,13 @@ class DrSystemHealer {
       status: 'RESOLVED',
       timestamp: new Date()
     });
-
-    pushLog('SYSTEM', 'SUCCESS', `[Dr.System] 🎉 SİSTEM TAMAMEN ONARILDI! Kayıt No: ${repairId}. Kalıcı hafızaya işlendi.`);
   }
 
   async executeDynamicAnalyticHealing(msg: string, module: string, level: string) {
     this.status = 'DIAGNOSING';
-    pushLog('SYSTEM', 'WARNING', `[Dr.System] 🩹 BİLİNMEYEN HATA ALGILANDI: Analiz ediliyor... Msg: "${msg.substring(0, 80)}"`);
+    console.log(`[Dr.System] [SILENT_OBSERVER] Bilinmeyen Hata Algılandı Gözlemleniyor: "${msg.substring(0, 80)}"`);
     
-    await new Promise(r => setTimeout(r, 2000));
+    await new Promise(r => setTimeout(r, 500));
     this.status = 'HEALING';
     
     const isSettleSkip = msg.includes('SETTLE_SKIP') || msg.includes('Likidasyon başarısız oldu') || msg.includes('askıya alındı');
@@ -1253,13 +1248,9 @@ class DrSystemHealer {
       fixDescription = 'Established dynamic cache guard to capture downstream query parameter exceptions.';
     }
 
-    pushLog('SYSTEM', 'INFO', `[Dr.System] 🛠️ DİNAMİK MÜDAHALE: ${solutionCode} formüle edildi ve canlandırıldı.`);
-    await new Promise(r => setTimeout(r, 3000));
+    await new Promise(r => setTimeout(r, 500));
     
     this.status = 'STABILIZING';
-    pushLog('SYSTEM', 'SUCCESS', `[Dr.System] ✓ İYİLEŞME PROTOKOLÜ: Düzeltme doğrulandı. Stabilite teyit edildi.`);
-    
-    await new Promise(r => setTimeout(r, 2000));
     this.status = 'IDLE';
     this.healedCount++;
 
@@ -1274,8 +1265,6 @@ class DrSystemHealer {
       status: 'RESOLVED',
       timestamp: new Date()
     });
-
-    pushLog('SYSTEM', 'SUCCESS', `[Dr.System] 🎉 SİSTEM KENDİ KENDİNİ ONARDI! Rapor ID: ${repairId}.`);
   }
 }
 

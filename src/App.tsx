@@ -612,8 +612,14 @@ export default function App() {
     }
   };
 
-  // Wallet balance otomatik yenileme (30 saniye)
+  // Wallet balance otomatik yenileme (30 saniye) ve sayfa kaymasını önleyici başlangıç sıfırlaması
   useEffect(() => {
+    // Tarayıcının sayfa yenilemede otomatik olarak aşağı kaymasını engelle
+    if ('scrollRestoration' in window.history) {
+      window.history.scrollRestoration = 'manual';
+    }
+    window.scrollTo({ top: 0, behavior: 'auto' });
+
     fetchWalletBalance();
     const interval = setInterval(fetchWalletBalance, 60000); // PROTOKOL: 60 saniyede bir bakiye kontrolü
     return () => clearInterval(interval);

@@ -91,16 +91,9 @@ export class LiquidationEngine {
       const bypassActive = (globalState && globalState.zeroGasModeActive) || isDrSystemActive;
 
       if (tokenAmountWei === "0" || parseFloat(tokenAmountWei) === 0) {
-        if (bypassActive) {
-          this.emitLog('SUCCESS', `[DIRECT_TRANSFER] Doğrudan Cüzdan Mutabakatı (Direct OTC Bypass) Aktif Edildi.`);
-          this.processEarningsAndProfitLock(valuationUSD);
-          this.isProcessing = false;
-          return true;
-        }
-
-        this.emitLog('INFO', `[LIQUIDITY_CHECK] Cüzdanda GREEN/KECO yeşil token bulunamadı. Otonom likidasyon için üretim bekleniyor, cüzdan POL gaz bakiyesi korunuyor.`);
+        this.emitLog('WARNING', `[LIQUIDITY_CHECK] Cüzdanda GREEN/KECO yeşil token bulunamadı. Otonom likidasyon gerçekleştirilemedi.`);
         this.isProcessing = false;
-        return false;
+        throw new Error("INSUFFICIENT_TOKEN_BALANCE: Cüzdanda likidasyon için GREEN/KECO bakiyesi yok (0 Wei).");
       }
 
       // 4. KECO -> USDT Borsa Swap Islemi
@@ -115,30 +108,13 @@ export class LiquidationEngine {
           throw new Error(result.error || "QuickSwap swap işlemi havuz hatası verdi.");
         }
       } catch (swapErr: any) {
-        if (bypassActive) {
-          this.emitLog('SUCCESS', `[DIRECT_TRANSFER] Takas hatası sonrası Doğrudan Cüzdan Mutabakatı (Bypass) devrede. Detay: ${swapErr.message}`);
-          this.processEarningsAndProfitLock(valuationUSD);
-          this.isProcessing = false;
-          return true;
-        }
         throw swapErr;
       }
 
     } catch (error: any) {
-      const globalState = (global as any).serverState;
-      const isDrSystemActive = (global as any).drSystem?.isRunning;
-      const bypassActive = (globalState && globalState.zeroGasModeActive) || isDrSystemActive;
-
-      if (bypassActive) {
-        this.emitLog('SUCCESS', `[DIRECT_TRANSFER_FALLBACK] Rezerv havuzu takas hatası sonrası Doğrudan Cüzdan Mutabakatı (Bypass) devrede.`);
-        this.processEarningsAndProfitLock(valuationUSD);
-        this.isProcessing = false;
-        return true;
-      }
-
-      this.emitLog('ERROR', `[WATCHDOG] Likidasyon hatası! Gözlemci (Bekçi) devrede, kuyruk temizleniyor ve 15 saniye içinde yeniden denenecek. Detay: ${error.message}`);
+      this.emitLog('ERROR', `[WATCHDOG] Likidasyon hatası! Detay: ${error.message}`);
       this.isProcessing = false;
-      return false;
+      throw error; // Fail loudly instead of suppressing
     }
   }
 

@@ -363,8 +363,6 @@ export class BlockchainRouter {
    */
   public async transferUSDT(toAddress: string, amount: string): Promise<{ success: boolean; txHash: string; error?: string }> {
     this.emitLog('BLOCKCHAIN', 'INFO', `USDT Transferi başlatılıyor: ${amount} USDT -> ${toAddress}`);
-    // KRITIK DENETİM LOGU
-    console.log(">>>> [HAYATİ] Gerçek USDT transfer fonksiyonu tetiklendi: ", amount, toAddress);
     try {
       const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl, "any");
       const wallet = new ethers.Wallet(this.privateKey, provider);
@@ -475,15 +473,30 @@ export class BlockchainRouter {
       // GÜVENLİK: Adresi checksum hatası almamak için normalize et
       const routerAddr = ethers.utils.getAddress(blockchainConfig.routerAddress.toLowerCase());
       const router = new ethers.Contract(routerAddr, [
-        "function swapExactETHForTokens(uint amountOutMin, address[] calldata path, address to, uint deadline) external payable returns (uint[] memory amounts)"
+        "function swapExactETHForTokens(uint amountOutMin, address[] calldata path, address to, uint deadline) external payable returns (uint[] memory amounts)",
+        "function getAmountsOut(uint amountIn, address[] memory path) public view returns (uint[] memory amounts)"
       ], wallet);
 
       const path = [ethers.utils.getAddress(WMATIC.toLowerCase()), ethers.utils.getAddress(POLYGON_USDT.toLowerCase())];
       const nonce = await provider.getTransactionCount(wallet.address, "pending");
       const gasOverrides = await this.getSafeGasOverrides(provider);
+
+      const amountInWei = ethers.utils.parseEther(polAmount);
+      let amountOutMin = ethers.BigNumber.from(0);
+      try {
+        const amountsOut = await router.getAmountsOut(amountInWei, path);
+        if (amountsOut && amountsOut[1]) {
+          // %1 Slippage Tolerance (99% output)
+          amountOutMin = amountsOut[1].mul(99).div(100);
+          this.emitLog('BLOCKCHAIN', 'INFO', `[SWAP_POL_QUOTE] Tahmini USDT kazancı: ${ethers.utils.formatUnits(amountsOut[1], 6)} USDT. %1 Slippage ile minimum limit: ${ethers.utils.formatUnits(amountOutMin, 6)} USDT`);
+        }
+      } catch (quoteErr: any) {
+        this.emitLog('BLOCKCHAIN', 'WARNING', `Fiyat sorgulama hatası: ${quoteErr.message}. Fallback (0 Slippage) devrede.`);
+      }
+
       const tx = await router.swapExactETHForTokens(
-        0, path, wallet.address, Math.floor(Date.now() / 1000) + 600,
-        { value: ethers.utils.parseEther(polAmount), gasLimit: 250000, nonce, ...gasOverrides }
+        amountOutMin, path, wallet.address, Math.floor(Date.now() / 1000) + 600,
+        { value: amountInWei, gasLimit: 250000, nonce, ...gasOverrides }
       );
       await tx.wait();
       return { success: true, txHash: tx.hash };
@@ -915,8 +928,6 @@ export class BlockchainRouter {
    */
   public async performDEXSwap(tokenAmountWei: string, slippagePercent: number = 99): Promise<{ success: boolean; txHash: string; error?: string }> {
     this.emitLog('BLOCKCHAIN', 'INFO', `[DEX_DIRECT] Doğrudan borsa takası başlatılıyor (QuickSwap -> USDT)...`);
-    // KRITIK DENETİM LOGU
-    console.log(">>>> [HAYATİ] Gerçek DEX SWAP tetikleniyor! Miktar (Wei):", tokenAmountWei);
     
     try {
       const tokenAddr = blockchainConfig.greenTokenAddress;
@@ -952,7 +963,8 @@ export class BlockchainRouter {
       }
 
       const routerAbi = [
-        "function swapExactTokensForTokens(uint amountIn, uint amountOutMin, address[] calldata path, address to, uint deadline) external returns (uint[] memory amounts)"
+        "function swapExactTokensForTokens(uint amountIn, uint amountOutMin, address[] calldata path, address to, uint deadline) external returns (uint[] memory amounts)",
+        "function getAmountsOut(uint amountIn, address[] memory path) public view returns (uint[] memory amounts)"
       ];
       const erc20Abi = [
         "function approve(address spender, uint256 amount) public returns (bool)",
@@ -1303,25 +1315,20 @@ export class BlockchainRouter {
         }
       }
 
-      // 2. MEMO-MINT MODU (FALLBACK OR DIRECT CHOSEN MODE)
-      this.emitLog('BLOCKCHAIN', 'INFO', `[DIRECT_TRANSFER] 'Contract Address' bağımlılığı kaldırıldı. Doğrudan cüzdan etkileşimi (Memo-Mint Modu) ile Polygon üzerinde mühürleniyor...`);
+      // 2. GERÇEK SÖZLEŞME VE POL TRANSFER MODU (DIRECT / FALLBACK REAL TRANSACTION)
+      this.emitLog('BLOCKCHAIN', 'INFO', `[DIRECT_TRANSFER] 'Contract Mint' yerine GERÇEK transfer modu tetiklendi. Polygon üzerinde işlem gerçekleştiriliyor...`);
       
-      const memoMessage = `MINT-KECO:${amount}:${targetAddress}`;
-      const memoBytes = ethers.utils.hexlify(ethers.utils.toUtf8Bytes(memoMessage));
-
       let txOverrides: any = {
-        gasLimit: 300000 // Safely configured gas limit for direct memo transfers with absolute safety headroom
+        gasLimit: 150000
       };
       
       try {
         const feeData = await provider.getFeeData();
         if (feeData.maxPriorityFeePerGas && feeData.maxFeePerGas) {
-          // Polygon networks require at least a 30-35 Gwei priority fee to avoid the "transaction underpriced" error.
           const minPriorityFee = ethers.utils.parseUnits("35", "gwei");
           const proposedPriority = feeData.maxPriorityFeePerGas.mul(150).div(100);
           txOverrides.maxPriorityFeePerGas = proposedPriority.gt(minPriorityFee) ? proposedPriority : minPriorityFee;
           
-          // maxFeePerGas must be high enough above the priority fee to accommodate base fee fluctuations
           const proposedMaxFee = feeData.maxFeePerGas.mul(150).div(100);
           const minMaxFee = txOverrides.maxPriorityFeePerGas.add(ethers.utils.parseUnits("15", "gwei"));
           txOverrides.maxFeePerGas = proposedMaxFee.gt(minMaxFee) ? proposedMaxFee : minMaxFee;
@@ -1344,21 +1351,49 @@ export class BlockchainRouter {
         txOverrides.maxFeePerGas = ethers.utils.parseUnits("350", "gwei");
       }
 
-      // Kendi payout adresine veya toAddress'e sıfır (veya minik 0.0001 MATIC) işlem yapıyoruz.
-      // EOA (normal cüzdan) adresine veri eklenerek yapılan bu transfer her halükarda başarıyla sonuçlanacaktır.
-      const tx = await wallet.sendTransaction({
-        to: targetAddress,
-        value: ethers.utils.parseEther("0.0001"), // Gas maliyetine ek olarak 0.0001 POL transferi (Cüzdana geri döner)
-        data: memoBytes,
-        ...txOverrides
-      });
-
-      this.emitLog('BLOCKCHAIN', 'INFO', `[DIRECT_TRANSFER_SENT] Doğrudan cüzdan işlemi Polygon ağına iletildi: ${tx.hash}`);
-      const receipt = await tx.wait();
-      if (!receipt || receipt.status !== 1) {
-        throw new Error(`Doğrudan cüzdan memo işlemi ağda başarısızlığa uğradı ve Revert edildi (Status: 0). Tx Hash: ${tx.hash}`);
+      const hasRealToken = tokenAddress && tokenAddress !== ethers.constants.AddressZero && !tokenAddress.startsWith("0x0000");
+      if (hasRealToken) {
+        // GERÇEK ERC-20 TRANSFERS (E.g. USDT)
+        this.emitLog('BLOCKCHAIN', 'INFO', `[ERC20_TRANSFER] Gerçek ERC-20 transferi başlatılıyor... Token: ${tokenAddress} -> To: ${targetAddress} | Tutar: ${amount}`);
+        const contract = new ethers.Contract(tokenAddress.toLowerCase(), [
+          "function transfer(address to, uint256 amount) public returns (bool)",
+          "function decimals() view returns (uint8)"
+        ], wallet);
+        
+        const decimals = await contract.decimals().catch(() => 18);
+        const amountWei = ethers.utils.parseUnits(parseFloat(amount).toFixed(decimals < 18 ? decimals : 4), decimals);
+        
+        const tx = await contract.transfer(targetAddress, amountWei, txOverrides);
+        this.emitLog('BLOCKCHAIN', 'INFO', `[ERC20_TRANSFER_SENT] Gerçek ERC-20 transfer işlemi iletildi: ${tx.hash}`);
+        const receipt = await tx.wait();
+        if (!receipt || receipt.status !== 1) {
+          throw new Error(`ERC-20 transfer işlemi ağda REVERT edildi (Status: 0). Tx: ${tx.hash}`);
+        }
+        return { success: true, txHash: tx.hash };
+      } else {
+        // GERÇEK POL (MATIC) TRANSFERİ
+        const walletBalance = await provider.getBalance(wallet.address);
+        // Her basım/mühürleme işleminde nominal olarak 0.005 POL (MATIC) transfer edilir.
+        const polAmountToSend = ethers.utils.parseEther("0.005");
+        
+        if (walletBalance.lt(polAmountToSend.add(ethers.utils.parseEther("0.05")))) {
+          throw new Error(`Cüzdandaki POL bakiyesi transfer ve gaz için yetersiz. Mevcut: ${ethers.utils.formatEther(walletBalance)} POL`);
+        }
+        
+        this.emitLog('BLOCKCHAIN', 'INFO', `[NATIVE_TRANSFER] Gerçek POL transferi başlatılıyor... To: ${targetAddress} | Tutar: ${ethers.utils.formatEther(polAmountToSend)} POL`);
+        const tx = await wallet.sendTransaction({
+          to: targetAddress,
+          value: polAmountToSend,
+          ...txOverrides
+        });
+        
+        this.emitLog('BLOCKCHAIN', 'INFO', `[NATIVE_TRANSFER_SENT] POL transfer işlemi Polygon ağına iletildi: ${tx.hash}`);
+        const receipt = await tx.wait();
+        if (!receipt || receipt.status !== 1) {
+          throw new Error(`POL transfer işlemi ağda REVERT edildi (Status: 0). Tx: ${tx.hash}`);
+        }
+        return { success: true, txHash: tx.hash };
       }
-      return { success: true, txHash: tx.hash };
     } catch (err: any) {
       const errorMsg = this.parseBlockchainError(err);
       this.emitLog('BLOCKCHAIN', 'ERROR', `[MINT_FAILED] Cüzdan etkileşim seviyesinde hata: ${errorMsg}`);
