@@ -37,6 +37,8 @@ if (envResult.error && !process.env.PRIVATE_KEY) {
 console.log("DEBUG: PRIVATE_KEY kontrolü:", process.env.PRIVATE_KEY ? "YÜKLÜ" : "BOŞ!");
 console.log("DEBUG: MONGO_URI kontrolü:", process.env.MONGO_URI ? "YÜKLÜ" : "BOŞ (varsayılan kullanılacak)");
 console.log("DEBUG: CONFIG_OVERRIDE kontrolü:", process.env.CONFIG_OVERRIDE ? "TRUE" : "FALSE (varsayılan kullanılacak)");
+console.log("DEBUG: GREEN_TOKEN_ADDRESS:", process.env.GREEN_TOKEN_ADDRESS || "BOŞ (varsayılan: 0x88AB810eAE8d41C8388402E53d6Cd2DDD645cDdE)");
+console.log("DEBUG: SMART_GATE_CONTRACT_ADDRESS / CONTRACT_ADDRESS:", process.env.CONTRACT_ADDRESS || process.env.SMART_GATE_CONTRACT_ADDRESS || "BOŞ (varsayılan: 0x88AB810eAE8d41C8388402E53d6Cd2DDD645cDdE)");
 console.log("DEBUG: AQUARIUS_URL:", 'https://aquarius.oceanprotocol.com'); // Ana ağ geçidi
 
 // GÜVENLİK KRİTİK: Üretim modunda gizli değişkenler zorunludur
@@ -51,7 +53,7 @@ export const blockchainConfig = {
     geminiApiKey: process.env.GEMINI_API_KEY || '',
     appUrl: process.env.APP_URL || '',
     configOverride: process.env.CONFIG_OVERRIDE === 'true',
-    contractAddress: process.env.CONTRACT_ADDRESS || process.env.SMART_GATE_CONTRACT_ADDRESS || '0x0000000000000000000000000000000000000000', // Data NFT Factory veya Veri Erişim Kontratı
+    contractAddress: process.env.CONTRACT_ADDRESS || process.env.SMART_GATE_CONTRACT_ADDRESS || '0x88AB810eAE8d41C8388402E53d6Cd2DDD645cDdE', // Data NFT Factory veya Veri Erişim Kontratı
     routerAddress: process.env.ROUTER_ADDRESS || '0xa5e0829caced8ffdd052420551415491d6993e2f',
     payoutWallet: (() => {
         const rawAddress = process.env.PAYOUT_WALLET || process.env.CHANNEL_ROUTING_WALLET || "";
@@ -87,7 +89,7 @@ export const blockchainConfig = {
     bridgeApiUrl: process.env.BRIDGE_API_URL || '', // Opsiyonel: Dış borsalara veri çıkışı için Gateway URL
     bridgeAuthToken: process.env.BRIDGE_AUTH_TOKEN || '', // Ticari Köprü Yetkilendirme Tokenı
     proxySettlementUrl: '', // Geçersiz DNS adresi temizlendi
-    greenTokenAddress: process.env.GREEN_TOKEN_ADDRESS || '0x0000000000000000000000000000000000000000',
+    greenTokenAddress: process.env.GREEN_TOKEN_ADDRESS || '0x88AB810eAE8d41C8388402E53d6Cd2DDD645cDdE',
     gasRefillEnabled: process.env.GAS_REFILL_ENABLED !== 'false', // Otomatik yakıt doldurma aktif mi?
     gasRefillThreshold: parseFloat(process.env.GAS_REFILL_THRESHOLD || '0.5'), // 0.5 POL altına düşerse işlem yapma/doldur
     gasRefillUsdtAmount: parseFloat(process.env.GAS_REFILL_USDT_AMOUNT || '5.0'), // 5 USDT'lik yakıt al

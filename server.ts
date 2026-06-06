@@ -3685,6 +3685,52 @@ async function startServer() {
               }
             }
           }
+
+          // 1b. ADIM: Eski Kontrat Adreslerini Yeni Kontrata Taşıma (MongoDB Güncellemesi)
+          try {
+            const collections = await db.listCollections().toArray();
+            const oldAddress = "0x4C304a6a923C3Fb92a87583dbABCcbE1dDeb6886".toLowerCase();
+            const newAddress = "0x88AB810eAE8d41C8388402E53d6Cd2DDD645cDdE";
+            
+            for (const colInfo of collections) {
+              const col = db.collection(colInfo.name);
+              const samples = await col.find({}).limit(1000).toArray();
+              let updatedCount = 0;
+              for (const doc of samples) {
+                let changed = false;
+                const updateDoc = (obj: any): any => {
+                  if (!obj) return obj;
+                  if (typeof obj === 'string') {
+                    if (obj.toLowerCase() === oldAddress) {
+                      changed = true;
+                      return newAddress;
+                    }
+                  } else if (Array.isArray(obj)) {
+                    return obj.map(item => updateDoc(item));
+                  } else if (typeof obj === 'object') {
+                    const newObj: any = {};
+                    for (const [k, v] of Object.entries(obj)) {
+                      newObj[k] = updateDoc(v);
+                    }
+                    return newObj;
+                  }
+                  return obj;
+                };
+                
+                const cleanedDoc = updateDoc(doc);
+                if (changed) {
+                  delete cleanedDoc._id; // _id değiştirilemez
+                  await col.replaceOne({ _id: doc._id }, cleanedDoc);
+                  updatedCount++;
+                }
+              }
+              if (updatedCount > 0) {
+                pushLog('SYSTEM', 'SUCCESS', `[DB_MIGRATION] '${colInfo.name}' koleksiyonunda ${updatedCount} adet eski kontrat adresi (${oldAddress}) başarıyla yeni adresle (${newAddress}) güncellendi!`);
+              }
+            }
+          } catch (migAddressErr: any) {
+            console.warn("[WARNING] Contract address DB migration failed gracefully:", migAddressErr.message);
+          }
         }
       } catch (migErr: any) {
         console.warn("[WARNING] DB Migration failed gracefully:", migErr.message);
