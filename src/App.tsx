@@ -675,19 +675,33 @@ export default function App() {
 
   // Handle Crawl Bot start signal emission
   const startCrawlBot = async () => {
+    // Optimistic UI update to ensure instant response on button click
+    setStats((prev) => ({ ...prev, isCrawling: true }));
     try {
-      await fetch("/api/crawl/start", { method: "POST" });
+      const res = await fetch("/api/crawl/start", { method: "POST" });
+      if (res.ok) {
+        await fetchStats();
+      }
     } catch (err) {
       console.error(err);
+      // Rollback on error
+      setStats((prev) => ({ ...prev, isCrawling: false }));
     }
   };
 
   // Handle Crawl Bot stop signal emission
   const stopCrawlBot = async () => {
+    // Optimistic UI update to ensure instant response on button click
+    setStats((prev) => ({ ...prev, isCrawling: false }));
     try {
-      await fetch("/api/crawl/stop", { method: "POST" });
+      const res = await fetch("/api/crawl/stop", { method: "POST" });
+      if (res.ok) {
+        await fetchStats();
+      }
     } catch (err) {
       console.error(err);
+      // Rollback on error
+      setStats((prev) => ({ ...prev, isCrawling: true }));
     }
   };
 
