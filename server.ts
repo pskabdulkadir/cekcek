@@ -456,12 +456,21 @@ async function monitorAndLiquidate() {
       const pendingAssets = await ReadyToSellModel.find({ isSold: false, liquidationFailed: { $ne: true }, isMintedOnChain: { $ne: false } }).sort({ timestamp: -1 });
       
       if (pendingAssets && pendingAssets.length > 0) {
-        if ((serverState as any).batchOnlyMode) {
-          // BATCH ONLY MODE ACTIVE
+        // GUARD: Eğer sistemde daha önceki batch operasyonu başarısız olduysa, yeni batch denemesini ötelemek
+        const failedBatchCount = pendingAssets.filter((p: any) => p.status === "PENDING_MANUAL_REVIEW" || p.liquidationFailed).length;
+        const failureRatio = failedBatchCount / pendingAssets.length;
+
+        if (failureRatio > 0.5) {
+          // %50'den fazla varlık başarısız → Manual inceleme gerekli
+          if (Math.random() > 0.8) {
+            pushLog('FINANCE', 'WARNING', `[BATCH_GUARD_ACTIVE] %${(failureRatio * 100).toFixed(0)} başarısızlık oranı tespit edildi. Batch operasyonu otomatik olarak erteleniyor. Manuel kontrol gerekli.`);
+          }
+        } else if ((serverState as any).batchOnlyMode) {
+          // BATCH ONLY MODE ACTIVE - güvenli koşullarda işlem
           const totalValUSD = pendingAssets.reduce((sum: number, item: any) => sum + (item.accessPriceUSD || 0), 0);
           const totalCo2 = pendingAssets.reduce((sum: number, item: any) => sum + (item.co2AnalysisGrams || 0), 0);
           const threshold = (serverState as any).batchOnlyThreshold || 5.0;
-          
+
           if (totalValUSD >= threshold) {
             pushLog('FINANCE', 'SUCCESS', `[BATCH_TRIGGER] 🎉 Toplu Mutabakat Eşiği Aşıldı! Biriken Değer: $${totalValUSD.toFixed(4)} USD (Eşik: $${threshold.toFixed(2)} USD). Toplam ${pendingAssets.length} adet varlık tek bir Toplu Likidasyon (Batch Liquidation) işlemiyle nakde çevriliyor...`);
             
