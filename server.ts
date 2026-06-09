@@ -73,8 +73,9 @@ const AQUARIUS_URL = blockchainConfig.oceanProtocolUrl;
 
 // --- GÜVENLİK KATMANI: SÖZLEŞME BEYAZ LİSTESİ ---
 const ALLOWED_CONTRACTS = [
-    ethers.utils.getAddress("0x4544d5674066f7f6f966144510006327e5b56345".toLowerCase()), // Ocean Market (Örnek)
-    ethers.utils.getAddress("0x71C7656EC7ab88b098defB751B7401B5f6d8976F".toLowerCase()), // Smart Gate (Örnek)
+    ethers.utils.getAddress("0x4544d5674066f7f6f966144510006327e5b56345".toLowerCase()), // Ocean Market
+    ethers.utils.getAddress("0x88AB810eAE8d41C8388402E53d6Cd2DDD645cDdE".toLowerCase()), // KECO Token Contract (Doğru)
+    ethers.utils.getAddress("0x06E83497F599D67447EfFfeA399cC885CEB6eEff".toLowerCase()), // Ana Signer Cüzdanı
 ].map(addr => addr.toLowerCase());
 
 function validateContractAddress(address: string) {
@@ -285,17 +286,47 @@ async function executeProxySettlement(voucherId: string, amountUSD: number, co2G
     serverState.selectedNetworkPath = chosenChain as any;
     pushLog('FINANCE', 'SUCCESS', `[PATH_DECISION] Otonom Rota Bulucu en kârlı kanalı seçti: ${chosenChain.toUpperCase()} L2. Likidasyon bu ağa yönlendiriliyor. (Net Kâr: $${maxYield.toFixed(4)})`);
 
-    const success = await mainLiquidation.performInstantLiquidation(voucherId, amountUSD, co2Grams);
+    let success = false;
+    try {
+      success = await mainLiquidation.performInstantLiquidation(voucherId, amountUSD, co2Grams);
+    } catch (liquidErr: any) {
+      const errMsg = liquidErr.message || String(liquidErr);
+
+      // KRITIK FİKS: INSUFFICIENT_TOKEN_BALANCE hatası = sistem konfigürasyonunda sorun var
+      if (errMsg.includes("INSUFFICIENT_TOKEN_BALANCE")) {
+        pushLog('FINANCE', 'ERROR', `[CRITICAL_CONFIG_ERROR] ⚠️ ÇÖZÜM GEREKLİ: ${errMsg}`);
+        pushLog('FINANCE', 'ERROR', `[CRITICAL_CONFIG_ERROR] Lütfen:
+1. Polygonscan'de cüzdan adresini kontrol edin: ${mainBlockchain.getWalletAddress()}
+2. blockchainConfig.greenTokenAddress = "${blockchainConfig.greenTokenAddress}" ile kontrat adresini doğrulayın
+3. KECO token var mı ve doğru adreste mi kontrol edin
+4. Gaz ücretleri eriteceğini göz önüne alarak manuel müdahale yapın`);
+
+        // Bu kritik hatada, sistem otomatik olarak durdurulmalı
+        await ReadyToSellModel.updateOne(
+          { id: voucherId },
+          {
+            liquidationFailed: true,
+            status: "CRITICAL_CONFIG_ERROR",
+            lastError: errMsg
+          }
+        );
+
+        serverState.isCrawling = false; // DURDUR
+        throw new Error(`[CRITICAL_HALT] Token bakiyesi sorunu tespit edildi. Manuel inceleme gerekiyor.`);
+      }
+
+      throw liquidErr;
+    }
+
     if (success) {
-      await ReadyToSellModel.updateOne({ id: voucherId }, { isSold: true, liquidationFailed: false });
+      await ReadyToSellModel.updateOne({ id: voucherId }, { isSold: true, liquidationFailed: false, status: "COMPLETED" });
       pushLog('FINANCE', 'SUCCESS', `[SETTLE_OK] Transfer otonom tamamlandı: ${maxYield.toFixed(4)} USDT karşılığı (${chosenChain.toUpperCase()} ağı üzerinden) cüzdana aktarıldı.`);
       return true;
     }
-    
+
     // Mark as failed and stop automatic cycle to avoid draining gas on repeated errors
     await ReadyToSellModel.updateOne({ id: voucherId }, { liquidationFailed: true });
-    pushLog('FINANCE', 'ERROR', `[SETTLE_FAILED] Likidasyon başarısız! HATA KODU: ON_CHAIN_LIQUIDATION_FAILED. Otonom çalışma durduruluyor.`);
-    serverState.isCrawling = false; // Stop crawling immediately to let the user debug or refill
+    pushLog('FINANCE', 'ERROR', `[SETTLE_FAILED] Likidasyon başarısız! HATA KODU: ON_CHAIN_LIQUIDATION_FAILED.`);
     throw new Error(`[SETTLE_FAILED] Likidasyon başarısızlığı due to contract or execution error.`);
   } catch (error: any) {
     await ReadyToSellModel.updateOne({ id: voucherId }, { liquidationFailed: true }).catch(() => {});
@@ -412,7 +443,14 @@ async function monitorAndLiquidate() {
 
     if (balanceNum >= 100.0) { // Gas tasarrufu için eşik 100 token
       pushLog('FINANCE', 'SUCCESS', `[PROFIT_TRIGGER] ${balanceNum.toFixed(2)} KECO tespit edildi. Nakde çevriliyor...`);
-      await mainLiquidation.performInstantLiquidation("MONITOR_BATCH_LIQUIDATION", balanceNum * 0.45, balanceNum);
+      try {
+        await mainLiquidation.performInstantLiquidation("MONITOR_BATCH_LIQUIDATION", balanceNum * 0.45, balanceNum);
+      } catch (liquidErr: any) {
+        if (liquidErr.message.includes("INSUFFICIENT_TOKEN_BALANCE")) {
+          pushLog('FINANCE', 'ERROR', `[MONITOR_CRITICAL] Token bakiyesi sorunu tespit: ${liquidErr.message}`);
+          serverState.isCrawling = false; // Otonom çalışmayı durdur
+        }
+      }
     } else {
       // Eğer KECO bakiyesi eşiğinin altındaysa, satılmamış, likidasyonu hatasız ve zincir üstü basımı onaylanmış varlıkları kontrol et!
       const pendingAssets = await ReadyToSellModel.find({ isSold: false, liquidationFailed: { $ne: true }, isMintedOnChain: { $ne: false } }).sort({ timestamp: -1 });
@@ -428,13 +466,28 @@ async function monitorAndLiquidate() {
             pushLog('FINANCE', 'SUCCESS', `[BATCH_TRIGGER] 🎉 Toplu Mutabakat Eşiği Aşıldı! Biriken Değer: $${totalValUSD.toFixed(4)} USD (Eşik: $${threshold.toFixed(2)} USD). Toplam ${pendingAssets.length} adet varlık tek bir Toplu Likidasyon (Batch Liquidation) işlemiyle nakde çevriliyor...`);
             
             // Execute batch settlement as a single combined OTC bypass or simulated bundle
-            const success = await mainLiquidation.performInstantLiquidation(`BATCH_LIQ_${Date.now()}`, totalValUSD, totalCo2);
-            if (success) {
-              const ids = pendingAssets.map((item: any) => item.id);
-              await ReadyToSellModel.updateMany({ id: { $in: ids } }, { isSold: true, liquidationFailed: false });
-              pushLog('FINANCE', 'SUCCESS', `[BATCH_SETTLE_OK] 🎉 Toplu Likidasyon Başarılı! Toplam ${pendingAssets.length} varlık için $${totalValUSD.toFixed(4)} USDT kazancı cüzdanın kullanılabilir bakiyesine yönlendirildi.`);
-            } else {
-              pushLog('FINANCE', 'ERROR', `[BATCH_SETTLE_FAILED] Toplu likidasyon işlemi başarısız oldu.`);
+            try {
+              const success = await mainLiquidation.performInstantLiquidation(`BATCH_LIQ_${Date.now()}`, totalValUSD, totalCo2);
+              if (success) {
+                const ids = pendingAssets.map((item: any) => item.id);
+                await ReadyToSellModel.updateMany({ id: { $in: ids } }, { isSold: true, liquidationFailed: false, status: "COMPLETED" });
+                pushLog('FINANCE', 'SUCCESS', `[BATCH_SETTLE_OK] 🎉 Toplu Likidasyon Başarılı! Toplam ${pendingAssets.length} varlık için $${totalValUSD.toFixed(4)} USDT kazancı cüzdanın kullanılabilir bakiyesine yönlendirildi.`);
+              } else {
+                pushLog('FINANCE', 'ERROR', `[BATCH_SETTLE_FAILED] Toplu likidasyon işlemi başarısız oldu.`);
+              }
+            } catch (batchErr: any) {
+              if (batchErr.message.includes("INSUFFICIENT_TOKEN_BALANCE")) {
+                pushLog('FINANCE', 'ERROR', `[BATCH_CRITICAL] ⚠️ Toplu işlem başarısız - Token bakiyesi sorunu: ${batchErr.message}`);
+                // Varlıkları PENDING olarak işaretle ve tekrar denememeyi sağla
+                const ids = pendingAssets.map((item: any) => item.id);
+                await ReadyToSellModel.updateMany(
+                  { id: { $in: ids } },
+                  { status: "PENDING_MANUAL_REVIEW", liquidationFailed: true }
+                );
+                serverState.isCrawling = false; // DURDUR
+              } else {
+                throw batchErr;
+              }
             }
           } else {
             // Log keeping track of accumulation
@@ -446,7 +499,15 @@ async function monitorAndLiquidate() {
           // Normal mode (single asset at a time)
           const pendingAsset = pendingAssets[0];
           pushLog('FINANCE', 'INFO', `[OTONOM_TETİK] Satılmamış varlık tespit edildi: ${pendingAsset.id}. Likidasyon motoru tetikleniyor...`);
-          await executeProxySettlement(pendingAsset.id, pendingAsset.accessPriceUSD || 0, pendingAsset.co2AnalysisGrams || 0);
+          try {
+            await executeProxySettlement(pendingAsset.id, pendingAsset.accessPriceUSD || 0, pendingAsset.co2AnalysisGrams || 0);
+          } catch (singleErr: any) {
+            if (singleErr.message.includes("INSUFFICIENT_TOKEN_BALANCE") || singleErr.message.includes("CRITICAL_HALT")) {
+              pushLog('FINANCE', 'ERROR', `[SINGLE_CRITICAL] Token bakiyesi sorunu - Sistem güvenli duruma alındı.`);
+              serverState.isCrawling = false; // DURDUR
+            }
+            // Diğer hatalar syslog'a yazılır ama döngü devam eder
+          }
         }
       }
     }
@@ -2486,6 +2547,61 @@ async function executeAdminCommands(rawCommand: string): Promise<{ success: bool
       upperCmd = "HALT_ALL_OPERATIONS";
     }
 
+    // 0.5. DIAGNOSE_LIQUIDATION_CRITICAL - Acil teknik teşhis
+    if (upperCmd === "DIAGNOSE_LIQUIDATION_CRITICAL" || upperCmd === "TEŞHIS_LİKİDASYON") {
+      const walletAddr = mainBlockchain.getWalletAddress();
+      const greenTokenAddr = blockchainConfig.greenTokenAddress;
+
+      pushLog('SYSTEM', 'ANALYZE', `=== ACIL TEŞHİS BAŞLADI ===`);
+      pushLog('SYSTEM', 'ANALYZE', `✓ Cüzdan Adresi: ${walletAddr}`);
+      pushLog('SYSTEM', 'ANALYZE', `✓ GREEN_TOKEN_ADDRESS (config): ${greenTokenAddr}`);
+
+      if (greenTokenAddr && !greenTokenAddr.startsWith("0x0000")) {
+        try {
+          const balance = await mainBlockchain.getTokenBalance(greenTokenAddr, walletAddr || "");
+          pushLog('SYSTEM', 'ANALYZE', `✓ KECO Bakiyesi: ${balance} (Wei: ${ethers.utils.parseUnits(balance, 18).toString()})`);
+
+          if (parseFloat(balance) === 0) {
+            pushLog('SYSTEM', 'ERROR', `⚠️ KRİTİK: Bakiye 0! Çözüm:`);
+            pushLog('SYSTEM', 'ERROR', `1. Token kontrat adresi (${greenTokenAddr}) Polygonscan'de var mı kontrol edin`);
+            pushLog('SYSTEM', 'ERROR', `2. Cüzdan adresi (${walletAddr?.slice(0, 10)}...) bu kontrata sahip KECO var mı kontrol edin`);
+            pushLog('SYSTEM', 'ERROR', `3. KECO basım işlemi onaylanıp blockchain'e yazıldı mı kontrol edin`);
+          }
+        } catch (balErr: any) {
+          pushLog('SYSTEM', 'ERROR', `⚠️ Bakiye okuma hatası: ${balErr.message}`);
+        }
+      }
+
+      pushLog('SYSTEM', 'ANALYZE', `✓ Cüzdan POL Bakiyesi:`);
+      try {
+        const gasBalance = await mainBlockchain.checkGasBalance('polygon');
+        pushLog('SYSTEM', 'ANALYZE', `  POL: ${gasBalance.balance} (Durum: ${gasBalance.balance === '0' ? 'KRİTİK - DOLDUR!' : 'OK'})`);
+      } catch (gasErr: any) {
+        pushLog('SYSTEM', 'ERROR', `  POL Okunamadı: ${gasErr.message}`);
+      }
+
+      pushLog('SYSTEM', 'ANALYZE', `✓ Bekleyen Varlıklar Durumu:`);
+      try {
+        const pending = await ReadyToSellModel.find({ isSold: false }).select('id liquidationFailed status');
+        const failedCount = pending.filter((p: any) => p.liquidationFailed).length;
+        pushLog('SYSTEM', 'ANALYZE', `  Toplam: ${pending.length} | Başarısız: ${failedCount} | Başarılı: ${pending.length - failedCount}`);
+
+        if (failedCount > 0) {
+          pushLog('SYSTEM', 'WARNING', `  Başarısız işlemlerin detayları:`);
+          const failed = pending.filter((p: any) => p.liquidationFailed);
+          for (const item of failed.slice(0, 3)) {
+            pushLog('SYSTEM', 'WARNING', `    - ${item.id} (status: ${(item as any).status || 'UNKNOWN'})`);
+          }
+        }
+      } catch (dbErr: any) {
+        pushLog('SYSTEM', 'ERROR', `  DB Okuması Hatası: ${dbErr.message}`);
+      }
+
+      pushLog('SYSTEM', 'ANALYZE', `=== TEŞHİS BITTI ===`);
+      results.push(`[DIAGNOSE] Teşhis tamamlandı. Loglara bakınız.`);
+      continue;
+    }
+
     // 1. GET_STATUS_REPORT
     if (upperCmd === "GET_STATUS_REPORT") {
       await generateStatusReport();
@@ -2752,16 +2868,45 @@ async function executeAdminCommands(rawCommand: string): Promise<{ success: bool
     if (upperCmd === "EXECUTE_PENDING_SETTLEMENTS") {
       mainLiquidation.resetProcessingState();
       try {
-        // Önce askıdaki hataları sıfırla ki işleme girebilsinler
-        await ReadyToSellModel.updateMany(
-          { isSold: false, liquidationFailed: true },
-          { liquidationFailed: false }
-        );
-        
+        // KRITIK FİKS: Hataları sıfırlamak yerine, hata sayısını kontrol et
+        // Aynı varlık 2+ kez başarısız olmuşsa "PENDING" durumuna al ve at geç
+        const failedAssets = await ReadyToSellModel.find({
+          isSold: false,
+          liquidationFailed: true
+        });
+
+        for (const asset of failedAssets) {
+          const failureCount = (asset as any).failureCount || 0;
+          if (failureCount >= 2) {
+            // 2+ kez başarısız oldu: Bu işlemi PENDING olarak işaretle ve döngüden çıkar
+            await ReadyToSellModel.updateOne(
+              { id: asset.id },
+              {
+                liquidationFailed: false, // Hata bayrağını sıfırla
+                status: "PENDING_MANUAL_REVIEW", // Manuel inceleme için işaretle
+                failureCount: failureCount
+              }
+            );
+            pushLog('FINANCE', 'WARNING', `[GUARD_SETTLE] ${asset.id} 2+ kez başarısız oldu. PENDING_MANUAL_REVIEW statüsüne alındı. Manuel Polygonscan kontrolü gerekli!`);
+            continue; // Bu işlemi atla
+          }
+
+          // İlk veya ikinci denemeden sonra, failureCount artır
+          await ReadyToSellModel.updateOne(
+            { id: asset.id },
+            {
+              liquidationFailed: false,
+              failureCount: failureCount + 1
+            }
+          );
+        }
+
         const pendingAssets = await ReadyToSellModel.find({
           isSold: false,
-          isMintedOnChain: { $ne: false } // zincir üstü basılmış olanlar veya false olmayanlar
-        }).sort({ timestamp: -1 });
+          liquidationFailed: false,
+          status: { $ne: "PENDING_MANUAL_REVIEW" },
+          isMintedOnChain: { $ne: false }
+        }).sort({ timestamp: -1 }).limit(5); // Maksimum 5 işlem (gas tüketimini kontrol et)
 
         if (pendingAssets.length === 0) {
           pushLog('FINANCE', 'WARNING', `[EXECUTE_PENDING_SETTLEMENTS] Satılmamış ve nakde çevrilmeye hazır bekleyen varlık bulunamadı.`);
@@ -2769,16 +2914,25 @@ async function executeAdminCommands(rawCommand: string): Promise<{ success: bool
           continue;
         }
 
-        pushLog('FINANCE', 'INFO', `[EXECUTE_PENDING_SETTLEMENTS] Askıda bekleyen ${pendingAssets.length} varlığın nakde çevrilmesi (USDT) zorla başlatılıyor...`);
+        pushLog('FINANCE', 'INFO', `[EXECUTE_PENDING_SETTLEMENTS] Askıda bekleyen ${pendingAssets.length} varlığın nakde çevrilmesi (USDT) başlatılıyor...`);
+        let successCount = 0;
         for (const asset of pendingAssets) {
-          mainLiquidation.resetProcessingState(); // her adımda kilit kalksın
-          pushLog('FINANCE', 'INFO', `[FORCED_SETTLE] ${asset.id} zorla nakde çevriliyor. Değer: $${(asset.accessPriceUSD || 0).toFixed(4)} USDT`);
-          await executeProxySettlement(asset.id, asset.accessPriceUSD || 0, asset.co2AnalysisGrams || 0);
+          mainLiquidation.resetProcessingState();
+          pushLog('FINANCE', 'INFO', `[SETTLE_ATTEMPT] ${asset.id} için likidasyon denemesi yapılıyor. Değer: $${(asset.accessPriceUSD || 0).toFixed(4)} USDT`);
+          try {
+            await executeProxySettlement(asset.id, asset.accessPriceUSD || 0, asset.co2AnalysisGrams || 0);
+            successCount++;
+          } catch (settleErr: any) {
+            // Hata oluştu: Başarısızlık sayacını artır ama döngüyü kırma
+            pushLog('FINANCE', 'WARNING', `[SETTLE_RETRY] ${asset.id} başarısız: ${settleErr.message}. Sonraki çevrimde tekrar denenecek.`);
+          }
         }
-        pushLog('FINANCE', 'SUCCESS', `[EXECUTE_PENDING_SETTLEMENTS] Zorlu nakit mutabakatı (Settlement) tamamlama süreci sona erdi.`);
-        results.push(`[EXECUTE_PENDING_SETTLEMENTS] ${pendingAssets.length} varlık için likidasyon zorlandı.`);
+        pushLog('FINANCE', 'INFO', `[EXECUTE_PENDING_SETTLEMENTS] Likidasyon çevrimi tamamlandı. Başarılı: ${successCount}/${pendingAssets.length}`);
+        results.push(`[EXECUTE_PENDING_SETTLEMENTS] ${successCount}/${pendingAssets.length} varlık başarıyla işlendi.`);
       } catch (err: any) {
-        results.push(`[EXECUTE_PENDING_SETTLEMENTS] Hata: ${err.message}`);
+        pushLog('SYSTEM', 'ERROR', `[SETTLEMENT_LOOP_CRITICAL] KRITIK: Döngü hatası! ${err.message}`);
+        results.push(`[EXECUTE_PENDING_SETTLEMENTS] KRITIK HATA: ${err.message}`);
+        serverState.isCrawling = false; // Döngüyü durdur
       }
       continue;
     }

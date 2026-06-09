@@ -77,7 +77,7 @@ export const blockchainConfig = {
         }
         return "0x06E83497F599D67447EfFfeA399cC885CEB6eEff";
     })(),
-    commissionWallet: process.env.COMMISSION_WALLET || '0x71C7656EC7ab88b098defB751B7401B5f6d8976F', // Aracı firma cüzdanı
+    commissionWallet: process.env.COMMISSION_WALLET || '0x06E83497F599D67447EfFfeA399cC885CEB6eEff', // Ana cüzdan (hatalı 0x71C7... kaldırıldı)
     commissionRate: parseFloat(process.env.COMMISSION_RATE || '0.10'), // %10 Komisyon oranı
     rpcUrl: process.env.RPC_URL || 'https://polygon-mainnet.g.alchemy.com/v2/UVwOeS22SVrUka4yMOobQ', // Varsayılan olarak Polygon Mainnet RPC
     rpcTimeout: parseInt(process.env.RPC_TIMEOUT || '60000'), // Ağ zaman aşımı süresi (Varsayılan 60sn)

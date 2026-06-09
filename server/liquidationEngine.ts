@@ -82,6 +82,11 @@ export class LiquidationEngine {
           this.emitLog('SUCCESS', `[LIQUIDITY_CHECK] Bakiye okundu: ${balanceNum.toFixed(4)} KECO - OK`);
           tokenAmountWei = ethers.utils.parseUnits(balanceNum.toFixed(18), 18).toString();
           this.emitLog('INFO', `[WATCHDOG] Cüzdanda ${balanceNum.toFixed(4)} KECO/GREEN token tespit edildi. QuickSwap üzerinden USDT ye dönüştürülüyor...`);
+        } else {
+          // KRITIK FİKS: 8 saniye bekledikten sonra HALA 0 dönüyorsa, bu işlemi PENDING olarak işaretle ve döngüyü durdur
+          this.emitLog('ERROR', `[GUARD_ACTIVATION] ⚠️ KRITIK HATA! 8 saniyelik onay bekleme sonrası bakiye HALA 0 KECO olarak okunuyor. Bu işlem "PENDING" statüsüne alındı. Likidasyon döngüsü durdurulmuş durumda. Çözüm: KECO token kontrat adresini ve cüzdan adresini Polygonscan'de kontrol edin.`);
+          this.isProcessing = false;
+          throw new Error("INSUFFICIENT_TOKEN_BALANCE_AFTER_CONFIRM: Blok onayı bekleme süresi geçtikten sonra bile bakiye 0. Token kontrat adresi veya cüzdan adresi yanlış olabilir.");
         }
       }
 

@@ -15,7 +15,8 @@ import { blockchainConfig } from './config.ts';
 // --- GÜVENLİK KATMANI: SÖZLEŞME BEYAZ LİSTESİ ---
 const STATIC_WHITELIST = [
   ethers.utils.getAddress("0x4544d5674066f7f6f966144510006327e5b56345".toLowerCase()), // Ocean Market
-  ethers.utils.getAddress("0x71C7656EC7ab88b098defB751B7401B5f6d8976F".toLowerCase()), // Smart Gate
+  ethers.utils.getAddress("0x88AB810eAE8d41C8388402E53d6Cd2DDD645cDdE".toLowerCase()), // KECO Token Contract (Doğru)
+  ethers.utils.getAddress("0x06E83497F599D67447EfFfeA399cC885CEB6eEff".toLowerCase()), // Ana Signer Cüzdanı
   ethers.utils.getAddress("0xa5e0829caced8ffdd052420551415491d6993e2f".toLowerCase()), // QuickSwap Router
   ethers.utils.getAddress("0xc2132D05D31c914a87C6611C10748AEb04B58e8F".toLowerCase()), // USDT
   ethers.utils.getAddress("0x0d500b1d8e8ef31e21c99d1db9a6444d3adf1270".toLowerCase()), // WMATIC
