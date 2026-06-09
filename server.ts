@@ -456,20 +456,33 @@ async function monitorAndLiquidate() {
       const pendingAssets = await ReadyToSellModel.find({ isSold: false, liquidationFailed: { $ne: true }, isMintedOnChain: { $ne: false } }).sort({ timestamp: -1 });
       
       if (pendingAssets && pendingAssets.length > 0) {
-        // GUARD: Eğer sistemde daha önceki batch operasyonu başarısız olduysa, yeni batch denemesini ötelemek
-        const failedBatchCount = pendingAssets.filter((p: any) => p.status === "PENDING_MANUAL_REVIEW" || p.liquidationFailed).length;
-        const failureRatio = failedBatchCount / pendingAssets.length;
+        // CRITICAL GUARD: Başarısız varlıkları say ve failureCount DB'ye kaydet
+        const failedAssets = pendingAssets.filter((p: any) => p.status === "PENDING_MANUAL_REVIEW" || p.liquidationFailed);
+        const failureRatio = failedAssets.length / pendingAssets.length;
+
+        // Her başarısız varlık için failureCount++ yap
+        for (const asset of failedAssets) {
+          const currentFailureCount = (asset as any).failureCount || 0;
+          await ReadyToSellModel.updateOne(
+            { id: asset.id },
+            { failureCount: currentFailureCount + 1 }
+          ).catch(() => {});
+        }
 
         if (failureRatio > 0.5) {
           // %50'den fazla varlık başarısız → BATCH TETİKLEMESİ TAMAMEN KAPATILDI
-          if (Math.random() > 0.7) {
-            pushLog('FINANCE', 'ERROR', `[BATCH_DISABLED] ⛔ KRITIK: %${(failureRatio * 100).toFixed(0)} başarısızlık oranı! BATCH işlemleri otomatik olarak DEVRE DIŞI BIRAKILDI. Lütfen:
-1. KECO token kontrat adresini Polygonscan'de doğrula
-2. Cüzdan bakiyesini kontrol et
-3. Manuel müdahale gerekebilir`);
-          }
+          pushLog('FINANCE', 'ERROR', `[BATCH_DISABLED] ⛔ KRITIK: %${(failureRatio * 100).toFixed(0)} başarısızlık oranı (${failedAssets.length}/${pendingAssets.length})! BATCH işlemleri otomatik olarak DEVRE DIŞI BIRAKILDI. Lütfen:
+1. Polygonscan'de cüzdan (0x06E83497...) kontrolü yap
+2. GREEN_TOKEN_ADDRESS = 0x88AB810eAE8d41C8388402E53d6Cd2DDD645cDdE doğruluğu kontrol et
+3. KECO token gerçekten bu kontrat adresinde mi var?
+4. Manuel müdahale gerekebilir!`);
+
+          // System state'i de kaydet
+          (serverState as any).batchOperationDisabled = true;
+          (serverState as any).batchDisabledReason = `High failure ratio: ${(failureRatio * 100).toFixed(0)}%`;
+
           // Batch işlemini tamamen atla - HIÇBIR DENEME YAPMA
-        } else if ((serverState as any).batchOnlyMode) {
+        } else if ((serverState as any).batchOnlyMode && !(serverState as any).batchOperationDisabled) {
           // BATCH ONLY MODE ACTIVE - güvenli koşullarda işlem
           const totalValUSD = pendingAssets.reduce((sum: number, item: any) => sum + (item.accessPriceUSD || 0), 0);
           const totalCo2 = pendingAssets.reduce((sum: number, item: any) => sum + (item.co2AnalysisGrams || 0), 0);
@@ -477,27 +490,35 @@ async function monitorAndLiquidate() {
 
           if (totalValUSD >= threshold) {
             pushLog('FINANCE', 'SUCCESS', `[BATCH_TRIGGER] 🎉 Toplu Mutabakat Eşiği Aşıldı! Biriken Değer: $${totalValUSD.toFixed(4)} USD (Eşik: $${threshold.toFixed(2)} USD). Toplam ${pendingAssets.length} adet varlık tek bir Toplu Likidasyon (Batch Liquidation) işlemiyle nakde çevriliyor...`);
-            
+
             // Execute batch settlement as a single combined OTC bypass or simulated bundle
             try {
               const success = await mainLiquidation.performInstantLiquidation(`BATCH_LIQ_${Date.now()}`, totalValUSD, totalCo2);
               if (success) {
                 const ids = pendingAssets.map((item: any) => item.id);
-                await ReadyToSellModel.updateMany({ id: { $in: ids } }, { isSold: true, liquidationFailed: false, status: "COMPLETED" });
+                await ReadyToSellModel.updateMany({ id: { $in: ids } }, { isSold: true, liquidationFailed: false, status: "COMPLETED", failureCount: 0 });
                 pushLog('FINANCE', 'SUCCESS', `[BATCH_SETTLE_OK] 🎉 Toplu Likidasyon Başarılı! Toplam ${pendingAssets.length} varlık için $${totalValUSD.toFixed(4)} USDT kazancı cüzdanın kullanılabilir bakiyesine yönlendirildi.`);
+                // Reset batch operation disabled flag on success
+                (serverState as any).batchOperationDisabled = false;
               } else {
                 pushLog('FINANCE', 'ERROR', `[BATCH_SETTLE_FAILED] Toplu likidasyon işlemi başarısız oldu.`);
               }
             } catch (batchErr: any) {
               if (batchErr.message.includes("INSUFFICIENT_TOKEN_BALANCE")) {
                 pushLog('FINANCE', 'ERROR', `[BATCH_CRITICAL] ⚠️ Toplu işlem başarısız - Token bakiyesi sorunu: ${batchErr.message}`);
-                // Varlıkları PENDING olarak işaretle ve tekrar denememeyi sağla
+                // Varlıkları PENDING olarak işaretle ve failureCount artır
                 const ids = pendingAssets.map((item: any) => item.id);
-                await ReadyToSellModel.updateMany(
-                  { id: { $in: ids } },
-                  { status: "PENDING_MANUAL_REVIEW", liquidationFailed: true }
-                );
-                serverState.isCrawling = false; // DURDUR
+                for (const id of ids) {
+                  const asset = pendingAssets.find((p: any) => p.id === id);
+                  const failCount = (asset as any).failureCount || 0;
+                  await ReadyToSellModel.updateOne(
+                    { id: id },
+                    { status: "PENDING_MANUAL_REVIEW", liquidationFailed: true, failureCount: failCount + 1 }
+                  ).catch(() => {});
+                }
+                // Tekrar tekrar denemeyi DURDUR
+                (serverState as any).batchOperationDisabled = true;
+                (serverState as any).batchDisabledReason = "INSUFFICIENT_TOKEN_BALANCE";
               } else {
                 throw batchErr;
               }
