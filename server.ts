@@ -461,10 +461,14 @@ async function monitorAndLiquidate() {
         const failureRatio = failedBatchCount / pendingAssets.length;
 
         if (failureRatio > 0.5) {
-          // %50'den fazla varlık başarısız → Manual inceleme gerekli
-          if (Math.random() > 0.8) {
-            pushLog('FINANCE', 'WARNING', `[BATCH_GUARD_ACTIVE] %${(failureRatio * 100).toFixed(0)} başarısızlık oranı tespit edildi. Batch operasyonu otomatik olarak erteleniyor. Manuel kontrol gerekli.`);
+          // %50'den fazla varlık başarısız → BATCH TETİKLEMESİ TAMAMEN KAPATILDI
+          if (Math.random() > 0.7) {
+            pushLog('FINANCE', 'ERROR', `[BATCH_DISABLED] ⛔ KRITIK: %${(failureRatio * 100).toFixed(0)} başarısızlık oranı! BATCH işlemleri otomatik olarak DEVRE DIŞI BIRAKILDI. Lütfen:
+1. KECO token kontrat adresini Polygonscan'de doğrula
+2. Cüzdan bakiyesini kontrol et
+3. Manuel müdahale gerekebilir`);
           }
+          // Batch işlemini tamamen atla - HIÇBIR DENEME YAPMA
         } else if ((serverState as any).batchOnlyMode) {
           // BATCH ONLY MODE ACTIVE - güvenli koşullarda işlem
           const totalValUSD = pendingAssets.reduce((sum: number, item: any) => sum + (item.accessPriceUSD || 0), 0);

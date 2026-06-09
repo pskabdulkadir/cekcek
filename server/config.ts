@@ -42,9 +42,19 @@ console.log("DEBUG: SMART_GATE_CONTRACT_ADDRESS / CONTRACT_ADDRESS:", process.en
 console.log("DEBUG: AQUARIUS_URL:", 'https://aquarius.oceanprotocol.com'); // Ana ağ geçidi
 
 // GÜVENLİK KRİTİK: Üretim modunda gizli değişkenler zorunludur
-if (process.env.NODE_ENV === 'production') {
+const isProduction = process.env.NODE_ENV === 'production';
+if (isProduction) {
     if (!process.env.MONGO_URI) throw new Error("FATAL: MONGO_URI is missing in production!");
     if (!process.env.PRIVATE_KEY) throw new Error("FATAL: PRIVATE_KEY is missing in production!");
+    if (!process.env.GREEN_TOKEN_ADDRESS) throw new Error("FATAL: GREEN_TOKEN_ADDRESS must be a valid ERC-20 contract!");
+}
+
+// PRODUCTION MODE STRICT: Demo/Simülasyon modu KAPALI
+const PRODUCTION_MODE_STRICT = isProduction || process.env.PRODUCTION_MODE === 'true';
+const DEMO_MODE_DISABLED = process.env.DEMO_MODE === 'false' || PRODUCTION_MODE_STRICT;
+
+if (PRODUCTION_MODE_STRICT) {
+    console.log("[PRODUCTION_MODE] 🔐 ÜRETIM MODU AKTİF - Demo/Simülasyon işlemleri KAPALI. Sadece gerçek blockchain işlemleri yapılacak.");
 }
 
 const mongoUri = process.env.MONGO_URI || 'mongodb://localhost:27017/dev_db';
@@ -108,7 +118,11 @@ export const blockchainConfig = {
     gasRefillEnabled: process.env.GAS_REFILL_ENABLED !== 'false', // Otomatik yakıt doldurma aktif mi?
     gasRefillThreshold: parseFloat(process.env.GAS_REFILL_THRESHOLD || '0.5'), // 0.5 POL altına düşerse işlem yapma/doldur
     gasRefillUsdtAmount: parseFloat(process.env.GAS_REFILL_USDT_AMOUNT || '5.0'), // 5 USDT'lik yakıt al
-    crawlMode: process.env.CRAWL_MODE || 'DATA_RECLAMATION' // DATA_RECLAMATION veya WEB_CRAWLER modu
+    crawlMode: process.env.CRAWL_MODE || 'DATA_RECLAMATION', // DATA_RECLAMATION veya WEB_CRAWLER modu
+    // ÜRETIM MODU AYARLARI
+    productionModeStrict: PRODUCTION_MODE_STRICT,
+    demoModeDisabled: DEMO_MODE_DISABLED,
+    requireRealTransactions: PRODUCTION_MODE_STRICT, // Demo işlemleri yasak
 };
 
 export const dbConfig = {
