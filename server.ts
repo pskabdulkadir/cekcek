@@ -397,6 +397,14 @@ let gasCooldownCycles = 0;
  * Pazar Yapıcı (Market Maker) ve Yakıt İkmal (Gas Refiller) sistemini yönetir.
  */
 async function monitorAndLiquidate() {
+  // CRITICAL GUARD: Batch işlemleri devre dışı bırakıldıysa, bu döngüyü tamamen atla
+  if ((serverState as any).batchOperationDisabled) {
+    if (Math.random() > 0.95) { // Spora log yazma (spam önleme)
+      pushLog('FINANCE', 'WARNING', `[BATCH_MONITOR_DISABLED] Batch işlemleri devre dışı bırakıldı. Neden: ${(serverState as any).batchDisabledReason || 'INSUFFICIENT_TOKEN_BALANCE'}. Manuel kontrol gerekli.`);
+    }
+    return; // Bu döngüden çık - hiçbir işlem yapma
+  }
+
   if (gasCooldownCycles > 0) {
     gasCooldownCycles--;
     return;
