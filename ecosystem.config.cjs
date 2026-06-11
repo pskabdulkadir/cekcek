@@ -1,12 +1,10 @@
 module.exports = {
   apps: [{
-    name: "cekcek-server", // PM2'de uygulamanızın adı
-    script: "server.ts", // Çalıştırılacak TypeScript dosyası
-    interpreter: "ts-node", // TypeScript dosyalarını çalıştırmak için ts-node kullanın
-    // args: ["--force-publish-all"], // Bu argüman artık server.ts içindeki FORCE_PUBLISH bayrağı ile yönetiliyor.
-    instances: 1, // Tek bir örnek çalıştır
+    name: "cekcek-server",
+    script: "dist/server.cjs", // Build çıktısı
+    instances: 1,
     exec_mode: "fork",
-    node_args: "--expose-gc --dns-result-order=ipv4first", // DNS çözümleme sırasını zorla
+    node_args: "--expose-gc --dns-result-order=ipv4first",
     max_memory_restart: "700M",
     autorestart: true,
     watch: false,

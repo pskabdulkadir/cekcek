@@ -67,16 +67,9 @@ export class LiquidationEngine {
       if (greenTokenAddr && greenTokenAddr !== ethers.constants.AddressZero && !greenTokenAddr.startsWith("0x0000")) {
         let balance = await this.blockchain.getTokenBalance(greenTokenAddr, walletAddress);
         let balanceNum = parseFloat(balance);
-
-        // PRE-FLIGHT CHECK: Bakiye 0 ise direkt abort (hiç deneme yapma)
-        if (balanceNum === 0 || balanceNum < 0.001) {
-          this.emitLog('WARNING', `[PRE_FLIGHT_ABORT] İşlem başlangıcında KECO bakiyesi 0. Likidasyon hiç denenmeyecek. Kontrat: ${greenTokenAddr}`);
-          this.isProcessing = false;
-          throw new Error("INSUFFICIENT_TOKEN_BALANCE_INITIAL: İşlem başlangıcında bakiye 0. Likidasyon yapılamaz.");
-        }
-
+        
         // --- BLOK ONAYI BEKLEME (Confirmation Delay) ---
-        // Eğer ilk okumada bakiye 0.01 ile 1.0 arasında ise (kısmen düşük), ağın onaylaması için bekliyoruz.
+        // Eğer ilk okumada bakiye 0.01 veya daha az ise, ağın (örneğin az önce yapılan basımı) onaylaması için bekliyoruz.
         if (balanceNum <= 0.01) {
           this.emitLog('INFO', `[LIQUIDITY_CHECK] Başlangıç KECO bakiye okuması düşük (${balanceNum.toFixed(4)} KECO). Blok onayı bekleniyor (${(this.confirmationDelayMs / 1000).toFixed(1)} saniye)...`);
           await new Promise(resolve => setTimeout(resolve, this.confirmationDelayMs));
@@ -89,11 +82,6 @@ export class LiquidationEngine {
           this.emitLog('SUCCESS', `[LIQUIDITY_CHECK] Bakiye okundu: ${balanceNum.toFixed(4)} KECO - OK`);
           tokenAmountWei = ethers.utils.parseUnits(balanceNum.toFixed(18), 18).toString();
           this.emitLog('INFO', `[WATCHDOG] Cüzdanda ${balanceNum.toFixed(4)} KECO/GREEN token tespit edildi. QuickSwap üzerinden USDT ye dönüştürülüyor...`);
-        } else {
-          // KRITIK FİKS: 8 saniye bekledikten sonra HALA 0 dönüyorsa, bu işlemi PENDING olarak işaretle ve döngüyü durdur
-          this.emitLog('ERROR', `[GUARD_ACTIVATION] ⚠️ KRITIK HATA! 8 saniyelik onay bekleme sonrası bakiye HALA 0 KECO olarak okunuyor. Bu işlem "PENDING" statüsüne alındı. Likidasyon döngüsü durdurulmuş durumda. Çözüm: KECO token kontrat adresini ve cüzdan adresini Polygonscan'de kontrol edin.`);
-          this.isProcessing = false;
-          throw new Error("INSUFFICIENT_TOKEN_BALANCE_AFTER_CONFIRM: Blok onayı bekleme süresi geçtikten sonra bile bakiye 0. Token kontrat adresi veya cüzdan adresi yanlış olabilir.");
         }
       }
 

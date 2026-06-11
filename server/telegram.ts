@@ -1,8 +1,9 @@
 import TelegramBot from "node-telegram-bot-api";
 
-// GELİŞTİRME SÜRECİNDE BİLDİRİM VE BOT TELEMETRİSİNİ KESMEK İÇİN DURAKLATMA BAYRAĞI
-// Kullanıcı 'şimdi tegramı burada durdur' dediği için başlangıçta true olarak konfigüre edilmiştir.
-export let isTelegramTemporarilyDisabled = true;
+// TELEGRAM BOT BAYRAĞI
+// Telegram bildirimlerini kontrol etmek için
+// Yeni API anahtarları sağlandığı için varsayılan olarak false (etkin)
+export let isTelegramTemporarilyDisabled = false;
 
 export function setTelegramTemporarilyDisabled(disabled: boolean) {
   isTelegramTemporarilyDisabled = disabled;

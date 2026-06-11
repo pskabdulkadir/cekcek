@@ -42,6 +42,18 @@ contract Sozlesme is ERC20 {
         return true;
     }
 
+    /**
+     * @dev Veri erişim hakkı satın alma fonksiyonu. Frontend tarafından çağrılır.
+     */
+    function buyAsset(string memory id, uint256 price, bytes memory signature) public payable returns (bool) {
+        require(msg.value >= price, "Yetersiz odeme gonderildi");
+        emit Transfer(address(0), msg.sender, 1); // Işlem loglanır
+        return true;
+    }
+
+    event AssetSold(string id, address buyer, uint256 price);
+
     // Blockchain.ts içindeki diğer ABI gereksinimleri için stub fonksiyonlar
     function submitProof(bytes32 /* proofHash */, uint256 /* amount */) external pure returns (bool) { return true; }
+    function settle(string memory /* id */) public pure returns (bool) { return true; }
 }

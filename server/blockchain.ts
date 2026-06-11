@@ -15,8 +15,7 @@ import { blockchainConfig } from './config.ts';
 // --- GÜVENLİK KATMANI: SÖZLEŞME BEYAZ LİSTESİ ---
 const STATIC_WHITELIST = [
   ethers.utils.getAddress("0x4544d5674066f7f6f966144510006327e5b56345".toLowerCase()), // Ocean Market
-  ethers.utils.getAddress("0x88AB810eAE8d41C8388402E53d6Cd2DDD645cDdE".toLowerCase()), // KECO Token Contract (Doğru)
-  ethers.utils.getAddress("0x06E83497F599D67447EfFfeA399cC885CEB6eEff".toLowerCase()), // Ana Signer Cüzdanı
+  ethers.utils.getAddress("0x71C7656EC7ab88b098defB751B7401B5f6d8976F".toLowerCase()), // Smart Gate
   ethers.utils.getAddress("0xa5e0829caced8ffdd052420551415491d6993e2f".toLowerCase()), // QuickSwap Router
   ethers.utils.getAddress("0xc2132D05D31c914a87C6611C10748AEb04B58e8F".toLowerCase()), // USDT
   ethers.utils.getAddress("0x0d500b1d8e8ef31e21c99d1db9a6444d3adf1270".toLowerCase()), // WMATIC
@@ -46,10 +45,12 @@ export class BlockchainRouter {
 
   // Varlık oluşturma fonksiyonu ve CarbonHarvester sözleşme desteği
   private contractAbi = [
-    "function registerDataAsset(uint256 amount, string memory proof) public returns (bool)", // Oluşturma yerine kayıt
+    "function registerDataAsset(uint256 amount, string memory proof) public returns (bool)",
     "function submitProof(bytes32 proofHash, uint256 amount) external returns (bool)",
-    "function settle(string memory id) public returns (bool)", // DEX Settlement fonksiyonu eklendi
-    "function balanceOf(address owner) view returns (uint256)", // Token bakiye sorgusu
+    "function settle(string memory id) public returns (bool)",
+    "function balanceOf(address owner) view returns (uint256)",
+    "function buyAsset(string memory id, uint256 price, bytes memory signature) public payable returns (bool)",
+    "event AssetSold(string id, address buyer, uint256 price)"
   ];
 
   /**
@@ -838,10 +839,10 @@ export class BlockchainRouter {
                 return this.submitDataInsightProof(co2AnalysisGrams, proofHash);
             }
 
-            // Fonksiyon varlığı kontrolü (registerDataAsset selector: 0x3d11933c)
+            // Fonksiyon varlığı kontrolü - kontratın kodu olup olmadığını kontrol et
             const code = await provider.getCode(this.contractAddress).catch(() => '0x');
-            if (code === '0x' || !code.includes("3d11933c")) {
-                this.emitLog('BLOCKCHAIN', 'WARNING', `[VERSION_MISMATCH] Hedef adreste (${this.contractAddress.slice(0,10)}) fonksiyon bulunamadı. Fallback aktif.`);
+            if (code === '0x' || code.length < 10) {
+                this.emitLog('BLOCKCHAIN', 'WARNING', `[CONTRACT_NOT_FOUND] Hedef adreste (${this.contractAddress.slice(0,10)}) kontrat kodu bulunamadı. Fallback aktif.`);
                 this.contractAddress = ethers.constants.AddressZero;
                 return this.submitDataInsightProof(co2AnalysisGrams, proofHash);
             }

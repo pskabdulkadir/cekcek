@@ -6,6 +6,7 @@
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
+    "skipDefaultLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "allowSyntheticDefaultImports": true,
     "resolveJsonModule": true,
@@ -23,7 +24,6 @@
     "server.ts",
     "server/**/*.ts",
     "src/**/*.ts",
-    "src/**/*.tsx",
-    "hardhat.config.cjs"
+    "src/**/*.tsx"
   ]
 }
