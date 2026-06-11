@@ -22,12 +22,24 @@ console.log(`   .env.example konumu: ${envExamplePath}`);
 
 if (!fs.existsSync(envPath)) {
   console.log('\n⚠️  .env dosyası bulunamıyor');
-  
+
   if (fs.existsSync(envExamplePath)) {
     console.log('📝 .env.example\'den kopyalanıyor...');
-    
+
     try {
-      fs.copyFileSync(envExamplePath, envPath);
+      let content = fs.readFileSync(envExamplePath, 'utf8');
+
+      // Fix potentially broken URLs in .env.example
+      content = content.replace(
+        /PROVIDER_1_URL=https:\/\/polygon\.rpc\.thirdweb\.com/g,
+        'PROVIDER_1_URL=https://polygon-rpc.com'
+      );
+      content = content.replace(
+        /PROVIDER_2_URL=https:\/\/polygon\.publicnode\.com/g,
+        'PROVIDER_2_URL=https://rpc-mainnet.matic.network'
+      );
+
+      fs.writeFileSync(envPath, content);
       console.log('✅ .env dosyası başarıyla oluşturuldu');
       console.log('\n💡 NOT: Render.com Environment Variables otomatik olarak uygulanacak');
       process.exit(0);
