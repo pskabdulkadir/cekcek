@@ -78,7 +78,7 @@ const validationSchema = [
   },
   {
     name: 'PROVIDER_1_URL',
-    required: true,
+    required: false, // Optional - POLYGON_RPC_URL zaten gerekli
     validate: validateUrl,
   },
   {
