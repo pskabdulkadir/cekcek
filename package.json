@@ -4,16 +4,17 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "setup-env": "node scripts/setup-env.js",
     "validate": "tsx scripts/validate-env.ts",
-    "dev": "npm run validate && tsx server.ts",
-    "build": "npm run validate && vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
+    "dev": "npm run setup-env && npm run validate && tsx server.ts",
+    "build": "npm run setup-env && npm run validate && vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
     "start": "node --dns-result-order=ipv4first dist/server.cjs",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
     "test": "vitest",
     "test:ui": "vitest --ui",
     "test:coverage": "vitest --coverage",
-    "setup": "cp .env.example .env && npm run validate"
+    "setup": "npm run setup-env && npm run validate"
   },
   "dependencies": {
     "@gelatonetwork/relay-sdk": "^5.7.0",
